@@ -1,0 +1,161 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model PulseChannel {
+  id        String   @id @default(cuid())
+  type      String
+  name      String?
+
+  // Optional scoping and context
+  farmId    String?
+  directKey String?  @unique
+  jobId     String?
+  animalId  String?
+  deviceId  String?
+
+  members   PulseChannelMember[]
+  messages  PulseMessage[]
+  createdAt DateTime @default(now())
+}
+
+model PulseChannelMember {
+  id        String   @id @default(cuid())
+  channel   PulseChannel  @relation(fields: [channelId], references: [id])
+  channelId String
+  userId    String
+
+  roleName  String?
+  isMuted   Boolean  @default(false)
+  lastReadAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([channelId, userId])
+}
+
+model PulseMessage {
+  id        String   @id @default(cuid())
+  channel   PulseChannel  @relation(fields: [channelId], references: [id])
+  channelId String
+  userId    String
+  body      String
+  createdAt DateTime @default(now())
+
+  isEdited   Boolean  @default(false)
+  isDeleted  Boolean  @default(false)
+  deletedAt  DateTime?
+
+  reads     PulseMessageRead[]
+  pins      PulseMessagePin[]
+  attachments PulseMessageAttachment[]
+}
+
+model PulseMessageRead {
+  id        String   @id @default(cuid())
+  message   PulseMessage  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  messageId String
+  userId    String
+  readAt    DateTime @default(now())
+  
+  @@unique([messageId, userId])
+}
+
+model PulseMessagePin {
+  id        String   @id @default(cuid())
+  channelId String
+  message   PulseMessage  @relation(fields: [messageId], references: [id])
+  messageId String
+  pinnedBy  String
+  createdAt DateTime @default(now())
+}
+
+model PulseFileAsset {
+  id          String   @id @default(cuid())
+  farmId      String?
+  ownerUserId String
+  source      String
+  originalName String
+  mimeType    String
+  sizeBytes   Int
+  storageKey  String
+  publicUrl   String?
+  createdAt   DateTime @default(now())
+
+  attachments PulseMessageAttachment[]
+}
+
+model PulseMessageAttachment {
+  id        String   @id @default(cuid())
+  message   PulseMessage  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  messageId String
+
+  file      PulseFileAsset @relation(fields: [fileId], references: [id])
+  fileId    String
+
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([messageId])
+}
+
+model PulseHazard {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  type        String
+  riskLevel   String
+  active      Boolean  @default(true)
+  createdById String
+  createdAt   DateTime @default(now())
+  resolvedAt  DateTime?
+}
+
+model PulseIncident {
+  id          String   @id @default(cuid())
+  type        String
+  description String
+  severity    String
+  status      String   @default("OPEN")
+  occurredAt  DateTime
+  createdAt   DateTime @default(now())
+}
+
+model Job {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  location    String
+  latitude    Float?
+  longitude   Float?
+  photoUrls   String[] // Array of photo URLs
+  status      String   @default("pending")
+  priority    String   @default("medium")
+  startDate   DateTime
+  endDate     DateTime?
+  startTime   String
+  endTime     String?
+  category    String   @default("general")
+  notes       String?
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  assignments JobAssignment[]
+}
+
+model JobAssignment {
+  id        String   @id @default(cuid())
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  jobId     String
+  userId    String
+  createdAt DateTime @default(now())
+
+  @@index([jobId, userId])
+}

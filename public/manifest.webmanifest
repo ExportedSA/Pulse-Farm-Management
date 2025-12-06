@@ -1,0 +1,39 @@
+{
+  "name": "Pulse - Comprehensive Dairy Farm Management",
+  "short_name": "Pulse",
+  "description": "Comprehensive offline-first farm management system for dairy operations. Track treatments, medicine inventory, animal health, pasture rotation, reproduction, NAIT compliance, and milk withholdings with offline sync.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f3f4f6",
+  "theme_color": "#4d9f5f",
+  "orientation": "portrait-primary",
+  "categories": ["productivity", "agriculture", "business", "utilities"],
+  
+  "shortcuts": [
+    {
+      "name": "New Treatment",
+      "short_name": "Treatment",
+      "description": "Record a new animal treatment",
+      "url": "/app/treatments/current"
+    },
+    {
+      "name": "Alerts",
+      "short_name": "Alerts",
+      "description": "View critical alerts and notifications",
+      "url": "/app/alerts"
+    },
+    {
+      "name": "Animals",
+      "short_name": "Animals",
+      "description": "Manage animal records",
+      "url": "/app/animals"
+    },
+    {
+      "name": "Medicines",
+      "short_name": "Medicines",
+      "description": "View medicine inventory",
+      "url": "/app/medicines"
+    }
+  ]
+}
