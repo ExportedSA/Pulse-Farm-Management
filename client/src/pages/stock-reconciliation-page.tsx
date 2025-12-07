@@ -134,10 +134,21 @@ export default function StockReconciliationPage() {
     },
   };
 
-  const handleTransactionSubmit = async () => {
-    try {
-      // For now, just show a toast - we'll implement the API later
+  // Create transaction mutation
+  const createTransactionMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const response = await fetch('/api/stock/transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) throw new Error('Failed to create transaction');
+      return response.json();
+    },
+    onSuccess: () => {
       toast.success(`${transactionType} transaction recorded`);
+      queryClient.invalidateQueries({ queryKey: ['/api/stock'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/animals'] });
       setIsTransactionDialogOpen(false);
       setTransactionForm({
         date: new Date().toISOString().split('T')[0],
@@ -149,9 +160,29 @@ export default function StockReconciliationPage() {
         pricePerHead: 0,
       });
       setTransactionType('');
-    } catch (error) {
+    },
+    onError: () => {
       toast.error('Failed to record transaction');
+    },
+  });
+
+  const handleTransactionSubmit = async () => {
+    if (!transactionType) {
+      toast.error('Please select a transaction type');
+      return;
     }
+    
+    createTransactionMutation.mutate({
+      type: transactionType,
+      date: transactionForm.date,
+      quantity: transactionForm.quantity,
+      description: transactionForm.description || `${transactionType} transaction`,
+      reference: transactionForm.reference || null,
+      fromLocation: transactionForm.fromLocation || null,
+      toLocation: transactionForm.toLocation || null,
+      pricePerHead: transactionForm.pricePerHead ? transactionForm.pricePerHead * 100 : null, // Convert to cents
+      totalValue: transactionForm.pricePerHead ? transactionForm.pricePerHead * transactionForm.quantity * 100 : null,
+    });
   };
 
   const getTransactionIcon = (type: string) => {
@@ -311,8 +342,11 @@ export default function StockReconciliationPage() {
                 <Button variant="outline" onClick={() => setIsTransactionDialogOpen(false)}>
                   Cancel
                 </Button>
-                <Button onClick={handleTransactionSubmit} disabled={!transactionType}>
-                  Record Transaction
+                <Button 
+                  onClick={handleTransactionSubmit} 
+                  disabled={!transactionType || createTransactionMutation.isPending}
+                >
+                  {createTransactionMutation.isPending ? 'Recording...' : 'Record Transaction'}
                 </Button>
               </DialogFooter>
             </DialogContent>

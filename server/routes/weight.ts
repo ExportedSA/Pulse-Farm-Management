@@ -279,4 +279,221 @@ router.delete("/targets/:id", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/weight/records - Get all weight records with optional date filter
+router.get("/records", async (req: Request, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const records = await storage.getAllWeightRecords(
+      startDate as string | undefined,
+      endDate as string | undefined
+    );
+    res.json(records);
+  } catch (error) {
+    console.error("Error fetching all weight records:", error);
+    res.status(500).json({ error: "Failed to fetch weight records" });
+  }
+});
+
+// GET /api/weight/stats - Get weight statistics
+router.get("/stats", async (req: Request, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const records = await storage.getAllWeightRecords(
+      startDate as string | undefined,
+      endDate as string | undefined
+    );
+    const animals = await storage.getAnimals();
+    const activeAnimals = animals.filter(a => a.status === "active");
+
+    // Calculate statistics
+    const totalRecords = records.length;
+    const uniqueAnimals = new Set(records.map(r => r.animalId)).size;
+    const averageWeight = records.length > 0
+      ? records.reduce((sum, r) => sum + parseFloat(r.weight), 0) / records.length
+      : 0;
+
+    // Calculate ADG for animals with multiple records
+    const recordsByAnimal: Record<string, any[]> = {};
+    records.forEach(r => {
+      if (!recordsByAnimal[r.animalId]) recordsByAnimal[r.animalId] = [];
+      recordsByAnimal[r.animalId].push(r);
+    });
+
+    let totalADG = 0;
+    let adgCount = 0;
+    Object.values(recordsByAnimal).forEach(animalRecords => {
+      if (animalRecords.length >= 2) {
+        const sorted = animalRecords.sort((a, b) => 
+          new Date(a.date).getTime() - new Date(b.date).getTime()
+        );
+        const first = sorted[0];
+        const last = sorted[sorted.length - 1];
+        const days = Math.ceil(
+          (new Date(last.date).getTime() - new Date(first.date).getTime()) / (1000 * 60 * 60 * 24)
+        );
+        if (days > 0) {
+          const adg = (parseFloat(last.weight) - parseFloat(first.weight)) / days;
+          totalADG += adg;
+          adgCount++;
+        }
+      }
+    });
+
+    const averageADG = adgCount > 0 ? totalADG / adgCount : 0;
+
+    // Weight distribution
+    const weightRanges = {
+      under200: records.filter(r => parseFloat(r.weight) < 200).length,
+      range200to400: records.filter(r => parseFloat(r.weight) >= 200 && parseFloat(r.weight) < 400).length,
+      range400to600: records.filter(r => parseFloat(r.weight) >= 400 && parseFloat(r.weight) < 600).length,
+      over600: records.filter(r => parseFloat(r.weight) >= 600).length,
+    };
+
+    res.json({
+      totalRecords,
+      uniqueAnimals,
+      totalAnimals: activeAnimals.length,
+      averageWeight: Math.round(averageWeight * 10) / 10,
+      averageADG: Math.round(averageADG * 1000) / 1000,
+      weightRanges,
+      coveragePercent: activeAnimals.length > 0 
+        ? Math.round((uniqueAnimals / activeAnimals.length) * 100) 
+        : 0,
+    });
+  } catch (error) {
+    console.error("Error fetching weight stats:", error);
+    res.status(500).json({ error: "Failed to fetch weight statistics" });
+  }
+});
+
+// POST /api/weight/batch - Batch record weights (weigh session)
+router.post("/batch", async (req: Request, res: Response) => {
+  try {
+    const schema = z.object({
+      sessionName: z.string().optional(),
+      sessionDate: z.string(),
+      records: z.array(z.object({
+        animalId: z.string().uuid(),
+        weight: z.number().positive(),
+        bodyConditionScore: z.number().min(1).max(5).optional(),
+        notes: z.string().optional(),
+      })),
+      recordedBy: z.string().uuid(),
+    });
+
+    const data = schema.parse(req.body);
+    const results = [];
+    const errors = [];
+
+    for (const record of data.records) {
+      try {
+        const weightRecord = await storage.createWeightRecord({
+          animalId: record.animalId,
+          weight: record.weight.toString(),
+          date: data.sessionDate,
+          bodyConditionScore: record.bodyConditionScore || null,
+          notes: record.notes || `Batch weigh session${data.sessionName ? `: ${data.sessionName}` : ''}`,
+          recordedBy: data.recordedBy,
+        });
+        results.push(weightRecord);
+      } catch (e) {
+        errors.push({ animalId: record.animalId, error: (e as Error).message });
+      }
+    }
+
+    res.status(201).json({
+      success: results.length,
+      failed: errors.length,
+      results,
+      errors,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Invalid input", details: error.errors });
+    }
+    console.error("Error batch recording weights:", error);
+    res.status(500).json({ error: "Failed to batch record weights" });
+  }
+});
+
+// GET /api/weight/growth/:animalId - Get growth data for an animal
+router.get("/growth/:animalId", async (req: Request, res: Response) => {
+  try {
+    const { animalId } = req.params;
+    
+    const animal = await storage.getAnimal(animalId);
+    if (!animal) {
+      return res.status(404).json({ error: "Animal not found" });
+    }
+
+    const records = await storage.getWeightRecordsByAnimal(animalId);
+    if (records.length === 0) {
+      return res.json({
+        animal,
+        records: [],
+        growth: null,
+      });
+    }
+
+    // Sort by date
+    const sorted = [...records].sort((a, b) => 
+      new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
+
+    // Calculate growth metrics
+    const firstRecord = sorted[0];
+    const lastRecord = sorted[sorted.length - 1];
+    const totalDays = Math.ceil(
+      (new Date(lastRecord.date).getTime() - new Date(firstRecord.date).getTime()) / (1000 * 60 * 60 * 24)
+    );
+    const totalGain = parseFloat(lastRecord.weight) - parseFloat(firstRecord.weight);
+    const overallADG = totalDays > 0 ? totalGain / totalDays : 0;
+
+    // Calculate ADG for each period
+    const recordsWithADG = sorted.map((record, index) => {
+      if (index === 0) return { ...record, adg: null, periodDays: null };
+      
+      const prev = sorted[index - 1];
+      const days = Math.ceil(
+        (new Date(record.date).getTime() - new Date(prev.date).getTime()) / (1000 * 60 * 60 * 24)
+      );
+      const gain = parseFloat(record.weight) - parseFloat(prev.weight);
+      const adg = days > 0 ? gain / days : null;
+
+      return {
+        ...record,
+        adg: adg !== null ? Math.round(adg * 1000) / 1000 : null,
+        periodDays: days,
+      };
+    });
+
+    // Calculate age-based metrics if birth date available
+    let birthWeight = null;
+    let currentAge = null;
+    if (animal.dateOfBirth) {
+      currentAge = Math.ceil(
+        (new Date().getTime() - new Date(animal.dateOfBirth).getTime()) / (1000 * 60 * 60 * 24)
+      );
+    }
+
+    res.json({
+      animal,
+      records: recordsWithADG,
+      growth: {
+        firstWeight: parseFloat(firstRecord.weight),
+        lastWeight: parseFloat(lastRecord.weight),
+        totalGain: Math.round(totalGain * 10) / 10,
+        totalDays,
+        overallADG: Math.round(overallADG * 1000) / 1000,
+        recordCount: records.length,
+        currentAge,
+        birthWeight,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching growth data:", error);
+    res.status(500).json({ error: "Failed to fetch growth data" });
+  }
+});
+
 export default router;

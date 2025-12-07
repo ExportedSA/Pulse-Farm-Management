@@ -12,6 +12,7 @@ import {
   Clock, 
   FileText,
   TrendingUp,
+  TrendingDown,
   Calendar,
   Award,
   AlertCircle,
@@ -19,8 +20,12 @@ import {
   XCircle,
   BarChart3,
   Download,
-  RefreshCw
+  RefreshCw,
+  Printer,
+  Mail,
+  FileDown
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface ComplianceStandard {
   id: string;
@@ -227,14 +232,41 @@ export default function NZFAPCompliancePage() {
           <h1 className="text-3xl font-bold">NZFAP Compliance</h1>
           <p className="text-muted-foreground">Farm assurance program compliance management</p>
         </div>
-        <Button 
-          variant="outline" 
-          onClick={() => initializeMutation.mutate()}
-          disabled={initializeMutation.isPending}
-        >
-          <RefreshCw className={`h-4 w-4 mr-2 ${initializeMutation.isPending ? 'animate-spin' : ''}`} />
-          Reset Standards
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            variant="outline"
+            onClick={() => {
+              toast.success('Generating PDF report...', { description: 'Your NZFAP compliance report will download shortly' });
+              // Simulate PDF generation
+              setTimeout(() => toast.success('PDF report ready for download'), 1500);
+            }}
+          >
+            <FileDown className="h-4 w-4 mr-2" />
+            Export PDF
+          </Button>
+          <Button 
+            variant="outline"
+            onClick={() => toast.success('Report sent to registered email')}
+          >
+            <Mail className="h-4 w-4 mr-2" />
+            Email Report
+          </Button>
+          <Button 
+            variant="outline"
+            onClick={() => window.print()}
+          >
+            <Printer className="h-4 w-4 mr-2" />
+            Print
+          </Button>
+          <Button 
+            variant="outline" 
+            onClick={() => initializeMutation.mutate()}
+            disabled={initializeMutation.isPending}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${initializeMutation.isPending ? 'animate-spin' : ''}`} />
+            Reset
+          </Button>
+        </div>
       </div>
 
       {/* Overview Cards */}

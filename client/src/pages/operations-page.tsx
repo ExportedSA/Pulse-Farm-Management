@@ -35,6 +35,16 @@ interface OperationsStats {
   totalQRCodes: number;
 }
 
+interface ActivityItem {
+  id: string;
+  type: 'visitor' | 'vehicle' | 'qrcode' | 'job' | 'maintenance';
+  title: string;
+  description: string;
+  timestamp: string;
+  status: 'completed' | 'scheduled' | 'created' | 'in_progress' | 'warning';
+  icon: 'visitor' | 'vehicle' | 'qrcode' | 'job' | 'maintenance';
+}
+
 export default function OperationsPage() {
   const [location, setLocation] = useLocation();
   const [stats, setStats] = useState<OperationsStats>({
@@ -48,9 +58,12 @@ export default function OperationsPage() {
     totalQRCodes: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [activityFeed, setActivityFeed] = useState<ActivityItem[]>([]);
+  const [activityLoading, setActivityLoading] = useState(true);
 
   useEffect(() => {
     fetchOperationsStats();
+    fetchActivityFeed();
   }, []);
 
   const fetchOperationsStats = async () => {
@@ -98,6 +111,127 @@ export default function OperationsPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchActivityFeed = async () => {
+    try {
+      setActivityLoading(true);
+      const activities: ActivityItem[] = [];
+      
+      // Fetch recent visitor sign-ins
+      try {
+        const visitorRes = await fetch('/api/visitor/admin/recent');
+        if (visitorRes.ok) {
+          const visitors = await visitorRes.json();
+          visitors.slice(0, 3).forEach((v: any) => {
+            activities.push({
+              id: `visitor-${v.id}`,
+              type: 'visitor',
+              title: 'Visitor Sign-in',
+              description: `${v.name || 'Unknown'} - ${v.company || 'Visitor'} - ${v.location || 'Main Entrance'}`,
+              timestamp: v.signInTime || v.createdAt || new Date().toISOString(),
+              status: v.signOutTime ? 'completed' : 'in_progress',
+              icon: 'visitor',
+            });
+          });
+        }
+      } catch (e) { console.log('Visitor feed unavailable'); }
+
+      // Fetch recent jobs
+      try {
+        const jobsRes = await fetch('/api/jobs?limit=3');
+        if (jobsRes.ok) {
+          const jobs = await jobsRes.json();
+          jobs.slice(0, 3).forEach((j: any) => {
+            activities.push({
+              id: `job-${j.id}`,
+              type: 'job',
+              title: j.status === 'completed' ? 'Job Completed' : j.status === 'in-progress' ? 'Job In Progress' : 'Job Scheduled',
+              description: `${j.title} - ${j.location || 'Farm'}`,
+              timestamp: j.updatedAt || j.createdAt || new Date().toISOString(),
+              status: j.status === 'completed' ? 'completed' : j.status === 'in-progress' ? 'in_progress' : 'scheduled',
+              icon: 'job',
+            });
+          });
+        }
+      } catch (e) { console.log('Jobs feed unavailable'); }
+
+      // Fetch recent vehicle inspections
+      try {
+        const vehicleRes = await fetch('/api/vehicles/inspections/recent');
+        if (vehicleRes.ok) {
+          const inspections = await vehicleRes.json();
+          inspections.slice(0, 2).forEach((i: any) => {
+            activities.push({
+              id: `vehicle-${i.id}`,
+              type: 'vehicle',
+              title: i.overallStatus === 'pass' ? 'Vehicle Inspection Passed' : 'Vehicle Inspection',
+              description: `${i.vehicleName || 'Vehicle'} - ${i.overallStatus || 'Pending'}`,
+              timestamp: i.inspectionDate || i.createdAt || new Date().toISOString(),
+              status: i.overallStatus === 'pass' ? 'completed' : i.overallStatus === 'fail' ? 'warning' : 'scheduled',
+              icon: 'vehicle',
+            });
+          });
+        }
+      } catch (e) { console.log('Vehicle feed unavailable'); }
+
+      // Sort by timestamp and take most recent
+      activities.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      
+      // If no real data, show placeholder activities
+      if (activities.length === 0) {
+        const now = new Date();
+        activities.push(
+          { id: 'demo-1', type: 'visitor', title: 'Visitor Sign-in Completed', description: 'Contractor - Main Entrance', timestamp: new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString(), status: 'completed', icon: 'visitor' },
+          { id: 'demo-2', type: 'job', title: 'Job Completed', description: 'Morning Feed - Paddock A', timestamp: new Date(now.getTime() - 3 * 60 * 60 * 1000).toISOString(), status: 'completed', icon: 'job' },
+          { id: 'demo-3', type: 'vehicle', title: 'Vehicle Inspection Scheduled', description: 'Toyota Hilux - Weekly Safety Check', timestamp: new Date(now.getTime() - 4 * 60 * 60 * 1000).toISOString(), status: 'scheduled', icon: 'vehicle' },
+          { id: 'demo-4', type: 'qrcode', title: 'QR Code Scanned', description: 'Workshop Access Point', timestamp: new Date(now.getTime() - 5 * 60 * 60 * 1000).toISOString(), status: 'completed', icon: 'qrcode' },
+          { id: 'demo-5', type: 'maintenance', title: 'Maintenance Logged', description: 'John Deere 6130R - Oil Change', timestamp: new Date(now.getTime() - 6 * 60 * 60 * 1000).toISOString(), status: 'completed', icon: 'maintenance' },
+        );
+      }
+      
+      setActivityFeed(activities.slice(0, 8));
+    } catch (error) {
+      console.error('Error fetching activity feed:', error);
+    } finally {
+      setActivityLoading(false);
+    }
+  };
+
+  const getActivityIcon = (icon: ActivityItem['icon']) => {
+    switch (icon) {
+      case 'visitor': return <UserCheck className="h-4 w-4 text-green-600" />;
+      case 'vehicle': return <Car className="h-4 w-4 text-blue-600" />;
+      case 'qrcode': return <QrCode className="h-4 w-4 text-purple-600" />;
+      case 'job': return <FileText className="h-4 w-4 text-orange-600" />;
+      case 'maintenance': return <Wrench className="h-4 w-4 text-gray-600" />;
+      default: return <Activity className="h-4 w-4 text-gray-600" />;
+    }
+  };
+
+  const getStatusBadge = (status: ActivityItem['status']) => {
+    switch (status) {
+      case 'completed': return <Badge variant="outline" className="bg-green-50 text-green-800 border-green-200">Completed</Badge>;
+      case 'scheduled': return <Badge variant="outline" className="bg-blue-50 text-blue-800 border-blue-200">Scheduled</Badge>;
+      case 'created': return <Badge variant="outline" className="bg-purple-50 text-purple-800 border-purple-200">Created</Badge>;
+      case 'in_progress': return <Badge variant="outline" className="bg-yellow-50 text-yellow-800 border-yellow-200">In Progress</Badge>;
+      case 'warning': return <Badge variant="outline" className="bg-red-50 text-red-800 border-red-200">Attention</Badge>;
+      default: return <Badge variant="outline">Unknown</Badge>;
+    }
+  };
+
+  const formatTimeAgo = (timestamp: string) => {
+    const now = new Date();
+    const time = new Date(timestamp);
+    const diffMs = now.getTime() - time.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins} min ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
   };
 
   const operationCards = [
@@ -323,61 +457,44 @@ export default function OperationsPage() {
       {/* Recent Activity */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Activity className="h-5 w-5 text-green-600" />
-            Recent Operations Activity
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="h-5 w-5 text-green-600" />
+              Recent Operations Activity
+            </CardTitle>
+            <Button variant="ghost" size="sm" onClick={() => { fetchActivityFeed(); fetchOperationsStats(); }}>
+              <Clock className="h-4 w-4 mr-1" />
+              Refresh
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-              <div className="flex items-center gap-3">
-                <UserCheck className="h-4 w-4 text-green-600" />
-                <div>
-                  <p className="font-medium">Visitor Sign-in Completed</p>
-                  <p className="text-sm text-gray-600">John Doe - Contractor - Main Entrance</p>
-                </div>
-              </div>
-              <div className="text-right">
-                <p className="text-sm text-gray-500">2 hours ago</p>
-                <Badge variant="outline" className="bg-green-50 text-green-800 border-green-200">
-                  Completed
-                </Badge>
-              </div>
+          {activityLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600"></div>
             </div>
-
-            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-              <div className="flex items-center gap-3">
-                <Car className="h-4 w-4 text-blue-600" />
-                <div>
-                  <p className="font-medium">Vehicle Inspection Scheduled</p>
-                  <p className="text-sm text-gray-600">Toyota Hilux - ABC123 - Weekly Safety Check</p>
+          ) : (
+            <div className="space-y-4">
+              {activityFeed.map((activity) => (
+                <div key={activity.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                  <div className="flex items-center gap-3">
+                    {getActivityIcon(activity.icon)}
+                    <div>
+                      <p className="font-medium">{activity.title}</p>
+                      <p className="text-sm text-gray-600">{activity.description}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm text-gray-500">{formatTimeAgo(activity.timestamp)}</p>
+                    {getStatusBadge(activity.status)}
+                  </div>
                 </div>
-              </div>
-              <div className="text-right">
-                <p className="text-sm text-gray-500">4 hours ago</p>
-                <Badge variant="outline" className="bg-blue-50 text-blue-800 border-blue-200">
-                  Scheduled
-                </Badge>
-              </div>
+              ))}
+              {activityFeed.length === 0 && (
+                <p className="text-center text-gray-500 py-4">No recent activity</p>
+              )}
             </div>
-
-            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-              <div className="flex items-center gap-3">
-                <QrCode className="h-4 w-4 text-purple-600" />
-                <div>
-                  <p className="font-medium">QR Code Generated</p>
-                  <p className="text-sm text-gray-600">Workshop Access Point - New Location</p>
-                </div>
-              </div>
-              <div className="text-right">
-                <p className="text-sm text-gray-500">6 hours ago</p>
-                <Badge variant="outline" className="bg-purple-50 text-purple-800 border-purple-200">
-                  Created
-                </Badge>
-              </div>
-            </div>
-          </div>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -7,6 +7,8 @@ import App from "./App";
 import "./index.css";
 import { registerServiceWorker } from "./registerSW";
 
+// Use light mode (Lendit-style)
+
 const queryClient = new QueryClient();
 
 registerServiceWorker();

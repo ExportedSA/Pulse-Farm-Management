@@ -5,7 +5,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { LineChart, Line, BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { LineChart, Line, BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from "recharts";
 import { Activity, Sprout, Pill, TrendingUp, Heart, Stethoscope, Leaf, Baby, Settings2, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 
@@ -225,6 +225,8 @@ export default function AnalyticsDashboard() {
                 <Tooltip />
                 <Legend />
                 <Bar dataKey="count" fill="hsl(var(--primary))" name="Treatment Events" />
+                <Bar dataKey="lastYearCount" fill="#94a3b8" name="Last Year" opacity={0.5} />
+                <ReferenceLine y={5} stroke="#ef4444" strokeDasharray="5 5" label={{ value: 'Target Max', position: 'right', fill: '#ef4444', fontSize: 12 }} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -312,6 +314,8 @@ export default function AnalyticsDashboard() {
                 <Line type="monotone" dataKey="avgRestDays" stroke="#3d7550" name="Rest Days" />
                 <Line type="monotone" dataKey="avgSoilQuality" stroke="#b8963e" name="Soil Quality" />
                 <Line type="monotone" dataKey="avgGrassCover" stroke="#967a52" name="Grass Cover (kg/ha)" />
+                <Line type="monotone" dataKey="lastYearGrassCover" stroke="#967a52" strokeDasharray="5 5" name="Last Year Cover" opacity={0.5} />
+                <ReferenceLine y={2500} stroke="#22c55e" strokeDasharray="5 5" label={{ value: 'Target Cover', position: 'right', fill: '#22c55e', fontSize: 12 }} />
               </LineChart>
             </ResponsiveContainer>
           )}

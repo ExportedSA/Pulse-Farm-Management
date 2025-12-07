@@ -6,7 +6,9 @@ import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Edit, Calendar, Tag, MapPin, Activity, TrendingUp, Plus, ChevronDown, ChevronUp, Syringe, Heart, Thermometer, AlertTriangle, Stethoscope, Pill, FlaskConical } from "lucide-react";
+import { Edit, Calendar, Tag, MapPin, Activity, TrendingUp, Plus, ChevronDown, ChevronUp, Syringe, Heart, Thermometer, AlertTriangle, Stethoscope, Pill, FlaskConical, Camera, Mic } from "lucide-react";
+import { PhotoUpload } from "@/components/PhotoUpload";
+import { VoiceRecorder } from "@/components/VoiceRecorder";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useState } from "react";
@@ -1072,6 +1074,32 @@ export default function AnimalDetailDialog({
                   )}
                 </>
               )}
+            </CardContent>
+          </Card>
+
+          {/* Photos */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Camera className="h-5 w-5" />
+                Photos
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <PhotoUpload animalId={animal.id} showExisting={true} />
+            </CardContent>
+          </Card>
+
+          {/* Voice Notes */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Mic className="h-5 w-5" />
+                Voice Notes
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <VoiceRecorder animalId={animal.id} showExisting={true} />
             </CardContent>
           </Card>
         </div>

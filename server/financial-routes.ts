@@ -277,6 +277,54 @@ router.delete('/killsheets/:killsheetId/items/:itemId', async (req, res) => {
 
 // ===== FINANCIAL REPORTS =====
 
+// ===== TREATMENT COSTS =====
+
+// Get treatment cost summary
+router.get('/treatment-costs/summary', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const summary = await storage.getTreatmentCostSummary(
+      startDate as string | undefined,
+      endDate as string | undefined
+    );
+    res.json(summary);
+  } catch (error) {
+    console.error('Error fetching treatment cost summary:', error);
+    res.status(500).json({ error: 'Failed to fetch treatment cost summary' });
+  }
+});
+
+// Get treatments with costs
+router.get('/treatment-costs', async (req, res) => {
+  try {
+    const { startDate, endDate, limit } = req.query;
+    const treatments = await storage.getTreatmentsWithCosts(
+      startDate as string | undefined,
+      endDate as string | undefined,
+      limit ? parseInt(limit as string) : 50
+    );
+    res.json(treatments);
+  } catch (error) {
+    console.error('Error fetching treatments with costs:', error);
+    res.status(500).json({ error: 'Failed to fetch treatments with costs' });
+  }
+});
+
+// Get treatment cost by condition
+router.get('/treatment-costs/by-condition', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const costsByCondition = await storage.getTreatmentCostsByCondition(
+      startDate as string | undefined,
+      endDate as string | undefined
+    );
+    res.json(costsByCondition);
+  } catch (error) {
+    console.error('Error fetching treatment costs by condition:', error);
+    res.status(500).json({ error: 'Failed to fetch treatment costs by condition' });
+  }
+});
+
 // Get profit/loss report
 router.get('/reports/profit-loss', async (req, res) => {
   try {

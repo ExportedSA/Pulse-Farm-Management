@@ -174,6 +174,21 @@ export const animals = pgTable('animals', {
   bodyConditionScore: integer('body_condition_score'),
   photoUrl: text('photo_url'),
   notes: text('notes'),
+  // Lineage tracking
+  damId: uuid('dam_id'), // Mother - self-reference handled at app level
+  sireId: uuid('sire_id'), // Father - self-reference handled at app level  
+  sireInfo: jsonb('sire_info').$type<{ 
+    name?: string; 
+    breed?: string; 
+    registrationNumber?: string;
+    externalId?: string; // For AI sires not in system
+  }>(),
+  geneticInfo: jsonb('genetic_info').$type<{
+    breedingValue?: number;
+    inbreedingCoefficient?: number;
+    geneticMerit?: string;
+    dnaTestResults?: Record<string, any>;
+  }>(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   version: integer('version').default(0).notNull(),
@@ -866,6 +881,13 @@ export const animalTreatments = pgTable('animal_treatments', {
   monitoringEndDate: varchar('monitoring_end_date', { length: 10 }),
   returnedToHerd: boolean('returned_to_herd').default(false),
   returnToHerdNotes: text('return_to_herd_notes'),
+  // Cost tracking
+  medicineCost: numeric('medicine_cost', { precision: 10, scale: 2 }), // Cost of medicine used
+  labourCost: numeric('labour_cost', { precision: 10, scale: 2 }), // Labour/time cost
+  vetCalloutCost: numeric('vet_callout_cost', { precision: 10, scale: 2 }), // Vet visit cost if applicable
+  otherCosts: numeric('other_costs', { precision: 10, scale: 2 }), // Any other costs
+  totalCost: numeric('total_cost', { precision: 10, scale: 2 }), // Calculated total
+  costNotes: text('cost_notes'), // Notes about costs
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   version: integer('version').default(0).notNull(),
@@ -1086,6 +1108,83 @@ export const pastureHealthRecords = pgTable('pasture_health_records', {
   grassCoverKg: integer('grass_cover_kg'), // Dry matter kg/ha
   notes: text('notes'),
 });
+
+// Pasture Walk Sessions - Group multiple paddock measurements
+export const pastureWalkSessions = pgTable('pasture_walk_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  walkDate: date('walk_date').notNull(),
+  walkTime: varchar('walk_time', { length: 10 }), // HH:MM format
+  recordedBy: uuid('recorded_by').references(() => users.id),
+  weatherConditions: varchar('weather_conditions', { length: 100 }), // sunny, cloudy, rainy, etc.
+  temperature: integer('temperature'), // Celsius
+  notes: text('notes'),
+  totalPaddocks: integer('total_paddocks').default(0),
+  averageCover: integer('average_cover'), // Average kg DM/ha across all paddocks
+  totalFarmCover: integer('total_farm_cover'), // Total kg DM across farm
+  status: varchar('status', { length: 20 }).default('in_progress'), // in_progress, completed
+  completedAt: timestamp('completed_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Pasture Cover Measurements - Individual paddock readings
+export const pastureCoverMeasurements = pgTable('pasture_cover_measurements', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sessionId: uuid('session_id').references(() => pastureWalkSessions.id, { onDelete: 'cascade' }),
+  pastureId: uuid('pasture_id').references(() => pastures.id, { onDelete: 'cascade' }).notNull(),
+  measurementDate: date('measurement_date').notNull(),
+  measurementTime: varchar('measurement_time', { length: 10 }), // HH:MM format
+  
+  // Rising Plate Meter readings
+  plateMeterReading: integer('plate_meter_reading'), // Raw plate meter reading (clicks/height)
+  plateMeterReadings: text('plate_meter_readings'), // JSON array of multiple readings per paddock
+  numberOfReadings: integer('number_of_readings').default(1), // How many readings taken
+  
+  // Calculated/entered cover
+  coverKgDmHa: integer('cover_kg_dm_ha').notNull(), // Dry matter kg/ha
+  preGrazingCover: integer('pre_grazing_cover'), // If measured before grazing
+  postGrazingCover: integer('post_grazing_cover'), // If measured after grazing (residual)
+  
+  // Growth calculations
+  previousCover: integer('previous_cover'), // Last measurement for growth calc
+  growthRateKgDay: integer('growth_rate_kg_day'), // Calculated daily growth
+  daysSinceLastMeasurement: integer('days_since_last_measurement'),
+  
+  // Quality indicators
+  grassQuality: integer('grass_quality'), // 1-5 scale
+  cloverPercentage: integer('clover_percentage'), // 0-100%
+  weedPercentage: integer('weed_percentage'), // 0-100%
+  
+  // Grazing info
+  currentlyGrazing: boolean('currently_grazing').default(false),
+  stockCount: integer('stock_count'), // Animals currently in paddock
+  daysInPaddock: integer('days_in_paddock'),
+  
+  // Additional data
+  soilMoisture: varchar('soil_moisture', { length: 20 }), // dry, moist, wet, saturated
+  photoUrl: text('photo_url'),
+  gpsCoordinates: text('gps_coordinates'), // JSON {lat, lng}
+  notes: text('notes'),
+  
+  recordedBy: uuid('recorded_by').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Insert schemas for pasture walk
+export const insertPastureWalkSessionSchema = createInsertSchema(pastureWalkSessions, {
+  walkDate: z.string().min(1, "Walk date required"),
+}).omit({ id: true, createdAt: true, updatedAt: true });
+
+export const insertPastureCoverMeasurementSchema = createInsertSchema(pastureCoverMeasurements, {
+  measurementDate: z.string().min(1, "Measurement date required"),
+  coverKgDmHa: z.number().int().min(0, "Cover must be positive"),
+}).omit({ id: true, createdAt: true, updatedAt: true });
+
+export type PastureWalkSession = typeof pastureWalkSessions.$inferSelect;
+export type InsertPastureWalkSession = z.infer<typeof insertPastureWalkSessionSchema>;
+export type PastureCoverMeasurement = typeof pastureCoverMeasurements.$inferSelect;
+export type InsertPastureCoverMeasurement = z.infer<typeof insertPastureCoverMeasurementSchema>;
 
 // ===== RELATIONS =====
 

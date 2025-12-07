@@ -19,7 +19,9 @@ import {
   CheckCircle,
   Clock,
   Trash2,
-  BarChart3
+  BarChart3,
+  Syringe,
+  Pill
 } from 'lucide-react';
 
 interface Expense {
@@ -123,6 +125,36 @@ export default function FinancialPage() {
     queryFn: async () => {
       const response = await fetch('/api/financial/killsheets/summary');
       if (!response.ok) throw new Error('Failed to fetch killsheet summary');
+      return response.json();
+    },
+  });
+
+  // Fetch treatment cost summary
+  const { data: treatmentCostSummary } = useQuery({
+    queryKey: ['treatmentCostSummary'],
+    queryFn: async () => {
+      const response = await fetch('/api/financial/treatment-costs/summary');
+      if (!response.ok) throw new Error('Failed to fetch treatment cost summary');
+      return response.json();
+    },
+  });
+
+  // Fetch treatments with costs
+  const { data: treatmentsWithCosts = [] } = useQuery({
+    queryKey: ['treatmentsWithCosts'],
+    queryFn: async () => {
+      const response = await fetch('/api/financial/treatment-costs?limit=50');
+      if (!response.ok) throw new Error('Failed to fetch treatments with costs');
+      return response.json();
+    },
+  });
+
+  // Fetch treatment costs by condition
+  const { data: costsByCondition = [] } = useQuery({
+    queryKey: ['treatmentCostsByCondition'],
+    queryFn: async () => {
+      const response = await fetch('/api/financial/treatment-costs/by-condition');
+      if (!response.ok) throw new Error('Failed to fetch costs by condition');
       return response.json();
     },
   });
@@ -330,6 +362,7 @@ export default function FinancialPage() {
         <TabsList>
           <TabsTrigger value="expenses">Expenses</TabsTrigger>
           <TabsTrigger value="killsheets">Killsheets</TabsTrigger>
+          <TabsTrigger value="treatment-costs">Treatment Costs</TabsTrigger>
         </TabsList>
 
         <TabsContent value="expenses" className="space-y-4">
@@ -704,6 +737,168 @@ export default function FinancialPage() {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Treatment Costs Tab */}
+        <TabsContent value="treatment-costs" className="space-y-4">
+          {/* Treatment Cost Summary Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Medicine Costs</p>
+                    <p className="text-2xl font-bold text-blue-600">
+                      {formatCurrency(treatmentCostSummary?.totalMedicineCost || 0)}
+                    </p>
+                  </div>
+                  <Pill className="h-8 w-8 text-blue-500" />
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Labour Costs</p>
+                    <p className="text-2xl font-bold text-orange-600">
+                      {formatCurrency(treatmentCostSummary?.totalLabourCost || 0)}
+                    </p>
+                  </div>
+                  <Clock className="h-8 w-8 text-orange-500" />
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Vet Callout Costs</p>
+                    <p className="text-2xl font-bold text-purple-600">
+                      {formatCurrency(treatmentCostSummary?.totalVetCost || 0)}
+                    </p>
+                  </div>
+                  <Syringe className="h-8 w-8 text-purple-500" />
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Total Treatment Costs</p>
+                    <p className="text-2xl font-bold text-red-600">
+                      {formatCurrency(treatmentCostSummary?.totalCost || 0)}
+                    </p>
+                  </div>
+                  <DollarSign className="h-8 w-8 text-red-500" />
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  {treatmentCostSummary?.treatmentCount || 0} treatments recorded
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Costs by Condition */}
+          {costsByCondition.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Treatment Costs by Condition</CardTitle>
+                <CardDescription>Breakdown of costs by health condition</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {costsByCondition.slice(0, 10).map((item: any) => {
+                    const totalCost = treatmentCostSummary?.totalCost || 1;
+                    const percentage = totalCost > 0 ? (item.totalCost / totalCost) * 100 : 0;
+                    return (
+                      <div key={item.condition} className="space-y-1">
+                        <div className="flex justify-between text-sm">
+                          <span className="font-medium">{item.condition}</span>
+                          <span className="text-muted-foreground">
+                            {formatCurrency(item.totalCost)} ({item.count} treatments)
+                          </span>
+                        </div>
+                        <div className="h-2 bg-muted rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-blue-500 rounded-full transition-all"
+                            style={{ width: `${Math.min(percentage, 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Recent Treatments with Costs */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Recent Treatments with Costs</CardTitle>
+              <CardDescription>Treatments that have cost data recorded</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {treatmentsWithCosts.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Syringe className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>No treatment costs recorded yet</p>
+                  <p className="text-sm mt-2">Add costs when recording treatments to track expenses</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {treatmentsWithCosts.slice(0, 20).map((treatment: any) => {
+                    const totalCost = parseFloat(treatment.totalCost || '0') ||
+                      (parseFloat(treatment.medicineCost || '0') + 
+                       parseFloat(treatment.labourCost || '0') +
+                       parseFloat(treatment.vetCalloutCost || '0') +
+                       parseFloat(treatment.otherCosts || '0'));
+                    
+                    return (
+                      <div key={treatment.id} className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <Syringe className="h-4 w-4 text-muted-foreground" />
+                            <span className="font-medium">{treatment.condition || 'Unknown Condition'}</span>
+                            <Badge variant="outline" className="text-xs">
+                              {treatment.category || 'treatment'}
+                            </Badge>
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            {treatment.cowId || treatment.animalId?.slice(0, 8) || 'Unknown'} • 
+                            {treatment.dateTime ? new Date(treatment.dateTime).toLocaleDateString() : 'No date'}
+                          </div>
+                          {treatment.treatmentType && (
+                            <div className="text-xs text-muted-foreground">
+                              {treatment.treatmentType}
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          <span className="text-lg font-bold text-red-600">
+                            {formatCurrency(totalCost)}
+                          </span>
+                          <div className="text-xs text-muted-foreground space-x-2">
+                            {treatment.medicineCost && parseFloat(treatment.medicineCost) > 0 && (
+                              <span>Med: {formatCurrency(treatment.medicineCost)}</span>
+                            )}
+                            {treatment.labourCost && parseFloat(treatment.labourCost) > 0 && (
+                              <span>Lab: {formatCurrency(treatment.labourCost)}</span>
+                            )}
+                            {treatment.vetCalloutCost && parseFloat(treatment.vetCalloutCost) > 0 && (
+                              <span>Vet: {formatCurrency(treatment.vetCalloutCost)}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </CardContent>

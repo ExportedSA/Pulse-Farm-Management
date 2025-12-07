@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useAuth } from "@/lib/auth-context";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Activity } from "lucide-react";
 
 const loginSchema = z.object({
   email: z.string().email("Invalid email address"),
@@ -49,13 +49,14 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-50 to-slate-100">
+      <Card className="w-full max-w-md bg-white shadow-xl border border-slate-200">
         <CardHeader className="space-y-4 text-center">
-          <div className="flex justify-center" />
           <div>
-            <CardTitle className="text-2xl">Welcome to Pulse</CardTitle>
-            <CardDescription>
+            <CardTitle className="text-2xl font-bold text-emerald-900">
+              Welcome to Pulse
+            </CardTitle>
+            <CardDescription className="text-slate-600">
               Sign in to your farm management system
             </CardDescription>
           </div>
@@ -112,7 +113,7 @@ export default function LoginPage() {
 
               <Button
                 type="submit"
-                className="w-full"
+                className="w-full bg-emerald-800 hover:bg-emerald-900 text-white shadow-lg"
                 disabled={isSubmitting}
                 data-testid="button-login-submit"
               >
@@ -121,11 +122,11 @@ export default function LoginPage() {
             </form>
           </Form>
 
-          <div className="mt-6 pt-6 border-t">
-            <p className="text-sm text-muted-foreground text-center">
+          <div className="mt-6 pt-6 border-t border-gray-200">
+            <p className="text-sm text-gray-500 text-center">
               Demo credentials for testing:
             </p>
-            <div className="mt-3 text-xs text-muted-foreground space-y-1">
+            <div className="mt-3 text-xs text-gray-400 space-y-1">
               <p className="text-center font-mono">admin@pulse.farm / admin123</p>
               <p className="text-center font-mono">manager@pulse.farm / manager123</p>
               <p className="text-center font-mono">staff@pulse.farm / staff123</p>

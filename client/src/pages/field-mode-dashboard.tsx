@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,17 +7,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
 import { offlineStorage, networkStatus } from "@/utils/offlineStorage";
 import { format } from "date-fns";
+import { Link } from "wouter";
 import { 
   Smartphone, Wifi, WifiOff, Scan, Mic, MicOff, Camera, 
-  FileText, Users, Plus, Check, X, Zap, Clock, Upload
+  FileText, Users, Plus, Check, X, Zap, Clock, Upload,
+  Search, Database, Image, Trash2, Eye, Download, RefreshCw
 } from "lucide-react";
 import type { Animal, TreatmentTemplate, Product } from "@shared/schema";
 
@@ -34,6 +37,17 @@ export default function FieldModeDashboard() {
   const [selectedAnimals, setSelectedAnimals] = useState<string[]>([]);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  
+  // Additional states for enhanced features
+  const [showQuickLookup, setShowQuickLookup] = useState(false);
+  const [quickLookupQuery, setQuickLookupQuery] = useState("");
+  const [showPhotoDialog, setShowPhotoDialog] = useState(false);
+  const [capturedPhotos, setCapturedPhotos] = useState<Array<{ id: string; dataUrl: string; timestamp: Date; animalId?: string }>>([]);
+  const [selectedPhotoAnimal, setSelectedPhotoAnimal] = useState<string>("");
+  const [offlineAnimalsCount, setOfflineAnimalsCount] = useState(0);
+  const [showOfflineData, setShowOfflineData] = useState(false);
 
   // Form states
   const [newTemplate, setNewTemplate] = useState({
@@ -80,6 +94,17 @@ export default function FieldModeDashboard() {
     };
   }, []);
 
+  // Load offline animals count on mount
+  useEffect(() => {
+    const loadOfflineCount = async () => {
+      const cached = await offlineStorage.getCachedData('animals');
+      if (cached) {
+        setOfflineAnimalsCount(cached.length);
+      }
+    };
+    loadOfflineCount();
+  }, []);
+
   // Fetch data
   const { data: animals = [] } = useQuery<Animal[]>({
     queryKey: ["/api/animals"],
@@ -107,6 +132,17 @@ export default function FieldModeDashboard() {
       return res.json();
     },
   });
+
+  // Cache animals for offline use
+  useEffect(() => {
+    const cacheAnimalsForOffline = async () => {
+      if (animals.length > 0) {
+        await offlineStorage.cacheData('animals', animals, 24 * 60 * 60 * 1000); // 24 hours
+        setOfflineAnimalsCount(animals.length);
+      }
+    };
+    cacheAnimalsForOffline();
+  }, [animals]);
 
   // Mutations
   const createTemplateMutation = useMutation({
@@ -307,6 +343,85 @@ export default function FieldModeDashboard() {
     );
   };
 
+  // Quick lookup - search animals by any identifier
+  const quickLookupResults = quickLookupQuery.trim() 
+    ? animals.filter(a => {
+        const query = quickLookupQuery.toLowerCase();
+        return (
+          a.cowId?.toLowerCase().includes(query) ||
+          a.naitTag?.toLowerCase().includes(query) ||
+          a.eid?.toLowerCase().includes(query) ||
+          a.breed?.toLowerCase().includes(query)
+        );
+      }).slice(0, 10)
+    : [];
+
+  // Photo capture handlers
+  const handlePhotoCapture = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string;
+        const newPhoto = {
+          id: `photo_${Date.now()}`,
+          dataUrl,
+          timestamp: new Date(),
+          animalId: selectedPhotoAnimal || undefined,
+        };
+        setCapturedPhotos(prev => [...prev, newPhoto]);
+        toast.success("Photo captured");
+        
+        // Store in offline storage for later sync
+        offlineStorage.cacheData(`photo_${newPhoto.id}`, newPhoto, 7 * 24 * 60 * 60 * 1000);
+      };
+      reader.readAsDataURL(file);
+    }
+    // Reset input
+    if (event.target) event.target.value = '';
+  };
+
+  const deletePhoto = (photoId: string) => {
+    setCapturedPhotos(prev => prev.filter(p => p.id !== photoId));
+    offlineStorage.removeCachedData(`photo_${photoId}`);
+    toast.success("Photo deleted");
+  };
+
+  // Get offline animals for lookup when offline
+  const getOfflineAnimals = async (): Promise<Animal[]> => {
+    const cached = await offlineStorage.getCachedData('animals');
+    return cached || [];
+  };
+
+  // Offline EID lookup
+  const offlineEidLookup = async (eid: string) => {
+    const cachedAnimals = await getOfflineAnimals();
+    const found = cachedAnimals.find(a => a.eid === eid);
+    if (found) {
+      if (!scannedAnimals.find(a => a.id === found.id)) {
+        setScannedAnimals(prev => [...prev, found]);
+        setSelectedAnimals(prev => [...prev, found.id]);
+        toast.success(`Found (offline): ${found.cowId || found.naitTag || eid}`);
+      } else {
+        toast.info("Animal already scanned");
+      }
+    } else {
+      toast.error(`No animal found for EID: ${eid}`);
+    }
+    setEidInput("");
+  };
+
+  // Enhanced EID scan that works offline
+  const handleEnhancedEidScan = () => {
+    if (!eidInput.trim()) return;
+    
+    if (isOnline) {
+      lookupEidMutation.mutate(eidInput.trim());
+    } else {
+      offlineEidLookup(eidInput.trim());
+    }
+  };
+
   return (
     <div className="container mx-auto p-6 space-y-6">
       {/* Header with connection status */}
@@ -338,7 +453,7 @@ export default function FieldModeDashboard() {
       </div>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
         <Card className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => setShowBatchDialog(true)}>
           <CardContent className="p-4 flex flex-col items-center text-center">
             <Users className="h-8 w-8 text-blue-600 mb-2" />
@@ -355,6 +470,22 @@ export default function FieldModeDashboard() {
           </CardContent>
         </Card>
 
+        <Card className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => setShowQuickLookup(true)}>
+          <CardContent className="p-4 flex flex-col items-center text-center">
+            <Search className="h-8 w-8 text-indigo-600 mb-2" />
+            <span className="font-medium">Quick Lookup</span>
+            <span className="text-xs text-muted-foreground">Find any animal</span>
+          </CardContent>
+        </Card>
+
+        <Card className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => setShowPhotoDialog(true)}>
+          <CardContent className="p-4 flex flex-col items-center text-center">
+            <Camera className="h-8 w-8 text-pink-600 mb-2" />
+            <span className="font-medium">Photo Capture</span>
+            <span className="text-xs text-muted-foreground">Document conditions</span>
+          </CardContent>
+        </Card>
+
         <Card className={`cursor-pointer hover:bg-muted/50 transition-colors ${isRecording ? 'ring-2 ring-red-500' : ''}`} 
               onClick={isRecording ? stopRecording : startRecording}>
           <CardContent className="p-4 flex flex-col items-center text-center">
@@ -364,11 +495,11 @@ export default function FieldModeDashboard() {
           </CardContent>
         </Card>
 
-        <Card className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => setShowTemplateDialog(true)}>
+        <Card className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => setShowOfflineData(true)}>
           <CardContent className="p-4 flex flex-col items-center text-center">
-            <Zap className="h-8 w-8 text-orange-600 mb-2" />
-            <span className="font-medium">New Template</span>
-            <span className="text-xs text-muted-foreground">Quick presets</span>
+            <Database className="h-8 w-8 text-gray-600 mb-2" />
+            <span className="font-medium">Offline Data</span>
+            <span className="text-xs text-muted-foreground">{offlineAnimalsCount} animals cached</span>
           </CardContent>
         </Card>
       </div>
@@ -389,11 +520,11 @@ export default function FieldModeDashboard() {
               placeholder="Enter or scan EID..."
               value={eidInput}
               onChange={(e) => setEidInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleEidScan()}
+              onKeyDown={(e) => e.key === 'Enter' && handleEnhancedEidScan()}
               className="flex-1"
             />
-            <Button onClick={handleEidScan} disabled={!eidInput.trim() || lookupEidMutation.isPending}>
-              {lookupEidMutation.isPending ? "Looking up..." : "Lookup"}
+            <Button onClick={handleEnhancedEidScan} disabled={!eidInput.trim() || lookupEidMutation.isPending}>
+              {lookupEidMutation.isPending ? "Looking up..." : isOnline ? "Lookup" : "Lookup (Offline)"}
             </Button>
           </div>
 
@@ -666,6 +797,243 @@ export default function FieldModeDashboard() {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Quick Lookup Dialog */}
+      <Dialog open={showQuickLookup} onOpenChange={setShowQuickLookup}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Search className="h-5 w-5" />
+              Quick Animal Lookup
+            </DialogTitle>
+            <DialogDescription>
+              Search by ID, NAIT tag, EID, or breed
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Input
+              placeholder="Search animals..."
+              value={quickLookupQuery}
+              onChange={(e) => setQuickLookupQuery(e.target.value)}
+              autoFocus
+            />
+            
+            {quickLookupQuery && (
+              <ScrollArea className="h-64">
+                {quickLookupResults.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8">No animals found</p>
+                ) : (
+                  <div className="space-y-2">
+                    {quickLookupResults.map((animal) => (
+                      <div 
+                        key={animal.id}
+                        className="p-3 border rounded-lg hover:bg-muted/50 cursor-pointer"
+                        onClick={() => {
+                          if (!scannedAnimals.find(a => a.id === animal.id)) {
+                            setScannedAnimals(prev => [...prev, animal]);
+                            setSelectedAnimals(prev => [...prev, animal.id]);
+                          }
+                          setShowQuickLookup(false);
+                          setQuickLookupQuery("");
+                          toast.success(`Added: ${animal.cowId || animal.naitTag}`);
+                        }}
+                      >
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <div className="font-medium">{animal.cowId || animal.naitTag || animal.id.slice(0, 8)}</div>
+                            <div className="text-sm text-muted-foreground">
+                              {animal.breed} • {animal.sex}
+                            </div>
+                            {animal.eid && (
+                              <div className="text-xs text-muted-foreground">EID: {animal.eid}</div>
+                            )}
+                          </div>
+                          <Badge variant={animal.status === 'active' ? 'default' : 'secondary'}>
+                            {animal.status}
+                          </Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </ScrollArea>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowQuickLookup(false); setQuickLookupQuery(""); }}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Photo Capture Dialog */}
+      <Dialog open={showPhotoDialog} onOpenChange={setShowPhotoDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Camera className="h-5 w-5" />
+              Photo Capture
+            </DialogTitle>
+            <DialogDescription>
+              Take photos to document conditions, injuries, or observations
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Animal selection for photo */}
+            <div>
+              <Label>Associate with Animal (optional)</Label>
+              <Select value={selectedPhotoAnimal} onValueChange={setSelectedPhotoAnimal}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select animal" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">No animal</SelectItem>
+                  {scannedAnimals.map((animal) => (
+                    <SelectItem key={animal.id} value={animal.id}>
+                      {animal.cowId || animal.naitTag || animal.id.slice(0, 8)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Capture buttons */}
+            <div className="flex gap-2">
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={handlePhotoCapture}
+              />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handlePhotoCapture}
+              />
+              <Button onClick={() => cameraInputRef.current?.click()} className="flex-1">
+                <Camera className="h-4 w-4 mr-2" />
+                Take Photo
+              </Button>
+              <Button variant="outline" onClick={() => fileInputRef.current?.click()} className="flex-1">
+                <Image className="h-4 w-4 mr-2" />
+                Choose File
+              </Button>
+            </div>
+
+            {/* Captured photos */}
+            {capturedPhotos.length > 0 && (
+              <div className="space-y-2">
+                <Label>Captured Photos ({capturedPhotos.length})</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  {capturedPhotos.map((photo) => (
+                    <div key={photo.id} className="relative group">
+                      <img 
+                        src={photo.dataUrl} 
+                        alt="Captured" 
+                        className="w-full h-24 object-cover rounded-lg"
+                      />
+                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
+                        <Button size="icon" variant="ghost" className="h-8 w-8 text-white" onClick={() => window.open(photo.dataUrl)}>
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button size="icon" variant="ghost" className="h-8 w-8 text-white" onClick={() => deletePhoto(photo.id)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      {photo.animalId && (
+                        <Badge className="absolute bottom-1 left-1 text-xs" variant="secondary">
+                          {animals.find(a => a.id === photo.animalId)?.cowId || 'Animal'}
+                        </Badge>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowPhotoDialog(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Offline Data Dialog */}
+      <Dialog open={showOfflineData} onOpenChange={setShowOfflineData}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Database className="h-5 w-5" />
+              Offline Data
+            </DialogTitle>
+            <DialogDescription>
+              Cached data for offline access
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="p-4 bg-muted rounded-lg space-y-3">
+              <div className="flex justify-between items-center">
+                <span>Cached Animals</span>
+                <Badge variant="secondary">{offlineAnimalsCount}</Badge>
+              </div>
+              <div className="flex justify-between items-center">
+                <span>Pending Actions</span>
+                <Badge variant={pendingActions > 0 ? "default" : "secondary"}>{pendingActions}</Badge>
+              </div>
+              <div className="flex justify-between items-center">
+                <span>Captured Photos</span>
+                <Badge variant="secondary">{capturedPhotos.length}</Badge>
+              </div>
+              <div className="flex justify-between items-center">
+                <span>Connection Status</span>
+                <Badge variant={isOnline ? "default" : "destructive"}>
+                  {isOnline ? "Online" : "Offline"}
+                </Badge>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <Button 
+                variant="outline" 
+                className="flex-1"
+                onClick={async () => {
+                  await offlineStorage.cacheData('animals', animals, 24 * 60 * 60 * 1000);
+                  setOfflineAnimalsCount(animals.length);
+                  toast.success("Animals cached for offline use");
+                }}
+                disabled={!isOnline}
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Refresh Cache
+              </Button>
+              <Button 
+                variant="outline" 
+                className="flex-1"
+                onClick={syncOfflineData}
+                disabled={!isOnline || pendingActions === 0}
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                Sync Now
+              </Button>
+            </div>
+
+            <p className="text-xs text-muted-foreground text-center">
+              Offline data is automatically synced when you reconnect to the internet.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowOfflineData(false)}>
+              Close
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

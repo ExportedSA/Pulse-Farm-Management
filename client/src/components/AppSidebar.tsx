@@ -1,4 +1,4 @@
-import { Home, Syringe, Pill, Users, Sprout, Heart, Settings, Activity, FolderTree, Shuffle, BarChart3, ChevronDown, Warehouse, MessageSquare, Shield, FileText, Briefcase, Leaf, Wrench, Car, QrCode, UserCheck, MapPin, DollarSign, Droplets, Award, Building2, Repeat, BookTemplate, CalendarDays, CloudSun, Timer, LayoutGrid, Tag, GitBranch, Stethoscope, Smartphone, Bell, Scale } from "lucide-react";
+import { Home, Syringe, Pill, Users, Sprout, Heart, Settings, Activity, FolderTree, Shuffle, BarChart3, ChevronDown, Warehouse, MessageSquare, Shield, FileText, Briefcase, Leaf, Wrench, Car, QrCode, UserCheck, MapPin, DollarSign, Droplets, Award, Building2, Repeat, BookTemplate, CalendarDays, CloudSun, Timer, LayoutGrid, Tag, GitBranch, Stethoscope, Smartphone, Bell, Scale, FlaskConical, Zap, CheckSquare, UserCog, ClipboardList, Clock, GraduationCap, AlertTriangle, Package } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useState } from "react";
 import { useChatContext } from "@/contexts/ChatContext";
@@ -25,7 +25,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 
-const categoryOrder = ["Navigation", "Livestock Management", "Land Management", "Operations", "Analytics & Compliance", "System"];
+const categoryOrder = ["Navigation", "Livestock Management", "Land Management", "Team", "Operations", "Analytics & Compliance", "System"];
 
 const menuItems = [
   {
@@ -41,7 +41,18 @@ const menuItems = [
     subItems: [
       { title: "All Animals", url: "/app/animals" },
       { title: "Stock Reconciliation", url: "/app/stock-reconciliation" },
-      { title: "Groups", url: "/app/groups" },
+      {
+        title: "Groups",
+        url: "/app/groups",
+        icon: Users,
+        category: "Livestock Management"
+      },
+      {
+        title: "Smart Groups",
+        url: "/app/smart-groups",
+        icon: Zap,
+        category: "Livestock Management"
+      },
     ],
     category: "Livestock Management"
   },
@@ -52,9 +63,21 @@ const menuItems = [
     category: "Livestock Management"
   },
   {
+    title: "Batch Treatment",
+    url: "/app/batch-treatment",
+    icon: Users,
+    category: "Livestock Management"
+  },
+  {
     title: "Milk Production",
     url: "/app/milk-production",
     icon: Droplets,
+    category: "Livestock Management"
+  },
+  {
+    title: "Milk Analytics",
+    url: "/app/milk-analytics",
+    icon: BarChart3,
     category: "Livestock Management"
   },
   {
@@ -70,8 +93,8 @@ const menuItems = [
     category: "Livestock Management"
   },
   {
-    title: "Weight & BCS",
-    url: "/app/weight-tracking",
+    title: "Weight & Growth",
+    url: "/app/weight-growth",
     icon: Scale,
     category: "Livestock Management"
   },
@@ -94,10 +117,28 @@ const menuItems = [
     category: "Livestock Management"
   },
   {
+    title: "Lab Results",
+    url: "/app/lab-results",
+    icon: FlaskConical,
+    category: "Livestock Management"
+  },
+  {
     title: "Health Analytics",
     url: "/app/health-analytics",
     icon: BarChart3,
     category: "Livestock Management"
+  },
+  {
+    title: "Benchmarking",
+    url: "/app/benchmarking",
+    icon: Award,
+    category: "Analytics & Compliance"
+  },
+  {
+    title: "AI Health Predictions",
+    url: "/app/health-predictions",
+    icon: Activity,
+    category: "Analytics & Compliance"
   },
   {
     title: "Field Mode",
@@ -106,9 +147,15 @@ const menuItems = [
     category: "Livestock Management"
   },
   {
-    title: "Smart Alerts",
-    url: "/app/smart-alerts",
-    icon: Bell,
+    title: "Smart Groups",
+    url: "/app/smart-groups",
+    icon: Zap,
+    category: "Livestock Management"
+  },
+  {
+    title: "Bulk Operations",
+    url: "/app/bulk-operations",
+    icon: CheckSquare,
     category: "Livestock Management"
   },
   {
@@ -137,6 +184,12 @@ const menuItems = [
     category: "Land Management"
   },
   {
+    title: "Pasture Walk",
+    url: "/app/pasture-walk",
+    icon: Leaf,
+    category: "Land Management"
+  },
+  {
     title: "Map Tasks",
     url: "/app/map-tasks",
     icon: MapPin,
@@ -144,25 +197,49 @@ const menuItems = [
   },
   // Operations
   {
-    title: "Operations",
+    title: "Operations Hub",
+    url: "/app/operations",
     icon: Wrench,
+    category: "Operations"
+  },
+  {
+    title: "Visitor Management",
+    url: "/app/operations/visitors",
+    icon: UserCheck,
+    category: "Operations"
+  },
+  {
+    title: "Vehicle Registry",
+    url: "/app/operations/vehicles",
+    icon: Car,
+    category: "Operations"
+  },
+  {
+    title: "QR Codes",
+    url: "/app/operations/qrcodes",
+    icon: QrCode,
+    category: "Operations"
+  },
+  {
+    title: "Team Management",
+    icon: UserCog,
     subItems: [
-      { title: "Visitor Management", url: "/app/operations/visitors", icon: UserCheck },
-      { title: "Vehicle Registry", url: "/app/operations/vehicles", icon: Car },
-      { title: "QR Code Generation", url: "/app/operations/qrcodes", icon: QrCode },
+      { title: "Staff Directory", url: "/app/operations/staff", icon: Users },
+      { title: "Timesheets", url: "/app/timesheets", icon: Clock },
+      { title: "Roster & Shifts", url: "/app/operations/roster", icon: CalendarDays },
+      { title: "Contractors", url: "/app/operations/contractors", icon: Building2 },
     ],
     category: "Operations"
   },
   {
-    title: "Staff Management",
-    url: "/app/operations/staff",
-    icon: Users,
-    category: "Operations"
-  },
-  {
-    title: "Contractors",
-    url: "/app/operations/contractors",
-    icon: Building2,
+    title: "Health & Safety",
+    icon: AlertTriangle,
+    subItems: [
+      { title: "Dashboard", url: "/app/health-safety", icon: Shield },
+      { title: "Incidents", url: "/app/health-safety?tab=incidents", icon: AlertTriangle },
+      { title: "Hazards", url: "/app/health-safety?tab=hazards", icon: AlertTriangle },
+      { title: "Emergency Plans", url: "/app/health-safety?tab=emergency", icon: FileText },
+    ],
     category: "Operations"
   },
   {
@@ -172,9 +249,27 @@ const menuItems = [
     category: "Operations"
   },
   {
-    title: "Task Calendar",
-    url: "/app/calendar",
-    icon: CalendarDays,
+    title: "Job Scheduler",
+    icon: Briefcase,
+    subItems: [
+      { title: "All Jobs", url: "/app/jobs", icon: Briefcase },
+      { title: "Recurring Tasks", url: "/app/recurring-tasks", icon: Repeat },
+      { title: "Task Templates", url: "/app/task-templates", icon: BookTemplate },
+      { title: "Task Calendar", url: "/app/task-calendar", icon: CalendarDays },
+      { title: "Kanban Board", url: "/app/kanban", icon: LayoutGrid },
+    ],
+    category: "Operations"
+  },
+  {
+    title: "Asset Registry",
+    url: "/app/asset-registry",
+    icon: Package,
+    category: "Operations"
+  },
+  {
+    title: "Farm Finance",
+    url: "/app/farm-finance",
+    icon: DollarSign,
     category: "Operations"
   },
   {
@@ -183,53 +278,26 @@ const menuItems = [
     icon: CloudSun,
     category: "Operations"
   },
+    // Analytics & Compliance
   {
-    title: "Kanban Board",
-    url: "/app/kanban",
-    icon: LayoutGrid,
-    category: "Operations"
-  },
-  {
-    title: "Job Scheduler",
-    url: "/app/jobs",
-    icon: Briefcase,
-    category: "Operations"
-  },
-  {
-    title: "Recurring Tasks",
-    url: "/app/recurring-tasks",
-    icon: Repeat,
-    category: "Operations"
-  },
-  {
-    title: "Task Dependencies",
-    url: "/app/dependencies",
-    icon: GitBranch,
-    category: "Operations"
-  },
-  {
-    title: "Task Templates",
-    url: "/app/task-templates",
-    icon: BookTemplate,
-    category: "Operations"
-  },
-  {
-    title: "Timesheets",
-    url: "/app/timesheets",
-    icon: Timer,
-    category: "Operations"
-  },
-  // Analytics & Compliance
-  {
-    title: "Analytics",
-    url: "/app/analytics",
+    title: "Analytics Dashboard",
     icon: BarChart3,
+    subItems: [
+      { title: "Overview", url: "/app/analytics" },
+      { title: "Medical Analytics", url: "/app/health-analytics" },
+      { title: "Pasture Analytics", url: "/app/pasture-analytics" },
+      { title: "Reproduction Analytics", url: "/app/reproduction" },
+      { title: "Financial Analytics", url: "/app/financial-analytics" },
+      { title: "Performance Benchmarks", url: "/app/performance-benchmarking" },
+      { title: "Animal Performance", url: "/app/animal-performance" },
+      { title: "Milk Analytics", url: "/app/milk-analytics" },
+    ],
     category: "Analytics & Compliance"
   },
   {
     title: "Alerts",
     url: "/app/alerts",
-    icon: Activity,
+    icon: AlertTriangle,
     category: "Analytics & Compliance"
   },
   {
@@ -239,23 +307,34 @@ const menuItems = [
     category: "Analytics & Compliance"
   },
   {
-    title: "Compliance Tagging",
-    url: "/app/compliance-tags",
-    icon: Tag,
+    title: "H&S Compliance",
+    url: "/app/compliance",
+    icon: Shield,
     category: "Analytics & Compliance"
   },
   {
-    title: "Health and Safety",
-    icon: Shield,
+    title: "Farm Compliance",
+    icon: Leaf,
     subItems: [
-      { title: "H&S Compliance", url: "/app/compliance" },
-      { title: "Farm Compliance", url: "/app/farm-compliance" },
+      { title: "Overview", url: "/app/farm-compliance" },
+      { title: "Effluent Management", url: "/app/environmental-compliance" },
+      { title: "Fertilizer Records", url: "/app/environmental-compliance" },
+      { title: "Spray Records", url: "/app/farm-compliance" },
+      { title: "Biosecurity", url: "/app/farm-compliance" },
+      { title: "Environmental", url: "/app/environmental-compliance" },
+      { title: "Freshwater Farm Plan", url: "/app/freshwater-farm-plan" },
     ],
     category: "Analytics & Compliance"
   },
   {
     title: "NAIT Records",
     url: "/app/nait",
+    icon: FileText,
+    category: "Analytics & Compliance"
+  },
+  {
+    title: "Reports & Export",
+    url: "/app/reports",
     icon: FileText,
     category: "Analytics & Compliance"
   },
@@ -275,7 +354,7 @@ const menuItems = [
 ];
 
 export function AppSidebar({ ...props }: AppSidebarProps) {
-  const location = useLocation();
+  const [location] = useLocation();
   const [openMenus, setOpenMenus] = useState<string[]>([]);
   const { state: sidebarState } = useSidebar();
   const { getTotalUnreadCount } = useChatContext();

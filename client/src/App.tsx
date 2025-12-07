@@ -68,6 +68,31 @@ import HealthAnalyticsDashboard from "@/pages/health-analytics-dashboard";
 import FieldModeDashboard from "@/pages/field-mode-dashboard";
 import AlertsNotificationsDashboard from "@/pages/alerts-notifications-dashboard";
 import WeightTrackingDashboard from "@/pages/weight-tracking-dashboard";
+import BatchTreatmentPage from "@/pages/batch-treatment-page";
+import LabResultsImportPage from "@/pages/lab-results-import";
+import BenchmarkingPage from "@/pages/benchmarking-page";
+import HealthPredictionsPage from "@/pages/health-predictions-page";
+import NaitCompliancePage from "@/pages/nait-compliance-page";
+import WeightGrowthTrackingPage from "@/pages/weight-growth-tracking";
+import SmartGroupsPage from "@/pages/smart-groups-page";
+import BulkOperationsPage from "@/pages/bulk-operations-page";
+import AnimalTimelinePage from "@/pages/animal-timeline-page";
+import AnimalLineagePage from "@/pages/animal-lineage-page";
+import HerdReportsPage from "@/pages/herd-reports-page";
+import PastureWalkPage from "@/pages/pasture-walk-page";
+import RosterSchedulingPage from "@/pages/roster-scheduling-page";
+import HealthSafetyPage from "@/pages/health-safety-page";
+import AssetRegistryPage from "@/pages/asset-registry-page";
+import FarmFinancePage from "@/pages/farm-finance-page";
+import QRCodeManagementPage from "@/pages/qr-code-management-page";
+import FinancialAnalyticsPage from "@/pages/financial-analytics-page";
+import PerformanceBenchmarkingPage from "@/pages/performance-benchmarking-page";
+import AnimalPerformancePage from "@/pages/animal-performance-page";
+import FreshwaterFarmPlanPage from "@/pages/freshwater-farm-plan-page";
+import EnvironmentalCompliancePage from "@/pages/environmental-compliance-page";
+import ReportsExportPage from "@/pages/reports-export-page";
+import WeatherIntegrationPage from "@/pages/weather-integration-page";
+import MilkAnalyticsPage from "@/pages/milk-analytics-page";
 
 function Router() {
   const [location] = useLocation();
@@ -104,33 +129,57 @@ function Router() {
         <Route path="/app/operations/vehicles" component={VehicleRegistryPage} />
         <Route path="/app/operations/vehicles/inspections" component={VehicleRegistryPage} />
         <Route path="/app/operations/visitors" component={VisitorPortalPage} />
-        <Route path="/app/operations/qrcodes" component={OperationsPage} />
+        <Route path="/app/operations/qrcodes" component={QRCodeManagementPage} />
         <Route path="/app/operations/staff" component={StaffManagementPage} />
         <Route path="/app/operations/contractors" component={ContractorManagementPage} />
+        <Route path="/app/operations/roster" component={RosterSchedulingPage} />
+        <Route path="/app/health-safety" component={HealthSafetyPage} />
+        <Route path="/app/asset-registry" component={AssetRegistryPage} />
+        <Route path="/app/farm-finance" component={FarmFinancePage} />
+        <Route path="/app/financial-analytics" component={FinancialAnalyticsPage} />
+        <Route path="/app/performance-benchmarking" component={PerformanceBenchmarkingPage} />
+        <Route path="/app/animal-performance" component={AnimalPerformancePage} />
+        <Route path="/app/freshwater-farm-plan" component={FreshwaterFarmPlanPage} />
+        <Route path="/app/environmental-compliance" component={EnvironmentalCompliancePage} />
+        <Route path="/app/reports" component={ReportsExportPage} />
+        <Route path="/app/weather" component={WeatherIntegrationPage} />
+        <Route path="/app/milk-analytics" component={MilkAnalyticsPage} />
         <Route path="/app/compliance" component={CompliancePage} />
         <Route path="/app/farm-compliance" component={FarmCompliancePage} />
         <Route path="/app/nait" component={NaitRecordsPage} />
         <Route path="/app/treatments/:section?" component={Home} />
+        <Route path="/app/batch-treatment" component={BatchTreatmentPage} />
         <Route path="/app/animals" component={AnimalsList} />
         <Route path="/app/stock-reconciliation" component={StockReconciliationPage} />
         <Route path="/app/map-tasks" component={MapTasksPage} />
         <Route path="/app/groups" component={GroupsManagement} />
         <Route path="/app/pastures" component={PasturesList} />
         <Route path="/app/pasture-rotation" component={PastureRotationPlanner} />
+        <Route path="/app/pasture-walk" component={PastureWalkPage} />
         <Route path="/app/medicines" component={MedicinesInventory} />
         <Route path="/app/reproduction" component={ReproductionPlanner} />
         <Route path="/app/reproduction-management" component={ReproductionDashboardNew} />
         <Route path="/app/vaccination" component={VaccinationDashboard} />
         <Route path="/app/health-monitoring" component={HealthMonitoringDashboard} />
         <Route path="/app/veterinary" component={VeterinaryDashboard} />
+        <Route path="/app/lab-results" component={LabResultsImportPage} />
         <Route path="/app/health-analytics" component={HealthAnalyticsDashboard} />
+        <Route path="/app/benchmarking" component={BenchmarkingPage} />
+        <Route path="/app/health-predictions" component={HealthPredictionsPage} />
         <Route path="/app/field-mode" component={FieldModeDashboard} />
         <Route path="/app/smart-alerts" component={AlertsNotificationsDashboard} />
         <Route path="/app/weight-tracking" component={WeightTrackingDashboard} />
+        <Route path="/app/weight-growth" component={WeightGrowthTrackingPage} />
+        <Route path="/app/smart-groups" component={SmartGroupsPage} />
+        <Route path="/app/bulk-operations" component={BulkOperationsPage} />
+        <Route path="/app/animals/:animalId/timeline" component={AnimalTimelinePage} />
+        <Route path="/app/animals/:animalId/lineage" component={AnimalLineagePage} />
+        <Route path="/app/herd-reports" component={HerdReportsPage} />
         <Route path="/app/analytics" component={AnalyticsDashboard} />
         <Route path="/app/financial" component={FinancialPage} />
         <Route path="/app/milk-production" component={MilkProductionPage} />
         <Route path="/app/nzfap-compliance" component={NZFAPCompliancePage} />
+        <Route path="/app/nait-compliance" component={NaitCompliancePage} />
         <Route path="/app/shed" component={ShedPage} />
         <Route path="/app/settings" component={SettingsPage} />
         <Route path="/app/alerts" component={AlertsPage} />

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Activity, AlertCircle, Pill, Users, Sprout, Heart, TrendingUp as TrendingUpIcon, Settings2 } from "lucide-react";
+import { Activity, AlertCircle, Pill, Users, Sprout, Heart, TrendingUp as TrendingUpIcon, Settings2, Wrench, UserCheck, Car, QrCode, AlertTriangle, Briefcase, Warehouse, Package, DollarSign, Clock, Shield, ChevronRight, Skull, TrendingDown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -99,6 +99,8 @@ export default function Dashboard() {
     { id: "population-trend", name: "Animal Population Growth" },
     { id: "critical-alerts", name: "Critical Alerts" },
     { id: "quick-actions", name: "Quick Actions" },
+    { id: "operations-hub", name: "Operations Hub" },
+    { id: "mortality-tracking", name: "Mortality Tracking" },
   ];
 
   // Calculate metrics
@@ -618,6 +620,187 @@ export default function Dashboard() {
           </Card>
         )}
       </div>
+
+      {/* Operations Hub Section */}
+      {!hiddenWidgets.includes("operations-hub") && (
+        <Card className="mt-8" data-testid="card-operations-hub">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Wrench className="h-6 w-6" strokeWidth={1.5} />
+              Operations Hub
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              <Link href="/app/operations">
+                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-green-300 transition-colors cursor-pointer">
+                  <div className="p-3 bg-green-100 rounded-full mb-2">
+                    <Wrench className="h-6 w-6 text-green-600" />
+                  </div>
+                  <span className="text-sm font-medium text-center">Operations Hub</span>
+                </div>
+              </Link>
+              <Link href="/app/operations/visitors">
+                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-green-300 transition-colors cursor-pointer">
+                  <div className="p-3 bg-blue-100 rounded-full mb-2">
+                    <UserCheck className="h-6 w-6 text-blue-600" />
+                  </div>
+                  <span className="text-sm font-medium text-center">Visitors</span>
+                </div>
+              </Link>
+              <Link href="/app/operations/vehicles">
+                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-blue-300 transition-colors cursor-pointer">
+                  <div className="p-3 bg-blue-100 rounded-full mb-2">
+                    <Car className="h-6 w-6 text-blue-600" />
+                  </div>
+                  <span className="text-sm font-medium text-center">Vehicles</span>
+                </div>
+              </Link>
+              <Link href="/app/operations/qrcodes">
+                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-purple-300 transition-colors cursor-pointer">
+                  <div className="p-3 bg-purple-100 rounded-full mb-2">
+                    <QrCode className="h-6 w-6 text-purple-600" />
+                  </div>
+                  <span className="text-sm font-medium text-center">QR Codes</span>
+                </div>
+              </Link>
+              <Link href="/app/operations/staff">
+                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-indigo-300 transition-colors cursor-pointer">
+                  <div className="p-3 bg-indigo-100 rounded-full mb-2">
+                    <Users className="h-6 w-6 text-indigo-600" />
+                  </div>
+                  <span className="text-sm font-medium text-center">Team</span>
+                </div>
+              </Link>
+              <Link href="/app/health-safety">
+                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-red-300 transition-colors cursor-pointer">
+                  <div className="p-3 bg-red-100 rounded-full mb-2">
+                    <AlertTriangle className="h-6 w-6 text-red-600" />
+                  </div>
+                  <span className="text-sm font-medium text-center">Health & Safety</span>
+                </div>
+              </Link>
+              <Link href="/app/shed">
+                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-amber-300 transition-colors cursor-pointer">
+                  <div className="p-3 bg-amber-100 rounded-full mb-2">
+                    <Warehouse className="h-6 w-6 text-amber-600" />
+                  </div>
+                  <span className="text-sm font-medium text-center">Shed</span>
+                </div>
+              </Link>
+              <Link href="/app/jobs">
+                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-orange-300 transition-colors cursor-pointer">
+                  <div className="p-3 bg-orange-100 rounded-full mb-2">
+                    <Briefcase className="h-6 w-6 text-orange-600" />
+                  </div>
+                  <span className="text-sm font-medium text-center">Job Scheduler</span>
+                </div>
+              </Link>
+              <Link href="/app/asset-registry">
+                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-teal-300 transition-colors cursor-pointer">
+                  <div className="p-3 bg-teal-100 rounded-full mb-2">
+                    <Package className="h-6 w-6 text-teal-600" />
+                  </div>
+                  <span className="text-sm font-medium text-center">Assets</span>
+                </div>
+              </Link>
+              <Link href="/app/farm-finance">
+                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-emerald-300 transition-colors cursor-pointer">
+                  <div className="p-3 bg-emerald-100 rounded-full mb-2">
+                    <DollarSign className="h-6 w-6 text-emerald-600" />
+                  </div>
+                  <span className="text-sm font-medium text-center">Finance</span>
+                </div>
+              </Link>
+              <Link href="/app/timesheets">
+                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-cyan-300 transition-colors cursor-pointer">
+                  <div className="p-3 bg-cyan-100 rounded-full mb-2">
+                    <Clock className="h-6 w-6 text-cyan-600" />
+                  </div>
+                  <span className="text-sm font-medium text-center">Timesheets</span>
+                </div>
+              </Link>
+              <Link href="/app/weather">
+                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-sky-300 transition-colors cursor-pointer">
+                  <div className="p-3 bg-sky-100 rounded-full mb-2">
+                    <Activity className="h-6 w-6 text-sky-600" />
+                  </div>
+                  <span className="text-sm font-medium text-center">Weather</span>
+                </div>
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Mortality Tracking Widget */}
+      {!hiddenWidgets.includes("mortality-tracking") && (
+        <Card className="mt-8" data-testid="card-mortality-tracking">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Skull className="h-6 w-6 text-red-600" strokeWidth={1.5} />
+              Mortality & Culling Tracking
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              <div className="p-4 bg-red-50 rounded-lg text-center">
+                <p className="text-sm text-red-600">Deaths (YTD)</p>
+                <p className="text-3xl font-bold text-red-700">5</p>
+                <p className="text-xs text-red-500">1.6% mortality rate</p>
+              </div>
+              <div className="p-4 bg-orange-50 rounded-lg text-center">
+                <p className="text-sm text-orange-600">Culled (YTD)</p>
+                <p className="text-3xl font-bold text-orange-700">12</p>
+                <p className="text-xs text-orange-500">3.8% cull rate</p>
+              </div>
+              <div className="p-4 bg-yellow-50 rounded-lg text-center">
+                <p className="text-sm text-yellow-600">Preventable</p>
+                <p className="text-3xl font-bold text-yellow-700">2</p>
+                <p className="text-xs text-yellow-500">40% of deaths</p>
+              </div>
+              <div className="p-4 bg-green-50 rounded-lg text-center">
+                <p className="text-sm text-green-600">vs Last Year</p>
+                <p className="text-3xl font-bold text-green-700 flex items-center justify-center gap-1">
+                  <TrendingDown className="h-5 w-5" />-15%
+                </p>
+                <p className="text-xs text-green-500">Improvement</p>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <h4 className="font-medium text-sm text-gray-700">Recent Events</h4>
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-red-100 rounded-full"><Skull className="h-4 w-4 text-red-600" /></div>
+                  <div>
+                    <p className="font-medium text-sm">NZ-2023-0089</p>
+                    <p className="text-xs text-gray-500">Pneumonia • Jan 10, 2024</p>
+                  </div>
+                </div>
+                <Badge className="bg-red-100 text-red-800">Death</Badge>
+              </div>
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-orange-100 rounded-full"><AlertTriangle className="h-4 w-4 text-orange-600" /></div>
+                  <div>
+                    <p className="font-medium text-sm">NZ-2018-0045</p>
+                    <p className="text-xs text-gray-500">Empty after 2 matings • Jan 8, 2024</p>
+                  </div>
+                </div>
+                <Badge className="bg-orange-100 text-orange-800">Culled</Badge>
+              </div>
+            </div>
+            <div className="mt-4 pt-4 border-t">
+              <Link href="/app/animal-performance">
+                <Button variant="outline" className="w-full">
+                  View Full Mortality Dashboard
+                  <ChevronRight className="h-4 w-4 ml-2" />
+                </Button>
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

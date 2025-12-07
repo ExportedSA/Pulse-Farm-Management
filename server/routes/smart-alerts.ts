@@ -3,10 +3,10 @@ import { Router, type Request, type Response } from "express";
 import { db } from "../db";
 import { 
   alerts, animals, animalTreatments, breedingRecords, vaccinationSchedules,
-  prescriptions, vetVisits, labResults, healthScores
+  prescriptions, vetVisits, labResults, healthScores, weightRecords
 } from "@shared/schema";
 import { eq, and, gte, lte, desc, sql, isNull, or } from "drizzle-orm";
-import { addDays, subDays, differenceInDays, format } from "date-fns";
+import { addDays, subDays, differenceInDays, differenceInMonths, format } from "date-fns";
 
 const router = Router();
 
@@ -169,6 +169,10 @@ router.post("/generate", async (req: Request, res: Response) => {
       vaccinationDue: 0,
       healthCheck: 0,
       vetReminders: 0,
+      ageMilestones: 0,
+      bcsAlerts: 0,
+      missingTags: 0,
+      overdueWeighing: 0,
     };
 
     // Generate treatment due alerts
@@ -188,6 +192,18 @@ router.post("/generate", async (req: Request, res: Response) => {
     
     // Generate vet reminders
     generated.vetReminders = await generateVetAlerts();
+    
+    // Generate age milestone alerts
+    generated.ageMilestones = await generateAgeMilestoneAlerts();
+    
+    // Generate BCS alerts
+    generated.bcsAlerts = await generateBCSAlerts();
+    
+    // Generate missing tag alerts
+    generated.missingTags = await generateMissingTagAlerts();
+    
+    // Generate overdue weighing alerts
+    generated.overdueWeighing = await generateOverdueWeighingAlerts();
 
     res.json({
       success: true,
@@ -637,6 +653,358 @@ async function generateVetAlerts(): Promise<number> {
             prescriptionId: rx.id,
             medicationName: rx.medicationName,
             endDate: format(endDate, 'yyyy-MM-dd'),
+          },
+        });
+        count++;
+      }
+    }
+  }
+
+  return count;
+}
+
+// ===== NEW ALERT GENERATION FUNCTIONS =====
+
+// Age milestone alerts (weaning, breeding age, etc.)
+async function generateAgeMilestoneAlerts(): Promise<number> {
+  let count = 0;
+  const today = new Date();
+
+  // Define age milestones in months
+  const milestones = [
+    { ageMonths: 2, name: 'Weaning Due', message: 'is approaching weaning age (2 months)', severity: 'medium' as const },
+    { ageMonths: 6, name: 'First Vaccination Due', message: 'is due for first vaccination series (6 months)', severity: 'medium' as const },
+    { ageMonths: 12, name: 'Yearling Check', message: 'is now a yearling - schedule health check', severity: 'low' as const },
+    { ageMonths: 15, name: 'Breeding Age', message: 'is reaching breeding age (15 months)', severity: 'medium' as const },
+    { ageMonths: 24, name: 'First Calving Expected', message: 'should be approaching first calving if bred at 15 months', severity: 'low' as const },
+  ];
+
+  // Get all active animals with date of birth
+  const activeAnimals = await db
+    .select()
+    .from(animals)
+    .where(and(
+      eq(animals.status, 'active'),
+      sql`${animals.dateOfBirth} IS NOT NULL`
+    ));
+
+  for (const animal of activeAnimals) {
+    if (!animal.dateOfBirth) continue;
+    
+    const birthDate = new Date(animal.dateOfBirth);
+    const ageMonths = differenceInMonths(today, birthDate);
+    
+    for (const milestone of milestones) {
+      // Check if animal is within 1 week of milestone (before or after)
+      const milestoneDate = addDays(birthDate, milestone.ageMonths * 30.44); // Approximate months to days
+      const daysToMilestone = differenceInDays(milestoneDate, today);
+      
+      // Alert if within 7 days before or 3 days after milestone
+      if (daysToMilestone >= -3 && daysToMilestone <= 7) {
+        const [existing] = await db
+          .select()
+          .from(alerts)
+          .where(and(
+            eq(alerts.animalId, animal.id),
+            sql`${alerts.metadata}->>'milestone' = ${milestone.name}`,
+            isNull(alerts.dismissedAt)
+          ));
+
+        if (!existing) {
+          await db.insert(alerts).values({
+            type: 'age_milestone',
+            severity: milestone.severity,
+            animalId: animal.id,
+            title: milestone.name,
+            message: `${animal.cowId || animal.naitTag || 'Animal'} ${milestone.message}`,
+            metadata: { 
+              milestone: milestone.name,
+              ageMonths,
+              milestoneAgeMonths: milestone.ageMonths,
+              cowId: animal.cowId,
+              dateOfBirth: animal.dateOfBirth,
+            },
+          });
+          count++;
+        }
+      }
+    }
+  }
+
+  return count;
+}
+
+// BCS (Body Condition Score) alerts
+async function generateBCSAlerts(): Promise<number> {
+  let count = 0;
+  const today = new Date();
+
+  // Get all active animals
+  const activeAnimals = await db
+    .select()
+    .from(animals)
+    .where(eq(animals.status, 'active'));
+
+  for (const animal of activeAnimals) {
+    // Check current BCS on animal record
+    if (animal.bodyConditionScore !== null && animal.bodyConditionScore !== undefined) {
+      const bcs = animal.bodyConditionScore;
+      
+      let alertType: string | null = null;
+      let severity: 'low' | 'medium' | 'high' | 'critical' = 'medium';
+      let message = '';
+      
+      if (bcs <= 2) {
+        alertType = 'bcs_too_low';
+        severity = bcs === 1 ? 'critical' : 'high';
+        message = `Body condition score is critically low (${bcs}/5) - immediate attention needed`;
+      } else if (bcs >= 4.5) {
+        alertType = 'bcs_too_high';
+        severity = bcs === 5 ? 'high' : 'medium';
+        message = `Body condition score is too high (${bcs}/5) - risk of metabolic issues`;
+      }
+      
+      if (alertType) {
+        const [existing] = await db
+          .select()
+          .from(alerts)
+          .where(and(
+            eq(alerts.animalId, animal.id),
+            sql`${alerts.type} IN ('bcs_too_low', 'bcs_too_high')`,
+            isNull(alerts.dismissedAt)
+          ));
+
+        if (!existing) {
+          await db.insert(alerts).values({
+            type: alertType,
+            severity,
+            animalId: animal.id,
+            title: alertType === 'bcs_too_low' ? 'Low Body Condition' : 'High Body Condition',
+            message,
+            metadata: { 
+              bcs,
+              cowId: animal.cowId,
+              threshold: alertType === 'bcs_too_low' ? 2 : 4.5,
+            },
+          });
+          count++;
+        }
+      }
+    }
+    
+    // Also check latest weight record for BCS
+    const [latestWeight] = await db
+      .select()
+      .from(weightRecords)
+      .where(eq(weightRecords.animalId, animal.id))
+      .orderBy(desc(weightRecords.date))
+      .limit(1);
+    
+    if (latestWeight?.bodyConditionScore) {
+      const bcs = latestWeight.bodyConditionScore;
+      
+      let alertType: string | null = null;
+      let severity: 'low' | 'medium' | 'high' | 'critical' = 'medium';
+      let message = '';
+      
+      if (bcs <= 2) {
+        alertType = 'bcs_too_low';
+        severity = bcs === 1 ? 'critical' : 'high';
+        message = `Latest BCS is critically low (${bcs}/5) recorded on ${latestWeight.date}`;
+      } else if (bcs >= 4.5) {
+        alertType = 'bcs_too_high';
+        severity = bcs === 5 ? 'high' : 'medium';
+        message = `Latest BCS is too high (${bcs}/5) recorded on ${latestWeight.date}`;
+      }
+      
+      if (alertType) {
+        const [existing] = await db
+          .select()
+          .from(alerts)
+          .where(and(
+            eq(alerts.animalId, animal.id),
+            sql`${alerts.type} IN ('bcs_too_low', 'bcs_too_high')`,
+            isNull(alerts.dismissedAt)
+          ));
+
+        if (!existing) {
+          await db.insert(alerts).values({
+            type: alertType,
+            severity,
+            animalId: animal.id,
+            title: alertType === 'bcs_too_low' ? 'Low Body Condition' : 'High Body Condition',
+            message,
+            metadata: { 
+              bcs,
+              cowId: animal.cowId,
+              recordDate: latestWeight.date,
+            },
+          });
+          count++;
+        }
+      }
+    }
+  }
+
+  return count;
+}
+
+// Missing tag alerts (NAIT compliance)
+async function generateMissingTagAlerts(): Promise<number> {
+  let count = 0;
+
+  // Find active animals missing required identification
+  const activeAnimals = await db
+    .select()
+    .from(animals)
+    .where(eq(animals.status, 'active'));
+
+  for (const animal of activeAnimals) {
+    const missingTags: string[] = [];
+    
+    // Check for missing NAIT tag (required for compliance)
+    if (!animal.naitTag || animal.naitTag.trim() === '') {
+      missingTags.push('NAIT tag');
+    }
+    
+    // Check for missing EID (electronic ID)
+    if (!animal.eid || animal.eid.trim() === '') {
+      missingTags.push('EID');
+    }
+    
+    // Check for missing visual ID
+    if (!animal.cowId || animal.cowId.trim() === '') {
+      missingTags.push('Visual ID');
+    }
+    
+    if (missingTags.length > 0) {
+      // Determine severity based on what's missing
+      let severity: 'low' | 'medium' | 'high' | 'critical' = 'low';
+      if (missingTags.includes('NAIT tag')) {
+        severity = 'high'; // NAIT is legally required
+      } else if (missingTags.includes('EID')) {
+        severity = 'medium';
+      }
+      
+      const [existing] = await db
+        .select()
+        .from(alerts)
+        .where(and(
+          eq(alerts.animalId, animal.id),
+          eq(alerts.type, 'missing_tag'),
+          isNull(alerts.dismissedAt)
+        ));
+
+      if (!existing) {
+        await db.insert(alerts).values({
+          type: 'missing_tag',
+          severity,
+          animalId: animal.id,
+          title: 'Missing Identification',
+          message: `Missing: ${missingTags.join(', ')}${missingTags.includes('NAIT tag') ? ' - NAIT compliance issue' : ''}`,
+          metadata: { 
+            missingTags,
+            cowId: animal.cowId,
+            hasNaitTag: !!animal.naitTag,
+            hasEid: !!animal.eid,
+            hasCowId: !!animal.cowId,
+          },
+        });
+        count++;
+      }
+    }
+  }
+
+  return count;
+}
+
+// Overdue weighing alerts
+async function generateOverdueWeighingAlerts(): Promise<number> {
+  let count = 0;
+  const today = new Date();
+  
+  // Define weighing intervals based on animal age/type
+  const weighingIntervals = {
+    calf: 14, // Calves should be weighed every 2 weeks
+    yearling: 30, // Yearlings every month
+    adult: 60, // Adults every 2 months
+  };
+
+  // Get all active animals
+  const activeAnimals = await db
+    .select()
+    .from(animals)
+    .where(eq(animals.status, 'active'));
+
+  for (const animal of activeAnimals) {
+    // Determine animal category based on age
+    let category: 'calf' | 'yearling' | 'adult' = 'adult';
+    let expectedInterval = weighingIntervals.adult;
+    
+    if (animal.dateOfBirth) {
+      const birthDate = new Date(animal.dateOfBirth);
+      const ageMonths = differenceInMonths(today, birthDate);
+      
+      if (ageMonths < 6) {
+        category = 'calf';
+        expectedInterval = weighingIntervals.calf;
+      } else if (ageMonths < 18) {
+        category = 'yearling';
+        expectedInterval = weighingIntervals.yearling;
+      }
+    }
+    
+    // Get latest weight record
+    const [latestWeight] = await db
+      .select()
+      .from(weightRecords)
+      .where(eq(weightRecords.animalId, animal.id))
+      .orderBy(desc(weightRecords.date))
+      .limit(1);
+    
+    let daysSinceLastWeigh = Infinity;
+    let lastWeighDate: string | null = null;
+    
+    if (latestWeight) {
+      lastWeighDate = latestWeight.date;
+      daysSinceLastWeigh = differenceInDays(today, new Date(latestWeight.date));
+    }
+    
+    // Check if overdue
+    if (daysSinceLastWeigh > expectedInterval) {
+      const daysOverdue = daysSinceLastWeigh - expectedInterval;
+      
+      let severity: 'low' | 'medium' | 'high' = 'low';
+      if (daysOverdue > expectedInterval) {
+        severity = 'high'; // More than double the interval
+      } else if (daysOverdue > expectedInterval / 2) {
+        severity = 'medium';
+      }
+      
+      const [existing] = await db
+        .select()
+        .from(alerts)
+        .where(and(
+          eq(alerts.animalId, animal.id),
+          eq(alerts.type, 'overdue_weighing'),
+          isNull(alerts.dismissedAt)
+        ));
+
+      if (!existing) {
+        await db.insert(alerts).values({
+          type: 'overdue_weighing',
+          severity,
+          animalId: animal.id,
+          title: 'Weighing Overdue',
+          message: lastWeighDate 
+            ? `Last weighed ${daysSinceLastWeigh} days ago (${category}s should be weighed every ${expectedInterval} days)`
+            : `Never been weighed - ${category}s should be weighed every ${expectedInterval} days`,
+          metadata: { 
+            cowId: animal.cowId,
+            category,
+            expectedInterval,
+            daysSinceLastWeigh: daysSinceLastWeigh === Infinity ? null : daysSinceLastWeigh,
+            lastWeighDate,
           },
         });
         count++;

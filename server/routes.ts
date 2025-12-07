@@ -35,6 +35,17 @@ import veterinaryRouter from "./routes/veterinary";
 import healthAnalyticsRouter from "./routes/health-analytics";
 import mobileFeaturesRouter from "./routes/mobile-features";
 import smartAlertsRouter from "./routes/smart-alerts";
+import photosRouter from "./routes/photos";
+import voiceNotesRouter from "./routes/voice-notes";
+import naitRouter from "./routes/nait";
+import stockTransactionsRouter from "./routes/stock-transactions";
+import bulkOperationsRouter from "./routes/bulk-operations";
+import animalTimelineRouter from "./routes/animal-timeline";
+import lineageRouter from "./routes/lineage";
+import herdReportsRouter from "./routes/herd-reports";
+import pastureWalksRouter from "./routes/pasture-walks";
+import rosterRouter from "./routes/roster";
+import healthSafetyRouter from "./routes/health-safety";
 import { z } from "zod";
 import {
   insertUserSchema,
@@ -81,6 +92,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ===== SMART ALERTS =====
   app.use("/api/alerts", smartAlertsRouter);
 
+  // ===== PHOTO ATTACHMENTS =====
+  app.use("/api/photos", photosRouter);
+
+  // ===== VOICE NOTES =====
+  app.use("/api/voice-notes", voiceNotesRouter);
+
+  // ===== NAIT INTEGRATION =====
+  app.use("/api/nait", naitRouter);
+
+  // ===== STOCK TRANSACTIONS =====
+  app.use("/api/stock", stockTransactionsRouter);
+
+  // ===== BULK OPERATIONS =====
+  app.use("/api/bulk", bulkOperationsRouter);
+
+  // ===== ANIMAL TIMELINE =====
+  app.use("/api/animals", animalTimelineRouter);
+
+  // ===== LINEAGE/OFFSPRING =====
+  app.use("/api/lineage", lineageRouter);
+
+  // ===== HERD REPORTS =====
+  app.use("/api/reports", herdReportsRouter);
+
+  // ===== PASTURE WALKS =====
+  app.use("/api/pasture-walks", pastureWalksRouter);
+
   // ===== HARDWARE MODULE =====
   app.use("/api/hardware", hardwareRouter);
 
@@ -125,6 +163,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Staff & Contractor Management routes
   app.use("/api/staff", staffRouter);
   app.use("/api/contractors", contractorsRouter);
+  app.use("/api/roster", rosterRouter);
+  
+  // Health & Safety routes
+  app.use("/api/health-safety", healthSafetyRouter);
   
   // Recurring Tasks routes
   app.use("/api/recurring-tasks", recurringTasksRouter);

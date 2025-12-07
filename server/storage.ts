@@ -4,13 +4,13 @@ import { eq, and, desc, gte, lte, or, like, sql } from "drizzle-orm";
 import { hashPassword } from "./password";
 import {
   users, products, productBatches, conditions, animals, pastures, animalTreatments,
-  treatmentEvents, reproductionEvents, naitRecords, milkWithholdings, pastureMovements, pastureHealthRecords,
+  treatmentEvents, reproductionEvents, naitRecords, naitQueue, milkWithholdings, pastureMovements, pastureHealthRecords,
   batchLifecycleEvents, animalGroups, animalGroupMembers, alerts,
   visitors, visitorSignIns, qrCodes,
   vehicleTypes, vehicles, vehicleInspectionTemplates, vehicleInspectionItems,
   vehicleInspections, vehicleInspectionResults, vehicleMaintenanceRecords,
   farmHazards, settings, userPreferences, activityLogs, weightRecords, weightTargets, vaccinationSchedules,
-  healthScores, mortalityRecords, healthAlerts,
+  healthScores, mortalityRecords, healthAlerts, photoAttachments, voiceNotes,
   bulls, breedingRecords, calvingRecords, lactationRecords, heatRecords,
   veterinarians, vetVisits, labResults, prescriptions, vetCostRecords,
   type User,
@@ -83,6 +83,10 @@ import {
   type InsertPrescription,
   type VetCostRecord,
   type InsertVetCostRecord,
+  type PhotoAttachment,
+  type InsertPhotoAttachment,
+  type VoiceNote,
+  type InsertVoiceNote,
   type PastureHealthRecord,
   type InsertPastureHealthRecord,
   type BatchLifecycleEvent,
@@ -2574,6 +2578,80 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
+  async getStockTransaction(id: string): Promise<StockTransaction | undefined> {
+    return this.getStockTransactionById(id);
+  }
+
+  async getStockTransactionsByAnimal(animalId: string): Promise<StockTransaction[]> {
+    try {
+      // Search for transactions that include this animal ID in the animalIds JSON array
+      const allTransactions = await db
+        .select()
+        .from(stockTransactions)
+        .orderBy(desc(stockTransactions.date));
+      
+      // Filter transactions that include this animal
+      return allTransactions.filter(t => {
+        if (!t.animalIds) return false;
+        try {
+          const ids = JSON.parse(t.animalIds);
+          return Array.isArray(ids) && ids.includes(animalId);
+        } catch {
+          return false;
+        }
+      });
+    } catch (error) {
+      console.error("Error getting stock transactions by animal:", error);
+      throw error;
+    }
+  }
+
+  // ===== ANIMAL TIMELINE HELPERS =====
+  
+  async getReproductionEventsByAnimal(animalId: string): Promise<ReproductionEvent[]> {
+    return this.getReproductionEvents(animalId);
+  }
+
+  async getPastureMovementsByAnimal(animalId: string): Promise<PastureMovement[]> {
+    return this.getPastureMovements(animalId);
+  }
+
+  async getAnimalGroupMembershipHistory(animalId: string): Promise<Array<{
+    id: string;
+    groupId: string;
+    groupName: string;
+    addedAt: Date;
+    removedAt?: string;
+    notes?: string;
+  }>> {
+    try {
+      // Get current memberships with group info
+      const memberships = await db
+        .select({
+          id: animalGroupMembers.id,
+          groupId: animalGroupMembers.groupId,
+          groupName: animalGroups.name,
+          addedAt: animalGroupMembers.addedAt,
+          notes: animalGroupMembers.notes,
+        })
+        .from(animalGroupMembers)
+        .innerJoin(animalGroups, eq(animalGroupMembers.groupId, animalGroups.id))
+        .where(eq(animalGroupMembers.animalId, animalId))
+        .orderBy(desc(animalGroupMembers.addedAt));
+      
+      return memberships.map(m => ({
+        id: m.id,
+        groupId: m.groupId,
+        groupName: m.groupName,
+        addedAt: m.addedAt,
+        notes: m.notes || undefined,
+      }));
+    } catch (error) {
+      console.error("Error getting group membership history:", error);
+      return [];
+    }
+  }
+
   // ===== TASK PINS (Phase 3) =====
   async getTaskPins(filters?: {
     status?: string;
@@ -4451,6 +4529,25 @@ export class DatabaseStorage implements IStorage {
     await db.delete(weightTargets).where(eq(weightTargets.id, id));
   }
 
+  async getAllWeightRecords(startDate?: string, endDate?: string): Promise<WeightRecord[]> {
+    let query = db.select().from(weightRecords);
+    
+    if (startDate && endDate) {
+      query = query.where(
+        and(
+          gte(weightRecords.date, startDate),
+          lte(weightRecords.date, endDate)
+        )
+      ) as any;
+    } else if (startDate) {
+      query = query.where(gte(weightRecords.date, startDate)) as any;
+    } else if (endDate) {
+      query = query.where(lte(weightRecords.date, endDate)) as any;
+    }
+    
+    return await query.orderBy(desc(weightRecords.date));
+  }
+
   // ===== VACCINATION SCHEDULE METHODS =====
 
   async getVaccinationSchedules(): Promise<VaccinationSchedule[]> {
@@ -5256,6 +5353,243 @@ export class DatabaseStorage implements IStorage {
       travelCosts,
       visitCount: visits.length,
     };
+  }
+
+  // ===== TREATMENT COSTS =====
+  async getTreatmentCostSummary(startDate?: string, endDate?: string): Promise<{
+    totalMedicineCost: number;
+    totalLabourCost: number;
+    totalVetCost: number;
+    totalOtherCosts: number;
+    totalCost: number;
+    treatmentCount: number;
+  }> {
+    let query = db.select().from(animalTreatments);
+    
+    const conditions = [];
+    if (startDate) {
+      conditions.push(gte(animalTreatments.dateTime, startDate));
+    }
+    if (endDate) {
+      conditions.push(lte(animalTreatments.dateTime, endDate));
+    }
+    
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions)) as any;
+    }
+    
+    const treatments = await query;
+    
+    const totalMedicineCost = treatments.reduce((sum, t) => sum + parseFloat(t.medicineCost || '0'), 0);
+    const totalLabourCost = treatments.reduce((sum, t) => sum + parseFloat(t.labourCost || '0'), 0);
+    const totalVetCost = treatments.reduce((sum, t) => sum + parseFloat(t.vetCalloutCost || '0'), 0);
+    const totalOtherCosts = treatments.reduce((sum, t) => sum + parseFloat(t.otherCosts || '0'), 0);
+    const totalCost = treatments.reduce((sum, t) => sum + parseFloat(t.totalCost || '0'), 0);
+    
+    return {
+      totalMedicineCost,
+      totalLabourCost,
+      totalVetCost,
+      totalOtherCosts,
+      totalCost: totalCost || (totalMedicineCost + totalLabourCost + totalVetCost + totalOtherCosts),
+      treatmentCount: treatments.length,
+    };
+  }
+
+  async getTreatmentsWithCosts(startDate?: string, endDate?: string, limit: number = 50): Promise<AnimalTreatment[]> {
+    let query = db
+      .select()
+      .from(animalTreatments)
+      .where(
+        or(
+          sql`${animalTreatments.totalCost} IS NOT NULL AND ${animalTreatments.totalCost} > 0`,
+          sql`${animalTreatments.medicineCost} IS NOT NULL AND ${animalTreatments.medicineCost} > 0`
+        )
+      )
+      .orderBy(desc(animalTreatments.dateTime))
+      .limit(limit);
+    
+    return await query;
+  }
+
+  async getTreatmentCostsByCondition(startDate?: string, endDate?: string): Promise<{
+    condition: string;
+    count: number;
+    totalCost: number;
+  }[]> {
+    const treatments = await db.select().from(animalTreatments);
+    
+    const costsByCondition: Record<string, { count: number; totalCost: number }> = {};
+    
+    for (const t of treatments) {
+      const condition = t.condition || 'Unknown';
+      const cost = parseFloat(t.totalCost || '0') || 
+        (parseFloat(t.medicineCost || '0') + parseFloat(t.labourCost || '0') + 
+         parseFloat(t.vetCalloutCost || '0') + parseFloat(t.otherCosts || '0'));
+      
+      if (!costsByCondition[condition]) {
+        costsByCondition[condition] = { count: 0, totalCost: 0 };
+      }
+      costsByCondition[condition].count++;
+      costsByCondition[condition].totalCost += cost;
+    }
+    
+    return Object.entries(costsByCondition)
+      .map(([condition, data]) => ({ condition, ...data }))
+      .filter(item => item.totalCost > 0)
+      .sort((a, b) => b.totalCost - a.totalCost);
+  }
+
+  // ===== NAIT RECORDS =====
+  async getNaitRecords(): Promise<any[]> {
+    return await db.select().from(naitRecords).orderBy(desc(naitRecords.createdAt));
+  }
+
+  async getNaitRecordByAnimal(animalId: string): Promise<any | null> {
+    const [record] = await db.select().from(naitRecords).where(eq(naitRecords.animalId, animalId));
+    return record || null;
+  }
+
+  async getPendingNaitRecords(): Promise<any[]> {
+    return await db.select().from(naitRecords).where(eq(naitRecords.status, "pending"));
+  }
+
+  async createNaitRecord(data: any): Promise<any> {
+    const [record] = await db.insert(naitRecords).values(data).returning();
+    return record;
+  }
+
+  async updateNaitRecord(id: string, data: any): Promise<any> {
+    const [record] = await db
+      .update(naitRecords)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(naitRecords.id, id))
+      .returning();
+    return record;
+  }
+
+  // ===== NAIT QUEUE =====
+  async getNaitQueue(): Promise<any[]> {
+    return await db.select().from(naitQueue).orderBy(desc(naitQueue.createdAt));
+  }
+
+  async getPendingNaitQueue(): Promise<any[]> {
+    return await db.select().from(naitQueue).where(eq(naitQueue.status, "pending"));
+  }
+
+  async getFailedNaitQueue(): Promise<any[]> {
+    return await db.select().from(naitQueue).where(eq(naitQueue.status, "failed"));
+  }
+
+  async createNaitQueueItem(data: any): Promise<any> {
+    const [item] = await db.insert(naitQueue).values({
+      ...data,
+      status: "pending",
+      attempts: 0,
+    }).returning();
+    return item;
+  }
+
+  async updateNaitQueueItem(id: string, data: any): Promise<any> {
+    const [item] = await db
+      .update(naitQueue)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(naitQueue.id, id))
+      .returning();
+    return item;
+  }
+
+  async retryNaitQueueItem(id: string): Promise<any> {
+    const [item] = await db
+      .update(naitQueue)
+      .set({ 
+        status: "pending", 
+        attempts: sql`${naitQueue.attempts} + 1`,
+        lastAttempt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(naitQueue.id, id))
+      .returning();
+    return item;
+  }
+
+  async deleteNaitQueueItem(id: string): Promise<void> {
+    await db.delete(naitQueue).where(eq(naitQueue.id, id));
+  }
+
+  // ===== VOICE NOTES =====
+  async getVoiceNotes(): Promise<VoiceNote[]> {
+    return await db.select().from(voiceNotes).orderBy(desc(voiceNotes.recordedAt));
+  }
+
+  async getVoiceNote(id: string): Promise<VoiceNote | null> {
+    const [note] = await db.select().from(voiceNotes).where(eq(voiceNotes.id, id));
+    return note || null;
+  }
+
+  async getVoiceNotesByAnimal(animalId: string): Promise<VoiceNote[]> {
+    return await db
+      .select()
+      .from(voiceNotes)
+      .where(eq(voiceNotes.animalId, animalId))
+      .orderBy(desc(voiceNotes.recordedAt));
+  }
+
+  async getVoiceNotesByTreatment(treatmentId: string): Promise<VoiceNote[]> {
+    return await db
+      .select()
+      .from(voiceNotes)
+      .where(eq(voiceNotes.treatmentId, treatmentId))
+      .orderBy(desc(voiceNotes.recordedAt));
+  }
+
+  async createVoiceNote(data: InsertVoiceNote): Promise<VoiceNote> {
+    const [note] = await db.insert(voiceNotes).values(data).returning();
+    return note;
+  }
+
+  async updateVoiceNote(id: string, data: Partial<InsertVoiceNote>): Promise<VoiceNote> {
+    const [note] = await db
+      .update(voiceNotes)
+      .set(data)
+      .where(eq(voiceNotes.id, id))
+      .returning();
+    return note;
+  }
+
+  async deleteVoiceNote(id: string): Promise<void> {
+    await db.delete(voiceNotes).where(eq(voiceNotes.id, id));
+  }
+
+  // ===== PHOTO ATTACHMENTS =====
+  async getPhotoAttachment(id: string): Promise<PhotoAttachment | null> {
+    const [attachment] = await db.select().from(photoAttachments).where(eq(photoAttachments.id, id));
+    return attachment || null;
+  }
+
+  async getPhotoAttachmentsByAnimal(animalId: string): Promise<PhotoAttachment[]> {
+    return await db
+      .select()
+      .from(photoAttachments)
+      .where(eq(photoAttachments.animalId, animalId))
+      .orderBy(desc(photoAttachments.createdAt));
+  }
+
+  async getPhotoAttachmentsByTreatment(treatmentId: string): Promise<PhotoAttachment[]> {
+    return await db
+      .select()
+      .from(photoAttachments)
+      .where(eq(photoAttachments.treatmentId, treatmentId))
+      .orderBy(desc(photoAttachments.createdAt));
+  }
+
+  async createPhotoAttachment(data: InsertPhotoAttachment): Promise<PhotoAttachment> {
+    const [attachment] = await db.insert(photoAttachments).values(data).returning();
+    return attachment;
+  }
+
+  async deletePhotoAttachment(id: string): Promise<void> {
+    await db.delete(photoAttachments).where(eq(photoAttachments.id, id));
   }
 }
 
