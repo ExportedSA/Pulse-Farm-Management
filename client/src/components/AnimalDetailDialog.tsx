@@ -277,27 +277,57 @@ export default function AnimalDetailDialog({
 
         <div className="space-y-6 mt-4">
           {/* Basic Information */}
+          {/* Tag Identification */}
           <Card>
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
                 <Tag className="h-5 w-5" />
+                Tag Identification
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="p-3 border rounded-lg">
+                  <div className="text-xs font-medium text-blue-600 mb-1">VID (Visual ID)</div>
+                  <div className="text-sm font-mono font-semibold">
+                    {(animal as any).visualId || animal.cowId || <span className="text-muted-foreground">Not set</span>}
+                  </div>
+                </div>
+                <div className="p-3 border rounded-lg">
+                  <div className="text-xs font-medium text-green-600 mb-1">LID (Lifetime ID)</div>
+                  <div className="text-sm font-mono font-semibold">
+                    {(animal as any).lifetimeId || <span className="text-muted-foreground">Not set</span>}
+                  </div>
+                </div>
+                <div className="p-3 border rounded-lg">
+                  <div className="text-xs font-medium text-purple-600 mb-1">NAIT Tag (EID)</div>
+                  <div className="text-sm font-mono font-semibold">
+                    {animal.naitTag || <span className="text-muted-foreground">Not set</span>}
+                  </div>
+                </div>
+                <div className="p-3 border rounded-lg">
+                  <div className="text-xs font-medium text-orange-600 mb-1">EID (Electronic)</div>
+                  <div className="text-sm font-mono font-semibold">
+                    {(animal as any).eid || <span className="text-muted-foreground">Not set</span>}
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mt-3">
+                To change tags, use the Edit button above or go to Animals → Edit Animal → Tags
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Basic Information */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Activity className="h-5 w-5" />
                 Basic Information
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <div className="text-sm font-medium text-muted-foreground">NAIT Tag</div>
-                  <div className="text-sm">{animal.naitTag || '—'}</div>
-                </div>
-                <div>
-                  <div className="text-sm font-medium text-muted-foreground">EID (Electronic ID)</div>
-                  <div className="text-sm font-mono">{(animal as any).eid || '—'}</div>
-                </div>
-                <div>
-                  <div className="text-sm font-medium text-muted-foreground">Visual ID (Cow Number)</div>
-                  <div className="text-sm">{animal.cowId || '—'}</div>
-                </div>
                 <div>
                   <div className="text-sm font-medium text-muted-foreground">Date of Birth</div>
                   <div className="text-sm">
@@ -307,6 +337,14 @@ export default function AnimalDetailDialog({
                 <div>
                   <div className="text-sm font-medium text-muted-foreground">Herd</div>
                   <div className="text-sm">{animal.herd || '—'}</div>
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-muted-foreground">Breed</div>
+                  <div className="text-sm">{animal.breed || '—'}</div>
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-muted-foreground">Sex</div>
+                  <div className="text-sm">{animal.sex || '—'}</div>
                 </div>
                 {animal.birthId && (
                   <div>

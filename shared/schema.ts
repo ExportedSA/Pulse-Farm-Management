@@ -161,9 +161,12 @@ export const conditions = pgTable('conditions', {
 // Animals (Herd)
 export const animals = pgTable('animals', {
   id: uuid('id').primaryKey().defaultRandom(),
-  naitTag: varchar('nait_tag', { length: 50 }).unique(),
+  // Tag Identification
+  visualId: varchar('visual_id', { length: 50 }), // VID - Visual ID (farm tag number)
+  lifetimeId: varchar('lifetime_id', { length: 50 }).unique(), // LID - Lifetime ID (NAIT birth tag)
+  naitTag: varchar('nait_tag', { length: 50 }).unique(), // NAIT EID tag number
   eid: varchar('eid', { length: 50 }).unique(), // Electronic ID for RFID tags
-  cowId: varchar('cow_id', { length: 50 }).unique(), // Visual ID
+  cowId: varchar('cow_id', { length: 50 }).unique(), // Legacy Visual ID field
   birthId: jsonb('birth_id').$type<{ participantCode: string; year: string; number: string }>(),
   breed: varchar('breed', { length: 100 }),
   dateOfBirth: varchar('date_of_birth', { length: 10 }),
@@ -193,6 +196,32 @@ export const animals = pgTable('animals', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   version: integer('version').default(0).notNull(),
   deletedAt: timestamp('deleted_at'),
+});
+
+// Tag type enum for tag history
+export const tagTypeEnum = pgEnum('tag_type', ['visual_id', 'lifetime_id', 'nait_tag', 'eid']);
+
+// Tag change reason enum
+export const tagChangeReasonEnum = pgEnum('tag_change_reason', [
+  'lost', 'damaged', 'illegible', 'replacement', 'correction', 'initial', 'other'
+]);
+
+// Animal Tag History - tracks all tag changes
+export const animalTagHistory = pgTable('animal_tag_history', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  animalId: uuid('animal_id').references(() => animals.id).notNull(),
+  tagType: tagTypeEnum('tag_type').notNull(),
+  oldValue: varchar('old_value', { length: 50 }),
+  newValue: varchar('new_value', { length: 50 }),
+  changeReason: tagChangeReasonEnum('change_reason').notNull(),
+  changeDate: date('change_date').notNull(),
+  notes: text('notes'),
+  // For NAIT compliance - track if reported to NAIT
+  naitReported: boolean('nait_reported').default(false),
+  naitReportedAt: timestamp('nait_reported_at'),
+  naitConfirmationNumber: varchar('nait_confirmation_number', { length: 100 }),
+  recordedBy: uuid('recorded_by').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
 // Weight Records (Health Tracking)
@@ -1932,6 +1961,11 @@ export const insertAnimalSchema = createInsertSchema(animals).omit({
   version: true 
 });
 
+export const insertAnimalTagHistorySchema = createInsertSchema(animalTagHistory).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertWeightRecordSchema = createInsertSchema(weightRecords).omit({
   id: true,
   createdAt: true,
@@ -2284,6 +2318,7 @@ export type RecordItem = ProductBatch; // Alias for backwards compatibility
 export type BatchLifecycleEvent = typeof batchLifecycleEvents.$inferSelect; // Phase 6
 export type Condition = typeof conditions.$inferSelect;
 export type Animal = typeof animals.$inferSelect;
+export type AnimalTagHistory = typeof animalTagHistory.$inferSelect;
 export type Pasture = typeof pastures.$inferSelect;
 export type AnimalTreatment = typeof animalTreatments.$inferSelect;
 export type TreatmentEvent = typeof treatmentEvents.$inferSelect;
@@ -2851,6 +2886,7 @@ export type InsertRecord = InsertProductBatch; // Alias for backwards compatibil
 export type InsertBatchLifecycleEvent = z.infer<typeof insertBatchLifecycleEventSchema>; // Phase 6
 export type InsertCondition = z.infer<typeof insertConditionSchema>;
 export type InsertAnimal = z.infer<typeof insertAnimalSchema>;
+export type InsertAnimalTagHistory = z.infer<typeof insertAnimalTagHistorySchema>;
 export type WeightRecord = typeof weightRecords.$inferSelect;
 export type WeightTarget = typeof weightTargets.$inferSelect;
 export type InsertWeightRecord = z.infer<typeof insertWeightRecordSchema>;

@@ -52,6 +52,7 @@ import reportsRouter from "./routes/reports";
 import externalApisRouter from "./routes/external-apis";
 import iotRouter from "./routes/iot";
 import multiFarmRouter from "./routes/multi-farm";
+import animalTagsRouter from "./routes/animal-tags";
 import { z } from "zod";
 import {
   insertUserSchema,
@@ -109,6 +110,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ===== MULTI-FARM MANAGEMENT =====
   app.use(multiFarmRouter);
+
+  // ===== ANIMAL TAG MANAGEMENT =====
+  app.use(animalTagsRouter);
 
   // ===== MOBILE & FIELD FEATURES =====
   app.use("/api/mobile", mobileFeaturesRouter);
