@@ -1,6 +1,6 @@
 import { Home, Syringe, Pill, Users, Sprout, Heart, Settings, Activity, FolderTree, Shuffle, BarChart3, ChevronDown, Warehouse, MessageSquare, Shield, FileText, Briefcase, Leaf, Wrench, Car, QrCode, UserCheck, MapPin, DollarSign, Droplets, Award, Building2, Repeat, BookTemplate, CalendarDays, CloudSun, Timer, LayoutGrid, Tag, GitBranch, Stethoscope, Smartphone, Bell, Scale, FlaskConical, Zap, CheckSquare, UserCog, ClipboardList, Clock, GraduationCap, AlertTriangle, Package } from "lucide-react";
 import { Link, useLocation } from "wouter";
-import { useState } from "react";
+import { useState, ComponentProps } from "react";
 import { useChatContext } from "@/contexts/ChatContext";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -19,6 +19,8 @@ import {
   SidebarFooter,
   useSidebar,
 } from "@/components/ui/sidebar";
+
+type AppSidebarProps = ComponentProps<typeof Sidebar>;
 import {
   Collapsible,
   CollapsibleContent,
@@ -356,12 +358,12 @@ const menuItems = [
 export function AppSidebar({ ...props }: AppSidebarProps) {
   const [location] = useLocation();
   const [openMenus, setOpenMenus] = useState<string[]>([]);
-  const { state: sidebarState } = useSidebar();
+  const { setOpen, setOpenMobile } = useSidebar();
   const { getTotalUnreadCount } = useChatContext();
 
   const handleMenuClick = () => {
-    sidebarState.setOpen(false);
-    sidebarState.setOpenMobile(false);
+    setOpen(false);
+    setOpenMobile(false);
   };
 
   const toggleSubmenu = (title: string) => {

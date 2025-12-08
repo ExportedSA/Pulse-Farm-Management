@@ -1008,6 +1008,10 @@ export class DatabaseStorage implements IStorage {
     return record;
   }
 
+  async getPendingNaitRecords(): Promise<NAITRecord[]> {
+    return await db.select().from(naitRecords).where(eq(naitRecords.status, "pending"));
+  }
+
   // ===== SETTINGS =====
   async getSetting(key: string): Promise<any> {
     const [setting] = await db.select().from(settings).where(eq(settings.key, key));
@@ -5438,34 +5442,6 @@ export class DatabaseStorage implements IStorage {
       .map(([condition, data]) => ({ condition, ...data }))
       .filter(item => item.totalCost > 0)
       .sort((a, b) => b.totalCost - a.totalCost);
-  }
-
-  // ===== NAIT RECORDS =====
-  async getNaitRecords(): Promise<any[]> {
-    return await db.select().from(naitRecords).orderBy(desc(naitRecords.createdAt));
-  }
-
-  async getNaitRecordByAnimal(animalId: string): Promise<any | null> {
-    const [record] = await db.select().from(naitRecords).where(eq(naitRecords.animalId, animalId));
-    return record || null;
-  }
-
-  async getPendingNaitRecords(): Promise<any[]> {
-    return await db.select().from(naitRecords).where(eq(naitRecords.status, "pending"));
-  }
-
-  async createNaitRecord(data: any): Promise<any> {
-    const [record] = await db.insert(naitRecords).values(data).returning();
-    return record;
-  }
-
-  async updateNaitRecord(id: string, data: any): Promise<any> {
-    const [record] = await db
-      .update(naitRecords)
-      .set({ ...data, updatedAt: new Date() })
-      .where(eq(naitRecords.id, id))
-      .returning();
-    return record;
   }
 
   // ===== NAIT QUEUE =====
