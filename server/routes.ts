@@ -49,6 +49,7 @@ import healthSafetyRouter from "./routes/health-safety";
 import financialAnalyticsRouter from "./routes/financial-analytics";
 import benchmarkingRouter from "./routes/benchmarking";
 import reportsRouter from "./routes/reports";
+import externalApisRouter from "./routes/external-apis";
 import { z } from "zod";
 import {
   insertUserSchema,
@@ -97,6 +98,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ===== REPORTS & PDF GENERATION =====
   app.use(reportsRouter);
+
+  // ===== EXTERNAL API INTEGRATIONS (NAIT, Weather, LIC, Fonterra) =====
+  app.use(externalApisRouter);
 
   // ===== MOBILE & FIELD FEATURES =====
   app.use("/api/mobile", mobileFeaturesRouter);
