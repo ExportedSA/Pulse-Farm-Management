@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Offline - Pulse Farm Management</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .container {
+      text-align: center;
+      max-width: 400px;
+    }
+    .icon {
+      width: 80px;
+      height: 80px;
+      background: #22c55e;
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 24px;
+    }
+    .icon svg {
+      width: 40px;
+      height: 40px;
+      color: white;
+    }
+    h1 {
+      color: #166534;
+      font-size: 24px;
+      margin-bottom: 12px;
+    }
+    p {
+      color: #4b5563;
+      margin-bottom: 24px;
+      line-height: 1.6;
+    }
+    .status {
+      background: white;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 24px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .status-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    .status-item:last-child {
+      border-bottom: none;
+    }
+    .status-label {
+      color: #6b7280;
+      font-size: 14px;
+    }
+    .status-value {
+      font-weight: 600;
+      color: #166534;
+    }
+    .status-value.pending {
+      color: #f59e0b;
+    }
+    .btn {
+      display: inline-block;
+      background: #22c55e;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 500;
+      transition: background 0.2s;
+    }
+    .btn:hover {
+      background: #16a34a;
+    }
+    .btn-secondary {
+      background: white;
+      color: #22c55e;
+      border: 2px solid #22c55e;
+      margin-left: 12px;
+    }
+    .btn-secondary:hover {
+      background: #f0fdf4;
+    }
+    .offline-features {
+      margin-top: 32px;
+      text-align: left;
+    }
+    .offline-features h3 {
+      color: #166534;
+      font-size: 16px;
+      margin-bottom: 12px;
+    }
+    .feature {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 0;
+      color: #4b5563;
+      font-size: 14px;
+    }
+    .feature-icon {
+      width: 24px;
+      height: 24px;
+      background: #dcfce7;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .feature-icon svg {
+      width: 14px;
+      height: 14px;
+      color: #22c55e;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3m8.293 8.293l1.414 1.414" />
+      </svg>
+    </div>
+    
+    <h1>You're Offline</h1>
+    <p>Don't worry - Pulse works offline! Your data is safely stored and will sync when you're back online.</p>
+    
+    <div class="status">
+      <div class="status-item">
+        <span class="status-label">Cached Animals</span>
+        <span class="status-value" id="cachedAnimals">Loading...</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Pending Actions</span>
+        <span class="status-value pending" id="pendingActions">0</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Last Sync</span>
+        <span class="status-value" id="lastSync">-</span>
+      </div>
+    </div>
+    
+    <div>
+      <a href="/" class="btn" onclick="window.location.reload()">Try Again</a>
+      <a href="/app/animals" class="btn btn-secondary">View Cached Data</a>
+    </div>
+    
+    <div class="offline-features">
+      <h3>Available Offline:</h3>
+      <div class="feature">
+        <div class="feature-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <span>View animal records</span>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <span>Record treatments (queued)</span>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <span>View pasture data</span>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <span>Access compliance checklists</span>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    // Check offline storage status
+    async function updateStatus() {
+      try {
+        // Check IndexedDB for cached data
+        const db = await openDB();
+        const animals = await getCount(db, 'animals');
+        const pending = await getCount(db, 'pendingActions');
+        const lastSync = localStorage.getItem('lastSync');
+        
+        document.getElementById('cachedAnimals').textContent = animals || '0';
+        document.getElementById('pendingActions').textContent = pending || '0';
+        document.getElementById('lastSync').textContent = lastSync ? new Date(lastSync).toLocaleString() : 'Never';
+      } catch (e) {
+        document.getElementById('cachedAnimals').textContent = '-';
+      }
+    }
+    
+    function openDB() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open('PulseFarmDB', 1);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+      });
+    }
+    
+    function getCount(db, storeName) {
+      return new Promise((resolve) => {
+        try {
+          const tx = db.transaction(storeName, 'readonly');
+          const store = tx.objectStore(storeName);
+          const request = store.count();
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => resolve(0);
+        } catch (e) {
+          resolve(0);
+        }
+      });
+    }
+    
+    // Listen for online status
+    window.addEventListener('online', () => {
+      window.location.reload();
+    });
+    
+    updateStatus();
+  </script>
+</body>
+</html>

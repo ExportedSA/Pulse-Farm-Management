@@ -93,6 +93,9 @@ import EnvironmentalCompliancePage from "@/pages/environmental-compliance-page";
 import ReportsExportPage from "@/pages/reports-export-page";
 import WeatherIntegrationPage from "@/pages/weather-integration-page";
 import MilkAnalyticsPage from "@/pages/milk-analytics-page";
+import GISMappingPage from "@/pages/gis-mapping-page";
+import GeneticMeritPage from "@/pages/genetic-merit-page";
+import FeedPlanningPage from "@/pages/feed-planning-page";
 
 function Router() {
   const [location] = useLocation();
@@ -183,6 +186,9 @@ function Router() {
         <Route path="/app/shed" component={ShedPage} />
         <Route path="/app/settings" component={SettingsPage} />
         <Route path="/app/alerts" component={AlertsPage} />
+        <Route path="/app/gis-mapping" component={GISMappingPage} />
+        <Route path="/app/genetic-merit" component={GeneticMeritPage} />
+        <Route path="/app/feed-planning" component={FeedPlanningPage} />
         <Route component={NotFound} />
       </Switch>
     </RequireAuth>

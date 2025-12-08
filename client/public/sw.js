@@ -1,6 +1,7 @@
-const CACHE_NAME = 'pulse-farm-v1.0.0';
-const STATIC_CACHE = 'pulse-static-v1.0.0';
-const DATA_CACHE = 'pulse-data-v1.0.0';
+const CACHE_NAME = 'pulse-farm-v2.0.0';
+const STATIC_CACHE = 'pulse-static-v2.0.0';
+const DATA_CACHE = 'pulse-data-v2.0.0';
+const OFFLINE_QUEUE = 'pulse-offline-queue';
 
 // Files to cache for offline functionality
 const STATIC_FILES = [
@@ -9,15 +10,33 @@ const STATIC_FILES = [
   '/manifest.json',
   '/icon-192.png',
   '/icon-512.png',
+  '/offline.html',
 ];
 
-// API endpoints that can be cached
+// API endpoints that can be cached for offline reading
 const CACHEABLE_PATTERNS = [
+  /^\/api\/animals/,
+  /^\/api\/pastures/,
+  /^\/api\/treatments/,
   /^\/api\/milk\/records/,
-  /^\/api\/financial\/expenses/,
-  /^\/api\/stock\/animals/,
-  /^\/api\/weather\/current/,
-  /^\/api\/nzfap\/standards/,
+  /^\/api\/financial/,
+  /^\/api\/weather/,
+  /^\/api\/integrations\/weather/,
+  /^\/api\/integrations\/nait/,
+  /^\/api\/integrations\/lic/,
+  /^\/api\/integrations\/fonterra/,
+  /^\/api\/benchmarking/,
+  /^\/api\/nzfap/,
+  /^\/api\/groups/,
+];
+
+// API endpoints that support offline queuing for writes
+const QUEUEABLE_ENDPOINTS = [
+  '/api/animals',
+  '/api/treatments',
+  '/api/pastures/movements',
+  '/api/reproduction',
+  '/api/milk/records',
 ];
 
 // Install event - cache static files
