@@ -50,6 +50,8 @@ import financialAnalyticsRouter from "./routes/financial-analytics";
 import benchmarkingRouter from "./routes/benchmarking";
 import reportsRouter from "./routes/reports";
 import externalApisRouter from "./routes/external-apis";
+import iotRouter from "./routes/iot";
+import multiFarmRouter from "./routes/multi-farm";
 import { z } from "zod";
 import {
   insertUserSchema,
@@ -101,6 +103,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ===== EXTERNAL API INTEGRATIONS (NAIT, Weather, LIC, Fonterra) =====
   app.use(externalApisRouter);
+
+  // ===== IOT INTEGRATIONS =====
+  app.use(iotRouter);
+
+  // ===== MULTI-FARM MANAGEMENT =====
+  app.use(multiFarmRouter);
 
   // ===== MOBILE & FIELD FEATURES =====
   app.use("/api/mobile", mobileFeaturesRouter);

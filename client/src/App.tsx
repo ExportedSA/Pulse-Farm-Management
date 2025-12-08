@@ -96,6 +96,8 @@ import MilkAnalyticsPage from "@/pages/milk-analytics-page";
 import GISMappingPage from "@/pages/gis-mapping-page";
 import GeneticMeritPage from "@/pages/genetic-merit-page";
 import FeedPlanningPage from "@/pages/feed-planning-page";
+import IoTDashboardPage from "@/pages/iot-dashboard-page";
+import MultiFarmPage from "@/pages/multi-farm-page";
 
 function Router() {
   const [location] = useLocation();
@@ -189,6 +191,8 @@ function Router() {
         <Route path="/app/gis-mapping" component={GISMappingPage} />
         <Route path="/app/genetic-merit" component={GeneticMeritPage} />
         <Route path="/app/feed-planning" component={FeedPlanningPage} />
+        <Route path="/app/iot" component={IoTDashboardPage} />
+        <Route path="/app/multi-farm" component={MultiFarmPage} />
         <Route component={NotFound} />
       </Switch>
     </RequireAuth>
