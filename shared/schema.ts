@@ -3339,33 +3339,6 @@ export const financialTransactions = pgTable('financial_transactions', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
-// Budget entries
-export const budgets = pgTable('budgets', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id'),
-  
-  // Budget period
-  financialYear: varchar('financial_year', { length: 10 }).notNull(), // e.g., '2024-25'
-  financialMonth: integer('financial_month'), // null for annual, 1-12 for monthly
-  
-  // Budget details
-  category: varchar('category', { length: 100 }).notNull(),
-  subcategory: varchar('subcategory', { length: 100 }),
-  type: transactionTypeEnum('type').notNull(),
-  
-  // Amounts
-  budgetAmount: numeric('budget_amount', { precision: 12, scale: 2 }).notNull(),
-  revisedAmount: numeric('revised_amount', { precision: 12, scale: 2 }),
-  
-  // Notes
-  notes: text('notes'),
-  assumptions: text('assumptions'),
-  
-  createdBy: uuid('created_by').references(() => users.id),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
-
 // Milk production records (for revenue tracking)
 export const milkProduction = pgTable('milk_production', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -3468,12 +3441,6 @@ export const reportHistory = pgTable('report_history', {
 
 // Financial validation schemas
 export const insertFinancialTransactionSchema = createInsertSchema(financialTransactions).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
-
-export const insertBudgetSchema = createInsertSchema(budgets).omit({
   id: true,
   createdAt: true,
   updatedAt: true,

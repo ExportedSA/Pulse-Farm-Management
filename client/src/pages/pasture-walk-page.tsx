@@ -577,6 +577,7 @@ export default function PastureWalkPage() {
                 </CardContent>
               </Card>
             </div>
+            </div>
           )}
         </TabsContent>
 
