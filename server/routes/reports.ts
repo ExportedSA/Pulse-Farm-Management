@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
+import { excelService } from '../services/excel-service';
 
 const router = Router();
 
@@ -139,6 +140,173 @@ router.get('/api/reports/download/:reportType', async (req: Request, res: Respon
     res.status(500).json({ error: 'Failed to download PDF report' });
   }
 });
+
+// Generate Excel report
+router.post('/api/reports/generate-excel', async (req: Request, res: Response) => {
+  try {
+    const { reportType, dateRange, farmName = 'Demo Farm' } = req.body;
+    
+    let workbook;
+    
+    switch (reportType) {
+      case 'financial-summary':
+        workbook = excelService.generateFinancialReport({
+          summary: {
+            totalRevenue: 1200000,
+            totalCosts: 850000,
+            netProfit: 350000,
+            profitMargin: 29.2,
+            revenueChange: 5.5,
+            costChange: 3.2,
+          },
+          revenueBreakdown: [
+            { category: 'Milk Revenue', amount: 1020000, percentage: 85 },
+            { category: 'Livestock Sales', amount: 150000, percentage: 12.5 },
+            { category: 'Other Income', amount: 30000, percentage: 2.5 },
+          ],
+          costBreakdown: [
+            { category: 'Feed & Grazing', amount: 180000, percentage: 21.2 },
+            { category: 'Labour', amount: 150000, percentage: 17.6 },
+            { category: 'Animal Health', amount: 48000, percentage: 5.6 },
+            { category: 'Fertilizer', amount: 96000, percentage: 11.3 },
+            { category: 'Repairs', amount: 60000, percentage: 7.1 },
+            { category: 'Other', amount: 316000, percentage: 37.2 },
+          ],
+          monthlyData: generateMonthlyData(),
+          budgetComparison: [
+            { category: 'Feed', budget: 180000, actual: 172000, variance: -8000, variancePercent: -4.4 },
+            { category: 'Labour', budget: 150000, actual: 148000, variance: -2000, variancePercent: -1.3 },
+            { category: 'Animal Health', budget: 50000, actual: 48000, variance: -2000, variancePercent: -4.0 },
+          ],
+        });
+        break;
+        
+      case 'herd-performance':
+        workbook = excelService.generateHerdPerformanceReport({
+          production: [
+            { metric: 'Total Milk Solids (kg)', current: 118500, previous: 112300, change: 5.5, target: 120000 },
+            { metric: 'MS per Cow (kg)', current: 395, previous: 374, change: 5.6, target: 400 },
+            { metric: 'MS per Hectare (kg)', current: 1185, previous: 1123, change: 5.5, target: 1200 },
+            { metric: 'Peak Milk (L/cow/day)', current: 2.2, previous: 2.1, change: 4.8, target: 2.3 },
+          ],
+          reproduction: [
+            { metric: '6-Week In-Calf Rate', result: '72%', target: '75%', status: 'Below Target' },
+            { metric: 'Empty Rate', result: '9%', target: '10%', status: 'On Track' },
+            { metric: 'Submission Rate', result: '88%', target: '85%', status: 'Exceeding' },
+          ],
+          health: [
+            { metric: 'Bulk SCC (000/ml)', value: 145, industryAvg: 180, status: 'Good' },
+            { metric: 'Lameness Rate', value: '5%', industryAvg: '8%', status: 'Good' },
+            { metric: 'Mastitis Rate', value: '8%', industryAvg: '12%', status: 'Good' },
+          ],
+        });
+        break;
+        
+      case 'nait':
+        workbook = excelService.generateNAITReport({
+          summary: {
+            naitNumber: '12345678',
+            totalAnimals: 312,
+            movements: 45,
+            complianceStatus: '100%',
+          },
+          movements: [
+            { date: new Date(), type: 'Arrival', animalId: 'NZ001234567', location: 'Farm ABC', registered: 'Yes' },
+            { date: new Date(), type: 'Departure', animalId: 'NZ001234568', location: 'Sale Yards', registered: 'Yes' },
+            { date: new Date(), type: 'Death', animalId: 'NZ001234569', location: 'On Farm', registered: 'Yes' },
+          ],
+          animals: [
+            { naitTag: 'NZ001234567', visualTag: 'A001', species: 'Cattle', birthDate: new Date('2022-08-15'), registrationDate: new Date('2022-08-20') },
+            { naitTag: 'NZ001234568', visualTag: 'A002', species: 'Cattle', birthDate: new Date('2022-09-01'), registrationDate: new Date('2022-09-05') },
+          ],
+        });
+        break;
+        
+      default:
+        workbook = excelService.generateWorkbook({
+          filename: 'Report',
+          sheets: [{
+            name: 'Data',
+            columns: [
+              { header: 'Report Type', key: 'type', width: 20 },
+              { header: 'Generated', key: 'date', width: 20 },
+            ],
+            data: [{ type: reportType, date: new Date().toLocaleDateString('en-NZ') }],
+          }],
+        });
+    }
+    
+    const excelBase64 = excelService.toBase64(workbook);
+    
+    res.json({
+      success: true,
+      excel: excelBase64,
+      filename: `${reportType}-report-${new Date().toISOString().slice(0, 10)}.xlsx`,
+    });
+  } catch (error) {
+    console.error('Excel generation error:', error);
+    res.status(500).json({ error: 'Failed to generate Excel report' });
+  }
+});
+
+// Download Excel directly
+router.get('/api/reports/download-excel/:reportType', async (req: Request, res: Response) => {
+  try {
+    const { reportType } = req.params;
+    
+    // Generate a simple workbook for direct download
+    const workbook = excelService.generateWorkbook({
+      filename: `${reportType} Report`,
+      sheets: [{
+        name: 'Summary',
+        title: `${getReportTitle(reportType)}`,
+        subtitle: `Generated: ${new Date().toLocaleDateString('en-NZ')}`,
+        columns: [
+          { header: 'Metric', key: 'metric', width: 25 },
+          { header: 'Value', key: 'value', width: 20 },
+        ],
+        data: [
+          { metric: 'Report Type', value: reportType },
+          { metric: 'Generated Date', value: new Date().toLocaleDateString('en-NZ') },
+          { metric: 'Farm', value: 'Demo Farm' },
+        ],
+      }],
+    });
+    
+    const buffer = excelService.toBuffer(workbook);
+    
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=${reportType}-report.xlsx`);
+    res.send(buffer);
+  } catch (error) {
+    console.error('Excel download error:', error);
+    res.status(500).json({ error: 'Failed to download Excel report' });
+  }
+});
+
+// Helper function to generate monthly data
+function generateMonthlyData() {
+  const months = [];
+  const now = new Date();
+  for (let i = 11; i >= 0; i--) {
+    const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const seasonalFactor = getSeasonalFactor(date.getMonth());
+    const revenue = Math.round(100000 * seasonalFactor);
+    const costs = Math.round(70000 * (0.9 + Math.random() * 0.2));
+    months.push({
+      month: date.toISOString().slice(0, 7),
+      revenue,
+      costs,
+      profit: revenue - costs,
+    });
+  }
+  return months;
+}
+
+function getSeasonalFactor(month: number): number {
+  const factors = [0.6, 0.4, 0.2, 0.1, 0.05, 0.02, 0.02, 0.3, 0.7, 1.0, 1.2, 1.0];
+  return factors[month];
+}
 
 // Schedule report
 router.post('/api/reports/schedule', async (req: Request, res: Response) => {

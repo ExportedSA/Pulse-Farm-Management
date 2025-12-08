@@ -168,7 +168,12 @@ export default function ReportsExportPage() {
     toast.loading('Generating report...', { id: 'report-gen' });
     
     try {
-      const response = await fetch('/api/reports/generate-pdf', {
+      // Determine endpoint based on format
+      const endpoint = exportFormat === 'Excel' 
+        ? '/api/reports/generate-excel' 
+        : '/api/reports/generate-pdf';
+      
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -183,17 +188,55 @@ export default function ReportsExportPage() {
       
       const data = await response.json();
       
-      // Create download link from base64 PDF
+      // Create download link from base64 data
       const link = document.createElement('a');
-      link.href = data.pdf;
+      link.href = exportFormat === 'Excel' ? data.excel : data.pdf;
       link.download = data.filename;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       
-      toast.success('Report generated successfully', { id: 'report-gen', description: 'Download started' });
+      toast.success('Report generated successfully', { id: 'report-gen', description: `${exportFormat} download started` });
     } catch (error) {
       toast.error('Failed to generate report', { id: 'report-gen' });
+    }
+  };
+
+  const handleQuickExport = async (template: any, format: 'PDF' | 'Excel') => {
+    toast.loading(`Generating ${format}...`, { id: 'quick-export' });
+    
+    try {
+      const endpoint = format === 'Excel' 
+        ? '/api/reports/generate-excel' 
+        : '/api/reports/generate-pdf';
+      
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reportType: template.id,
+          dateRange: {
+            start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+            end: new Date().toISOString().slice(0, 10),
+          },
+          farmName: 'Demo Farm',
+        }),
+      });
+      
+      if (!response.ok) throw new Error('Failed to generate report');
+      
+      const data = await response.json();
+      
+      const link = document.createElement('a');
+      link.href = format === 'Excel' ? data.excel : data.pdf;
+      link.download = data.filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      toast.success(`${format} generated successfully`, { id: 'quick-export' });
+    } catch (error) {
+      toast.error(`Failed to generate ${format}`, { id: 'quick-export' });
     }
   };
 

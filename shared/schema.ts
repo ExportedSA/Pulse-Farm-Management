@@ -3289,3 +3289,214 @@ export type RecurringTaskTemplate = typeof recurringTaskTemplates.$inferSelect;
 export type InsertRecurringTaskTemplate = z.infer<typeof insertRecurringTaskTemplateSchema>;
 export type RecurringTaskInstance = typeof recurringTaskInstances.$inferSelect;
 export type InsertRecurringTaskInstance = z.infer<typeof insertRecurringTaskInstanceSchema>;
+
+// ===== FINANCIAL TABLES =====
+
+// Transaction type enum
+export const transactionTypeEnum = pgEnum('transaction_type', ['revenue', 'expense']);
+
+// Financial Transactions - Core table for all financial records
+export const financialTransactions = pgTable('financial_transactions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id'), // For multi-farm support
+  
+  // Transaction details
+  type: transactionTypeEnum('type').notNull(),
+  category: varchar('category', { length: 100 }).notNull(), // e.g., 'milk_revenue', 'feed', 'labour'
+  subcategory: varchar('subcategory', { length: 100 }), // e.g., 'hay', 'grain', 'permanent_staff'
+  description: text('description'),
+  
+  // Financial data
+  amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
+  gstAmount: numeric('gst_amount', { precision: 12, scale: 2 }).default('0'),
+  netAmount: numeric('net_amount', { precision: 12, scale: 2 }),
+  
+  // Date and period
+  transactionDate: date('transaction_date').notNull(),
+  financialYear: varchar('financial_year', { length: 10 }), // e.g., '2024-25'
+  financialMonth: integer('financial_month'), // 1-12
+  
+  // Reference data
+  invoiceNumber: varchar('invoice_number', { length: 100 }),
+  supplier: varchar('supplier', { length: 255 }),
+  customer: varchar('customer', { length: 255 }),
+  
+  // Linked entities
+  animalId: uuid('animal_id').references(() => animals.id),
+  pastureId: uuid('pasture_id').references(() => pastures.id),
+  
+  // Payment details
+  paymentMethod: varchar('payment_method', { length: 50 }), // cash, bank, credit
+  paymentStatus: varchar('payment_status', { length: 20 }).default('paid'), // paid, pending, overdue
+  
+  // Metadata
+  notes: text('notes'),
+  tags: jsonb('tags').$type<string[]>(),
+  attachments: jsonb('attachments').$type<string[]>(),
+  
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Budget entries
+export const budgets = pgTable('budgets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id'),
+  
+  // Budget period
+  financialYear: varchar('financial_year', { length: 10 }).notNull(), // e.g., '2024-25'
+  financialMonth: integer('financial_month'), // null for annual, 1-12 for monthly
+  
+  // Budget details
+  category: varchar('category', { length: 100 }).notNull(),
+  subcategory: varchar('subcategory', { length: 100 }),
+  type: transactionTypeEnum('type').notNull(),
+  
+  // Amounts
+  budgetAmount: numeric('budget_amount', { precision: 12, scale: 2 }).notNull(),
+  revisedAmount: numeric('revised_amount', { precision: 12, scale: 2 }),
+  
+  // Notes
+  notes: text('notes'),
+  assumptions: text('assumptions'),
+  
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Milk production records (for revenue tracking)
+export const milkProduction = pgTable('milk_production', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id'),
+  
+  // Production date
+  productionDate: date('production_date').notNull(),
+  
+  // Volume data
+  totalLitres: numeric('total_litres', { precision: 10, scale: 2 }).notNull(),
+  fatPercent: numeric('fat_percent', { precision: 4, scale: 2 }),
+  proteinPercent: numeric('protein_percent', { precision: 4, scale: 2 }),
+  milkSolidsKg: numeric('milk_solids_kg', { precision: 10, scale: 2 }),
+  
+  // Quality
+  somaticCellCount: integer('somatic_cell_count'),
+  bacteriaCount: integer('bacteria_count'),
+  temperature: numeric('temperature', { precision: 4, scale: 1 }),
+  
+  // Pricing
+  pricePerKgMs: numeric('price_per_kg_ms', { precision: 6, scale: 2 }),
+  totalValue: numeric('total_value', { precision: 12, scale: 2 }),
+  
+  // Collection details
+  collectionTime: varchar('collection_time', { length: 5 }),
+  vatNumber: varchar('vat_number', { length: 20 }),
+  docketNumber: varchar('docket_number', { length: 50 }),
+  
+  // Herd info
+  cowsMilked: integer('cows_milked'),
+  
+  notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Scheduled reports configuration
+export const scheduledReports = pgTable('scheduled_reports', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id'),
+  
+  // Report details
+  name: varchar('name', { length: 255 }).notNull(),
+  reportType: varchar('report_type', { length: 100 }).notNull(),
+  
+  // Schedule
+  frequency: varchar('frequency', { length: 20 }).notNull(), // daily, weekly, monthly, quarterly, annually
+  cronExpression: varchar('cron_expression', { length: 100 }),
+  nextRunAt: timestamp('next_run_at'),
+  lastRunAt: timestamp('last_run_at'),
+  
+  // Delivery
+  recipients: jsonb('recipients').$type<string[]>().notNull(),
+  format: varchar('format', { length: 20 }).notNull().default('PDF'), // PDF, Excel, Both
+  
+  // Configuration
+  reportConfig: jsonb('report_config').$type<{
+    dateRange?: string;
+    sections?: string[];
+    filters?: Record<string, any>;
+  }>(),
+  
+  // Status
+  enabled: boolean('enabled').default(true),
+  lastStatus: varchar('last_status', { length: 20 }), // success, failed
+  lastError: text('last_error'),
+  
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Report generation history
+export const reportHistory = pgTable('report_history', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id'),
+  scheduledReportId: uuid('scheduled_report_id').references(() => scheduledReports.id),
+  
+  // Report details
+  reportType: varchar('report_type', { length: 100 }).notNull(),
+  reportName: varchar('report_name', { length: 255 }).notNull(),
+  format: varchar('format', { length: 20 }).notNull(),
+  
+  // Generation details
+  generatedAt: timestamp('generated_at').defaultNow().notNull(),
+  generatedBy: uuid('generated_by').references(() => users.id),
+  
+  // File storage
+  fileUrl: varchar('file_url', { length: 500 }),
+  fileSize: integer('file_size'), // bytes
+  
+  // Delivery status
+  deliveryStatus: varchar('delivery_status', { length: 20 }), // sent, failed, pending
+  deliveredTo: jsonb('delivered_to').$type<string[]>(),
+  deliveredAt: timestamp('delivered_at'),
+  
+  // Error tracking
+  errorMessage: text('error_message'),
+});
+
+// Financial validation schemas
+export const insertFinancialTransactionSchema = createInsertSchema(financialTransactions).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertBudgetSchema = createInsertSchema(budgets).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertMilkProductionSchema = createInsertSchema(milkProduction).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertScheduledReportSchema = createInsertSchema(scheduledReports).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+// Financial Types
+export type FinancialTransaction = typeof financialTransactions.$inferSelect;
+export type InsertFinancialTransaction = z.infer<typeof insertFinancialTransactionSchema>;
+export type Budget = typeof budgets.$inferSelect;
+export type InsertBudget = z.infer<typeof insertBudgetSchema>;
+export type MilkProduction = typeof milkProduction.$inferSelect;
+export type InsertMilkProduction = z.infer<typeof insertMilkProductionSchema>;
+export type ScheduledReport = typeof scheduledReports.$inferSelect;
+export type InsertScheduledReport = z.infer<typeof insertScheduledReportSchema>;
