@@ -46,6 +46,9 @@ import herdReportsRouter from "./routes/herd-reports";
 import pastureWalksRouter from "./routes/pasture-walks";
 import rosterRouter from "./routes/roster";
 import healthSafetyRouter from "./routes/health-safety";
+import financialAnalyticsRouter from "./routes/financial-analytics";
+import benchmarkingRouter from "./routes/benchmarking";
+import reportsRouter from "./routes/reports";
 import { z } from "zod";
 import {
   insertUserSchema,
@@ -85,6 +88,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ===== HEALTH ANALYTICS =====
   app.use("/api/analytics/health", healthAnalyticsRouter);
+
+  // ===== FINANCIAL ANALYTICS =====
+  app.use(financialAnalyticsRouter);
+
+  // ===== BENCHMARKING =====
+  app.use(benchmarkingRouter);
+
+  // ===== REPORTS & PDF GENERATION =====
+  app.use(reportsRouter);
 
   // ===== MOBILE & FIELD FEATURES =====
   app.use("/api/mobile", mobileFeaturesRouter);

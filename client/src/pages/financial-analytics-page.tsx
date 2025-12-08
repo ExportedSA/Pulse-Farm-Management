@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,7 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
-import { format } from 'date-fns';
+import { Skeleton } from '@/components/ui/skeleton';
+import { format, subMonths } from 'date-fns';
 import { toast } from 'sonner';
 import {
   DollarSign, TrendingUp, TrendingDown, BarChart3, PieChart, Calculator,
@@ -103,16 +105,46 @@ export default function FinancialAnalyticsPage() {
   const [selectedSeason, setSelectedSeason] = useState('2023-24');
   const [comparisonSeason, setComparisonSeason] = useState('2022-23');
 
-  // Calculate totals
-  const totalCosts = mockCostCategories.reduce((s, c) => s + c.currentPeriod, 0);
+  // Fetch financial analytics data from API
+  const { data: dashboardData, isLoading: isLoadingDashboard } = useQuery({
+    queryKey: ['/api/financial-analytics/dashboard', selectedPeriod],
+    queryFn: async () => {
+      const endDate = new Date();
+      const startDate = subMonths(endDate, selectedPeriod === 'ytd' ? 12 : selectedPeriod === 'quarter' ? 3 : 1);
+      const res = await fetch(`/api/financial-analytics/dashboard?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}`);
+      if (!res.ok) throw new Error('Failed to fetch financial data');
+      return res.json();
+    },
+  });
+
+  const { data: cashFlowForecast } = useQuery({
+    queryKey: ['/api/financial-analytics/cashflow-forecast'],
+    queryFn: async () => {
+      const res = await fetch('/api/financial-analytics/cashflow-forecast?months=12');
+      if (!res.ok) throw new Error('Failed to fetch cash flow forecast');
+      return res.json();
+    },
+  });
+
+  const { data: enterpriseProfitability } = useQuery({
+    queryKey: ['/api/financial-analytics/enterprise-profitability'],
+    queryFn: async () => {
+      const res = await fetch('/api/financial-analytics/enterprise-profitability');
+      if (!res.ok) throw new Error('Failed to fetch enterprise profitability');
+      return res.json();
+    },
+  });
+
+  // Use API data or fallback to mock data
+  const totalCosts = dashboardData?.summary?.totalCosts || mockCostCategories.reduce((s, c) => s + c.currentPeriod, 0);
   const totalBudget = mockCostCategories.reduce((s, c) => s + c.budget, 0);
   const totalPrevious = mockCostCategories.reduce((s, c) => s + c.previousPeriod, 0);
   const budgetVariance = totalBudget - totalCosts;
   const budgetVariancePercent = (budgetVariance / totalBudget) * 100;
 
-  const totalRevenue = 470000;
-  const grossMargin = totalRevenue - totalCosts;
-  const grossMarginPercent = (grossMargin / totalRevenue) * 100;
+  const totalRevenue = dashboardData?.summary?.totalRevenue || 470000;
+  const grossMargin = dashboardData?.summary?.netProfit || (totalRevenue - totalCosts);
+  const grossMarginPercent = dashboardData?.summary?.profitMargin || (grossMargin / totalRevenue) * 100;
 
   // Break-even calculation
   const fixedCosts = 95000; // Estimated fixed costs

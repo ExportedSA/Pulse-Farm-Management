@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
+import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import {
@@ -95,8 +97,28 @@ export default function PerformanceBenchmarkingPage() {
   const [isSetTargetOpen, setIsSetTargetOpen] = useState(false);
   const [selectedKPI, setSelectedKPI] = useState<KPI | null>(null);
 
-  // Calculate overall score
-  const overallScore = Math.round(mockPerformanceScores.reduce((s, p) => s + p.score, 0) / mockPerformanceScores.length);
+  // Fetch benchmarking data from API
+  const { data: benchmarkingData, isLoading } = useQuery({
+    queryKey: ['/api/benchmarking/dashboard', selectedRegion],
+    queryFn: async () => {
+      const res = await fetch(`/api/benchmarking/dashboard?region=${selectedRegion}`);
+      if (!res.ok) throw new Error('Failed to fetch benchmarking data');
+      return res.json();
+    },
+  });
+
+  const { data: yoyData } = useQuery({
+    queryKey: ['/api/benchmarking/yoy-comparison'],
+    queryFn: async () => {
+      const res = await fetch('/api/benchmarking/yoy-comparison?years=3');
+      if (!res.ok) throw new Error('Failed to fetch YoY data');
+      return res.json();
+    },
+  });
+
+  // Calculate overall score - use API data if available
+  const overallScore = benchmarkingData?.rankings?.overall?.percentile || 
+    Math.round(mockPerformanceScores.reduce((s, p) => s + p.score, 0) / mockPerformanceScores.length);
   const overallGrade = overallScore >= 85 ? 'A' : overallScore >= 70 ? 'B' : overallScore >= 55 ? 'C' : overallScore >= 40 ? 'D' : 'F';
 
   // Filter KPIs

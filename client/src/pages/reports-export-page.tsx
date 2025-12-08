@@ -161,14 +161,64 @@ export default function ReportsExportPage() {
     }
   };
 
-  const handleGenerateReport = () => {
+  const handleGenerateReport = async () => {
+    if (!selectedTemplate) return;
+    
     setIsGenerateOpen(false);
-    toast.success('Report generation started', { description: 'You will be notified when ready' });
+    toast.loading('Generating report...', { id: 'report-gen' });
+    
+    try {
+      const response = await fetch('/api/reports/generate-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reportType: selectedTemplate.id,
+          dateRange,
+          sections: selectedSections,
+          farmName: 'Demo Farm',
+        }),
+      });
+      
+      if (!response.ok) throw new Error('Failed to generate report');
+      
+      const data = await response.json();
+      
+      // Create download link from base64 PDF
+      const link = document.createElement('a');
+      link.href = data.pdf;
+      link.download = data.filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      toast.success('Report generated successfully', { id: 'report-gen', description: 'Download started' });
+    } catch (error) {
+      toast.error('Failed to generate report', { id: 'report-gen' });
+    }
   };
 
-  const handleScheduleReport = () => {
-    setIsScheduleOpen(false);
-    toast.success('Report scheduled successfully');
+  const handleScheduleReport = async () => {
+    if (!selectedTemplate) return;
+    
+    try {
+      const response = await fetch('/api/reports/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reportId: selectedTemplate.id,
+          frequency: 'monthly',
+          recipients: ['farm@example.com'],
+          format: exportFormat,
+        }),
+      });
+      
+      if (!response.ok) throw new Error('Failed to schedule report');
+      
+      setIsScheduleOpen(false);
+      toast.success('Report scheduled successfully');
+    } catch (error) {
+      toast.error('Failed to schedule report');
+    }
   };
 
   const toggleSection = (section: string) => {
