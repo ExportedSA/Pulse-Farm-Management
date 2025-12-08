@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { Link } from "wouter";
 import { Card } from "@/components/ui/card";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { 
   MessageSquare, 
   Sprout, 
@@ -10,34 +12,16 @@ import {
   BarChart3, 
   Warehouse, 
   DollarSign,
-  Zap,
-  Activity,
-  Award,
-  FileText,
   Wrench,
-  CalendarDays,
-  CloudSun,
-  LayoutGrid,
-  Briefcase,
-  Repeat,
-  Timer,
-  Building2,
-  Car,
-  UserCheck,
-  QrCode,
-  GitBranch,
-  BookTemplate,
-  Tag,
-  Smartphone,
-  CheckSquare,
-  Scale,
-  Stethoscope,
-  FlaskConical,
   Droplets,
-  Leaf,
-  Shuffle,
-  MapPin
 } from "lucide-react";
+
+type SubLink = { name: string; path: string };
+type LinkGroup = { 
+  name: string; 
+  path?: string; 
+  subLinks?: SubLink[];
+};
 
 const categories = [
   {
@@ -47,9 +31,23 @@ const categories = [
     color: "#3d8b5f",
     links: [
       { name: "All Animals", path: "/app/animals" },
-      { name: "Groups", path: "/app/groups" },
+      { 
+        name: "Groups & Organization", 
+        subLinks: [
+          { name: "Animal Groups", path: "/app/groups" },
+          { name: "Smart Groups", path: "/app/smart-groups" },
+          { name: "Bulk Operations", path: "/app/bulk-operations" },
+        ]
+      },
       { name: "Stock Reconciliation", path: "/app/stock-reconciliation" },
-      { name: "Weight & Growth", path: "/app/weight-growth" },
+      { 
+        name: "Weight & Performance", 
+        subLinks: [
+          { name: "Weight & Growth", path: "/app/weight-growth" },
+          { name: "Animal Timeline", path: "/app/animals/123/timeline" },
+          { name: "Equipment Linking", path: "/app/equipment" },
+        ]
+      },
     ],
   },
   {
@@ -58,9 +56,25 @@ const categories = [
     icon: Heart,
     color: "#2d7a4a",
     links: [
-      { name: "Treatments", path: "/app/treatments/current" },
+      { 
+        name: "Treatments", 
+        subLinks: [
+          { name: "Current Treatments", path: "/app/treatments/current" },
+          { name: "Batch Treatment", path: "/app/batch-treatment" },
+          { name: "Treatment History", path: "/app/treatments" },
+        ]
+      },
       { name: "Medicine Inventory", path: "/app/medicines" },
       { name: "Vaccination", path: "/app/vaccination" },
+      { 
+        name: "Veterinary", 
+        subLinks: [
+          { name: "Vet Records", path: "/app/veterinary" },
+          { name: "Lab Results", path: "/app/lab-results" },
+          { name: "Health Monitoring", path: "/app/health-monitoring" },
+          { name: "Health Analytics", path: "/app/health-analytics" },
+        ]
+      },
       { name: "Field Mode", path: "/app/field-mode" },
     ],
   },
@@ -70,7 +84,13 @@ const categories = [
     icon: Droplets,
     color: "#4a9c6d",
     links: [
-      { name: "Breeding", path: "/app/reproduction" },
+      { 
+        name: "Breeding", 
+        subLinks: [
+          { name: "Reproduction Events", path: "/app/reproduction" },
+          { name: "Breeding Management", path: "/app/reproduction-management" },
+        ]
+      },
       { name: "Milk Production", path: "/app/milk-production" },
     ],
   },
@@ -83,6 +103,7 @@ const categories = [
       { name: "Pastures", path: "/app/pastures" },
       { name: "Pasture Walk", path: "/app/pasture-walk" },
       { name: "Rotation Planning", path: "/app/pasture-rotation" },
+      { name: "Map Tasks", path: "/app/map-tasks" },
     ],
   },
   {
@@ -92,8 +113,32 @@ const categories = [
     color: "#b8963e",
     links: [
       { name: "Shed", path: "/app/shed" },
-      { name: "Calendar", path: "/app/calendar" },
-      { name: "Staff & Contractors", path: "/app/operations" },
+      { 
+        name: "Scheduling", 
+        subLinks: [
+          { name: "Task Calendar", path: "/app/calendar" },
+          { name: "Kanban Board", path: "/app/kanban" },
+          { name: "Job Scheduler", path: "/app/jobs" },
+          { name: "Recurring Tasks", path: "/app/recurring-tasks" },
+          { name: "Task Templates", path: "/app/task-templates" },
+        ]
+      },
+      { 
+        name: "Team", 
+        subLinks: [
+          { name: "Staff Management", path: "/app/operations/staff" },
+          { name: "Contractors", path: "/app/operations/contractors" },
+          { name: "Timesheets", path: "/app/timesheets" },
+        ]
+      },
+      { 
+        name: "Visitors & Vehicles", 
+        subLinks: [
+          { name: "Visitor Management", path: "/app/operations/visitors" },
+          { name: "Vehicle Registry", path: "/app/operations/vehicles" },
+          { name: "QR Codes", path: "/app/operations/qrcodes" },
+        ]
+      },
       { name: "Weather", path: "/app/weather" },
     ],
   },
@@ -106,6 +151,8 @@ const categories = [
       { name: "Dashboard", path: "/app/analytics" },
       { name: "Herd Reports", path: "/app/herd-reports" },
       { name: "Benchmarking", path: "/app/benchmarking" },
+      { name: "AI Health Predictions", path: "/app/health-predictions" },
+      { name: "Alerts", path: "/app/alerts" },
     ],
   },
   {
@@ -114,9 +161,22 @@ const categories = [
     icon: Shield,
     color: "#8b5cf6",
     links: [
-      { name: "NAIT", path: "/app/nait-compliance" },
+      { 
+        name: "NAIT", 
+        subLinks: [
+          { name: "NAIT Records", path: "/app/nait" },
+          { name: "NAIT Compliance", path: "/app/nait-compliance" },
+        ]
+      },
       { name: "NZFAP", path: "/app/nzfap-compliance" },
-      { name: "Health & Safety", path: "/app/compliance" },
+      { 
+        name: "Health & Safety", 
+        subLinks: [
+          { name: "H&S Compliance", path: "/app/compliance" },
+          { name: "Farm Compliance", path: "/app/farm-compliance" },
+          { name: "Compliance Tags", path: "/app/compliance-tags" },
+        ]
+      },
     ],
   },
   {
@@ -126,7 +186,6 @@ const categories = [
     color: "#10b981",
     links: [
       { name: "Financial Overview", path: "/app/financial" },
-      { name: "Alerts", path: "/app/alerts" },
     ],
   },
   {
@@ -138,8 +197,56 @@ const categories = [
       { name: "Team Chat", path: "/app/chat" },
     ],
   },
-];
+] as const;
 
+
+// Component for expandable link groups
+function LinkItem({ link }: { link: LinkGroup }) {
+  const [isOpen, setIsOpen] = useState(false);
+  
+  // Simple link without sub-items
+  if (link.path && !link.subLinks) {
+    return (
+      <Link href={link.path}>
+        <a className="block text-sm text-emerald-700 hover:text-amber-600 hover:translate-x-1 transition-transform font-medium py-1">
+          → {link.name}
+        </a>
+      </Link>
+    );
+  }
+  
+  // Expandable group with sub-items
+  if (link.subLinks) {
+    return (
+      <div>
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className="flex items-center gap-1 text-sm text-emerald-700 hover:text-amber-600 font-medium py-1 w-full text-left"
+        >
+          {isOpen ? (
+            <ChevronDown className="h-3 w-3" />
+          ) : (
+            <ChevronRight className="h-3 w-3" />
+          )}
+          {link.name}
+        </button>
+        {isOpen && (
+          <div className="ml-4 border-l-2 border-emerald-200 pl-3 space-y-1">
+            {link.subLinks.map((subLink) => (
+              <Link key={subLink.path} href={subLink.path}>
+                <a className="block text-sm text-emerald-600 hover:text-amber-600 hover:translate-x-1 transition-transform py-0.5">
+                  {subLink.name}
+                </a>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+  
+  return null;
+}
 
 export default function LandingDashboard() {
   return (
@@ -153,7 +260,7 @@ export default function LandingDashboard() {
         
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {categories.map((category) => (
-            <Card key={category.title} className="p-6 hover:shadow-xl transition-all hover:scale-[1.02] border border-slate-200 bg-white shadow-lg">
+            <Card key={category.title} className="p-6 hover:shadow-xl transition-all border border-slate-200 bg-white shadow-lg">
               <div className="flex items-start gap-4 mb-4">
                 <div className="p-3 rounded-xl shadow-md" style={{ backgroundColor: category.color }}>
                   <category.icon className="h-6 w-6 text-white" />
@@ -163,11 +270,9 @@ export default function LandingDashboard() {
                   <p className="text-sm text-gray-600">{category.description}</p>
                 </div>
               </div>
-              <div className="space-y-2 pl-1">
-                {category.links.map((link) => (
-                  <Link key={link.path} href={link.path}>
-                    <a className="block text-sm text-emerald-700 hover:text-amber-600 hover:translate-x-1 transition-transform font-medium">→ {link.name}</a>
-                  </Link>
+              <div className="space-y-1 pl-1">
+                {category.links.map((link, idx) => (
+                  <LinkItem key={link.name + idx} link={link as LinkGroup} />
                 ))}
               </div>
             </Card>
