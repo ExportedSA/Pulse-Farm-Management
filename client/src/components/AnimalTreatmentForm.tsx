@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertAnimalTreatmentSchema, type InsertAnimalTreatment, type User, type Product, type Condition, type AnimalTreatment, type ProductBatch } from "@shared/schema";
+import { insertAnimalTreatmentSchema, type InsertAnimalTreatment, type User, type Product, type Condition, type AnimalTreatment, type ProductBatch, type Animal } from "@shared/schema";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -13,11 +13,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Check, ChevronDown, Edit2, ArrowLeft, ArrowRight } from "lucide-react";
+import { Check, ChevronDown, Edit2, ArrowLeft, ArrowRight, Users, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { useAuth } from "@/lib/auth-context";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 type AnimalTreatmentFormProps = {
   users: User[];
@@ -188,6 +190,23 @@ export default function AnimalTreatmentForm({
   const [openBatchSelect, setOpenBatchSelect] = useState(false);
   const [openDoseUnitSelect, setOpenDoseUnitSelect] = useState(false);
   const [expandAwaitingHelp, setExpandAwaitingHelp] = useState(false);
+  
+  // Group treatment state
+  const [isGroupTreatment, setIsGroupTreatment] = useState(false);
+  const [selectedAnimals, setSelectedAnimals] = useState<string[]>([]);
+  const [animalSearchQuery, setAnimalSearchQuery] = useState("");
+  const [openAnimalSelect, setOpenAnimalSelect] = useState(false);
+
+  // Fetch animals for group treatment
+  const { data: animals = [] } = useQuery<Animal[]>({
+    queryKey: ["/api/animals"],
+    queryFn: async () => {
+      const res = await fetch("/api/animals");
+      if (!res.ok) throw new Error("Failed to fetch animals");
+      return res.json();
+    },
+    enabled: isGroupTreatment,
+  });
 
   const formSchema = createFormSchema(conditions, selectedCondition);
 
@@ -654,110 +673,232 @@ export default function AnimalTreatmentForm({
                   )}
                 />
 
-                <div className="space-y-2">
-                  {!prefillTreatment && (
-                    <div className="flex items-center gap-4">
-                      <Button
-                        type="button"
-                        variant={!useBirthId ? "default" : "outline"}
-                        onClick={() => {
-                          setUseBirthId(false);
-                          form.setValue("useBirthId", false);
-                        }}
-                        data-testid="button-use-cow-id"
-                      >
-                        Cow ID
-                      </Button>
-                      <Button
-                        type="button"
-                        variant={useBirthId ? "default" : "outline"}
-                        onClick={() => {
-                          setUseBirthId(true);
-                          form.setValue("useBirthId", true);
-                        }}
-                        data-testid="button-use-birth-id"
-                      >
-                        Birth ID
-                      </Button>
-                    </div>
-                  )}
-
-                  {!useBirthId ? (
-                    <FormField
-                      control={form.control}
-                      name="cowId"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Cow ID *</FormLabel>
-                          <FormControl>
-                            <Input 
-                              placeholder="Enter cow ID" 
-                              {...field} 
-                              disabled={!!prefillTreatment}
-                              data-testid="input-cow-id" 
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
+                {/* Group Treatment Toggle */}
+                {!prefillTreatment && (
+                  <div className="flex items-center gap-3 p-3 rounded-lg border" style={{ backgroundColor: isGroupTreatment ? '#f0ebe4' : 'transparent', borderColor: '#e8e4de' }}>
+                    <Checkbox
+                      id="group-treatment"
+                      checked={isGroupTreatment}
+                      onCheckedChange={(checked) => {
+                        setIsGroupTreatment(checked === true);
+                        if (!checked) {
+                          setSelectedAnimals([]);
+                        }
+                      }}
                     />
-                  ) : (
-                    <div className="space-y-2">
-                      <FormLabel>Birth ID *</FormLabel>
-                      <div className="grid grid-cols-3 gap-2">
-                        <FormField
-                          control={form.control}
-                          name="birthId.participantCode"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormControl>
-                                <Input 
-                                  placeholder="Ptpt" 
-                                  {...field} 
-                                  disabled={!!prefillTreatment}
-                                  data-testid="input-birth-participant" 
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={form.control}
-                          name="birthId.year"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormControl>
-                                <Input 
-                                  placeholder="Year" 
-                                  {...field} 
-                                  disabled={!!prefillTreatment}
-                                  data-testid="input-birth-year" 
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={form.control}
-                          name="birthId.number"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormControl>
-                                <Input 
-                                  placeholder="Number" 
-                                  {...field} 
-                                  disabled={!!prefillTreatment}
-                                  data-testid="input-birth-number" 
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
+                    <label htmlFor="group-treatment" className="text-sm font-medium cursor-pointer flex items-center gap-2" style={{ color: '#1a3a2f' }}>
+                      <Users className="h-4 w-4" />
+                      Group Treatment
+                      <span className="text-xs font-normal" style={{ color: '#636e72' }}>
+                        (treat multiple animals at once)
+                      </span>
+                    </label>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  {/* Group Treatment - Multi-animal selector */}
+                  {isGroupTreatment && !prefillTreatment ? (
+                    <div className="space-y-3">
+                      <FormLabel>Select Animals *</FormLabel>
+                      
+                      {/* Selected animals badges */}
+                      {selectedAnimals.length > 0 && (
+                        <div className="flex flex-wrap gap-2 p-2 rounded border" style={{ borderColor: '#e8e4de' }}>
+                          {selectedAnimals.map(animalId => {
+                            const animal = animals.find(a => a.id === animalId);
+                            return (
+                              <Badge 
+                                key={animalId} 
+                                variant="secondary"
+                                className="flex items-center gap-1 cursor-pointer hover:bg-red-100"
+                                onClick={() => setSelectedAnimals(prev => prev.filter(id => id !== animalId))}
+                              >
+                                {animal?.visualId || animal?.name || animalId}
+                                <X className="h-3 w-3" />
+                              </Badge>
+                            );
+                          })}
+                          <span className="text-xs self-center" style={{ color: '#636e72' }}>
+                            {selectedAnimals.length} selected
+                          </span>
+                        </div>
+                      )}
+                      
+                      {/* Animal search and select */}
+                      <Popover open={openAnimalSelect} onOpenChange={setOpenAnimalSelect}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            role="combobox"
+                            className="w-full justify-between"
+                          >
+                            {selectedAnimals.length > 0 
+                              ? `${selectedAnimals.length} animals selected` 
+                              : "Search and select animals..."}
+                            <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-full p-0" align="start">
+                          <Command>
+                            <CommandInput 
+                              placeholder="Search by tag, name, or ID..." 
+                              value={animalSearchQuery}
+                              onValueChange={setAnimalSearchQuery}
+                            />
+                            <CommandList>
+                              <CommandEmpty>No animals found.</CommandEmpty>
+                              <CommandGroup>
+                                <ScrollArea className="h-[200px]">
+                                  {animals
+                                    .filter(animal => {
+                                      const query = animalSearchQuery.toLowerCase();
+                                      return (
+                                        animal.visualId?.toLowerCase().includes(query) ||
+                                        animal.name?.toLowerCase().includes(query) ||
+                                        animal.naitTag?.toLowerCase().includes(query)
+                                      );
+                                    })
+                                    .slice(0, 50)
+                                    .map((animal) => (
+                                      <CommandItem
+                                        key={animal.id}
+                                        value={animal.visualId || animal.name || animal.id}
+                                        onSelect={() => {
+                                          setSelectedAnimals(prev => 
+                                            prev.includes(animal.id)
+                                              ? prev.filter(id => id !== animal.id)
+                                              : [...prev, animal.id]
+                                          );
+                                        }}
+                                      >
+                                        <Check
+                                          className={cn(
+                                            "mr-2 h-4 w-4",
+                                            selectedAnimals.includes(animal.id) ? "opacity-100" : "opacity-0"
+                                          )}
+                                        />
+                                        <span className="font-medium">{animal.visualId || animal.name}</span>
+                                        {animal.breed && (
+                                          <span className="ml-2 text-xs text-muted-foreground">{animal.breed}</span>
+                                        )}
+                                      </CommandItem>
+                                    ))}
+                                </ScrollArea>
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
                     </div>
+                  ) : (
+                    <>
+                      {/* Single Animal - Original UI */}
+                      {!prefillTreatment && (
+                        <div className="flex items-center gap-4">
+                          <Button
+                            type="button"
+                            variant={!useBirthId ? "default" : "outline"}
+                            onClick={() => {
+                              setUseBirthId(false);
+                              form.setValue("useBirthId", false);
+                            }}
+                            data-testid="button-use-cow-id"
+                          >
+                            Cow ID
+                          </Button>
+                          <Button
+                            type="button"
+                            variant={useBirthId ? "default" : "outline"}
+                            onClick={() => {
+                              setUseBirthId(true);
+                              form.setValue("useBirthId", true);
+                            }}
+                            data-testid="button-use-birth-id"
+                          >
+                            Birth ID
+                          </Button>
+                        </div>
+                      )}
+
+                      {!useBirthId ? (
+                        <FormField
+                          control={form.control}
+                          name="cowId"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Cow ID *</FormLabel>
+                              <FormControl>
+                                <Input 
+                                  placeholder="Enter cow ID" 
+                                  {...field} 
+                                  disabled={!!prefillTreatment}
+                                  data-testid="input-cow-id" 
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      ) : (
+                        <div className="space-y-2">
+                          <FormLabel>Birth ID *</FormLabel>
+                          <div className="grid grid-cols-3 gap-2">
+                            <FormField
+                              control={form.control}
+                              name="birthId.participantCode"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormControl>
+                                    <Input 
+                                      placeholder="Ptpt" 
+                                      {...field} 
+                                      disabled={!!prefillTreatment}
+                                      data-testid="input-birth-participant" 
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                            <FormField
+                              control={form.control}
+                              name="birthId.year"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormControl>
+                                    <Input 
+                                      placeholder="Year" 
+                                      {...field} 
+                                      disabled={!!prefillTreatment}
+                                      data-testid="input-birth-year" 
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                            <FormField
+                              control={form.control}
+                              name="birthId.number"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormControl>
+                                    <Input 
+                                      placeholder="Number" 
+                                      {...field} 
+                                      disabled={!!prefillTreatment}
+                                      data-testid="input-birth-number" 
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
 
