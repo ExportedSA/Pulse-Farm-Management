@@ -328,7 +328,7 @@ export default function LandingDashboard() {
             <div className="flex gap-3 flex-wrap">
               {quickStats.map((stat) => (
                 <Link key={stat.label} href={stat.path}>
-                  <div className="bg-white/10 backdrop-blur-sm rounded-xl px-4 py-3 hover:bg-white/20 transition-all cursor-pointer min-w-[120px]">
+                  <a className="bg-white/10 backdrop-blur-sm rounded-xl px-4 py-3 hover:bg-white/20 transition-all cursor-pointer min-w-[120px] block">
                     <div className="flex items-center gap-2 mb-1">
                       <stat.icon className="h-4 w-4 text-emerald-200" />
                       <span className="text-xs text-emerald-200">{stat.label}</span>
@@ -339,7 +339,7 @@ export default function LandingDashboard() {
                         {stat.trend}
                       </span>
                     </div>
-                  </div>
+                  </a>
                 </Link>
               ))}
             </div>
@@ -353,7 +353,7 @@ export default function LandingDashboard() {
           <div className="mb-6 flex gap-3 overflow-x-auto pb-2">
             {alerts.map((alert, idx) => (
               <Link key={idx} href={alert.path}>
-                <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap cursor-pointer transition-all hover:scale-105 ${
+                <a className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap cursor-pointer transition-all hover:scale-105 ${
                   alert.type === 'warning' ? 'bg-amber-100 text-amber-800 hover:bg-amber-200' :
                   alert.type === 'success' ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200' :
                   'bg-sky-100 text-sky-800 hover:bg-sky-200'
@@ -363,7 +363,7 @@ export default function LandingDashboard() {
                   {alert.type === 'info' && <Bell className="h-4 w-4" />}
                   {alert.message}
                   <ChevronRight className="h-4 w-4" />
-                </div>
+                </a>
               </Link>
             ))}
           </div>
@@ -377,29 +377,33 @@ export default function LandingDashboard() {
               Quick Actions
             </h2>
             <Link href="/app/field-mode">
-              <Button variant="outline" size="sm" className="text-emerald-700 border-emerald-300 hover:bg-emerald-50">
-                <Plus className="h-4 w-4 mr-1" />
-                Field Mode
-              </Button>
+              <a>
+                <Button variant="outline" size="sm" className="text-emerald-700 border-emerald-300 hover:bg-emerald-50">
+                  <Plus className="h-4 w-4 mr-1" />
+                  Field Mode
+                </Button>
+              </a>
             </Link>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {seasonalActions.map((action) => (
               <Link key={action.name} href={action.path}>
-                <Button 
-                  variant="outline" 
-                  className={`w-full h-auto py-4 flex flex-col items-center gap-2 hover:scale-105 transition-all ${
-                    action.priority 
-                      ? 'border-emerald-400 bg-emerald-50 hover:bg-emerald-100 text-emerald-800' 
-                      : 'hover:border-emerald-300 hover:bg-emerald-50'
-                  }`}
-                >
-                  <action.icon className={`h-6 w-6 ${action.priority ? 'text-emerald-600' : 'text-slate-500'}`} />
-                  <span className="text-sm font-medium">{action.name}</span>
-                  {action.priority && (
-                    <Badge className="bg-amber-500 text-white text-xs">Seasonal</Badge>
-                  )}
-                </Button>
+                <a className="block">
+                  <Button 
+                    variant="outline" 
+                    className={`w-full h-auto py-4 flex flex-col items-center gap-2 hover:scale-105 transition-all ${
+                      action.priority 
+                        ? 'border-emerald-400 bg-emerald-50 hover:bg-emerald-100 text-emerald-800' 
+                        : 'hover:border-emerald-300 hover:bg-emerald-50'
+                    }`}
+                  >
+                    <action.icon className={`h-6 w-6 ${action.priority ? 'text-emerald-600' : 'text-slate-500'}`} />
+                    <span className="text-sm font-medium">{action.name}</span>
+                    {action.priority && (
+                      <Badge className="bg-amber-500 text-white text-xs">Seasonal</Badge>
+                    )}
+                  </Button>
+                </a>
               </Link>
             ))}
           </div>
@@ -439,10 +443,10 @@ export default function LandingDashboard() {
                     <div className="space-y-1">
                       {module.links.map((link) => (
                         <Link key={link.path} href={link.path}>
-                          <div className="flex items-center justify-between px-2 py-1.5 rounded hover:bg-slate-100 text-sm text-slate-700 hover:text-emerald-700 transition-colors cursor-pointer group/link">
+                          <a className="flex items-center justify-between px-2 py-1.5 rounded hover:bg-slate-100 text-sm text-slate-700 hover:text-emerald-700 transition-colors cursor-pointer group/link">
                             <span>{link.name}</span>
                             <ArrowRight className="h-4 w-4 opacity-0 group-hover/link:opacity-100 transition-opacity" />
-                          </div>
+                          </a>
                         </Link>
                       ))}
                     </div>
@@ -491,20 +495,22 @@ export default function LandingDashboard() {
 
             {/* Team Chat Quick Access */}
             <Link href="/app/chat">
-              <Card className="mt-4 border-0 shadow-md bg-gradient-to-r from-cyan-500 to-cyan-600 text-white cursor-pointer hover:shadow-lg transition-all">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <MessageSquare className="h-6 w-6" />
-                      <div>
-                        <h3 className="font-semibold">Team Chat</h3>
-                        <p className="text-sm text-cyan-100">3 unread messages</p>
+              <a className="block">
+                <Card className="mt-4 border-0 shadow-md bg-gradient-to-r from-cyan-500 to-cyan-600 text-white cursor-pointer hover:shadow-lg transition-all">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <MessageSquare className="h-6 w-6" />
+                        <div>
+                          <h3 className="font-semibold">Team Chat</h3>
+                          <p className="text-sm text-cyan-100">3 unread messages</p>
+                        </div>
                       </div>
+                      <ChevronRight className="h-5 w-5" />
                     </div>
-                    <ChevronRight className="h-5 w-5" />
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              </a>
             </Link>
           </div>
         </div>
