@@ -411,7 +411,7 @@ export function AppSidebar({ ...props }: AppSidebarProps) {
                                 className="hover:bg-pulse-800 data-[active=true]:bg-pulse-accent data-[active=true]:text-white"
                               >
                                 <item.icon className="w-5 h-5 text-pulse-text-muted" strokeWidth={1.5} />
-                                <span className="text-base font-bold text-black">{item.title}</span>
+                                <span className="text-sm font-medium text-slate-700">{item.title}</span>
                                 <ChevronDown className="ml-auto h-4 w-4 transition-transform text-pulse-text-muted" />
                               </SidebarMenuButton>
                             </CollapsibleTrigger>
@@ -427,7 +427,7 @@ export function AppSidebar({ ...props }: AppSidebarProps) {
                                       className="hover:bg-pulse-800 data-[active=true]:bg-pulse-accent data-[active=true]:text-white"
                                     >
                                       <Link href={subItem.url}>
-                                        <span className="text-base font-semibold text-black">{subItem.title}</span>
+                                        <span className="text-sm font-normal text-slate-600">{subItem.title}</span>
                                       </Link>
                                     </SidebarMenuSubButton>
                                   </SidebarMenuSubItem>
@@ -450,7 +450,7 @@ export function AppSidebar({ ...props }: AppSidebarProps) {
                         >
                           <Link href={item.url!}>
                             <item.icon className="w-5 h-5 text-pulse-text-muted" strokeWidth={1.5} />
-                            <span className="text-base font-bold text-black">{item.title}</span>
+                            <span className="text-sm font-medium text-slate-700">{item.title}</span>
                             {/* Unread badge for Chat menu item */}
                             {item.title === "Chat" && getTotalUnreadCount() > 0 && (
                               <Badge className="bg-pulse-gold text-white text-xs px-1.5 py-0.5 min-w-[20px] text-center ml-auto">
