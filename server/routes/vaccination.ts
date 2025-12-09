@@ -86,16 +86,19 @@ router.post("/schedules", async (req: Request, res: Response) => {
 
     const schedule = await storage.createVaccinationSchedule(validatedData);
     
-    // TODO: Create alert for upcoming vaccination
-    // await storage.createAlert({
-    //   type: 'vaccination_due',
-    //   groupId: validatedData.groupId,
-    //   title: `Vaccination Due: ${schedule.programName}`,
-    //   message: `${schedule.programName} scheduled for ${schedule.nextDueDate}`,
-    //   dueDate: schedule.nextDueDate,
-    //   isActive: true,
-    //   createdBy: validatedData.createdBy,
-    // });
+    // Create alert for upcoming vaccination
+    try {
+      await storage.createAlert({
+        type: 'vaccination_due',
+        title: `Vaccination Due: ${schedule.programName}`,
+        message: `${schedule.programName} scheduled for ${schedule.nextDueDate}`,
+        severity: 'medium',
+        metadata: { groupId: validatedData.groupId, scheduleId: schedule.id },
+      });
+    } catch (alertError) {
+      console.error("Failed to create vaccination alert:", alertError);
+      // Continue - alert creation failure shouldn't block schedule creation
+    }
     
     res.status(201).json(schedule);
   } catch (error) {
@@ -224,6 +227,9 @@ router.post("/record", async (req: Request, res: Response) => {
     }
 
     // Validate animal exists
+    if (!treatmentData.animalId) {
+      return res.status(400).json({ error: "Animal ID is required" });
+    }
     const animal = await storage.getAnimal(treatmentData.animalId);
     if (!animal) {
       return res.status(404).json({ error: "Animal not found" });

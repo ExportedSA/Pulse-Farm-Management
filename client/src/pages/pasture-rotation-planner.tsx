@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useAuth } from "@/lib/auth-context";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 export default function PastureRotationPlanner() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [selectedAnimals, setSelectedAnimals] = useState<Set<string>>(new Set());
   const [targetPasture, setTargetPasture] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
@@ -85,7 +87,7 @@ export default function PastureRotationPlanner() {
       return await apiRequest("/api/pasture-movements/bulk", "POST", {
         animalIds,
         toPastureId,
-        movedBy: "current-user", // TODO: Get from auth context
+        movedBy: user?.name || user?.id || "unknown",
         reason,
       });
     },

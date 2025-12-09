@@ -5,7 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
-import { animals, animalTagHistory } from '@shared/schema';
+import { animals, animalTagHistory, naitQueue } from '@shared/schema';
 import { eq, desc } from 'drizzle-orm';
 
 const router = Router();
@@ -97,8 +97,24 @@ router.post('/api/animals/:animalId/tags', async (req: Request, res: Response) =
     
     // If NAIT tag or LID changed, queue for NAIT reporting
     if (tagType === 'nait_tag' || tagType === 'lifetime_id') {
-      // TODO: Add to NAIT queue for reporting
-      console.log(`Tag change queued for NAIT reporting: ${tagType} changed from ${oldValue} to ${newValue}`);
+      try {
+        await db.insert(naitQueue).values({
+          animalId,
+          actionType: 'tag_change',
+          payload: {
+            tagType,
+            oldValue,
+            newValue,
+            changedBy: req.body.changedBy || 'system',
+            changedAt: new Date().toISOString(),
+          },
+          status: 'pending',
+          attempts: 0,
+        });
+      } catch (queueError) {
+        console.error('Failed to queue NAIT tag change:', queueError);
+        // Continue - queue failure shouldn't block tag update
+      }
     }
     
     res.json({

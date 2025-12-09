@@ -2182,7 +2182,27 @@ export const insertAnimalGroupMemberSchema = createInsertSchema(animalGroupMembe
 
 // Alerts Insert Schema
 export const insertAlertSchema = createInsertSchema(alerts, {
-  type: z.enum(['treatment_overdue', 'mastitis_quarter_repeat', 'rtv_ready', 'awaiting_treatment', 'withholding_ending', 'monitoring_complete']),
+  type: z.enum([
+    // Treatment alerts
+    'treatment_overdue', 'treatment_due', 'mastitis_quarter_repeat', 'rtv_ready', 'awaiting_treatment',
+    // Withholding alerts
+    'withholding_ending', 'withholding_meat_ending', 'withholding_milk_ending', 'withholding_cleared', 'monitoring_complete',
+    // Calving alerts
+    'calving_due', 'calving_overdue', 'calving_imminent',
+    // Vaccination alerts
+    'vaccination_due', 'vaccination_overdue', 'vaccination_schedule_reminder',
+    // Health check alerts
+    'health_check_due', 'health_score_critical', 'lameness_detected',
+    // Reproduction alerts
+    'heat_predicted', 'pregnancy_check_due', 'dry_off_due',
+    // Vet alerts
+    'vet_visit_reminder', 'lab_results_ready', 'prescription_ending',
+    // Vehicle compliance alerts
+    'vehicle_service_overdue', 'vehicle_service_due', 'vehicle_wof_expired', 'vehicle_wof_expiring',
+    'vehicle_cof_expired', 'vehicle_cof_expiring', 'vehicle_registration_expired', 'vehicle_registration_expiring',
+    'vehicle_ruc_expired', 'vehicle_ruc_expiring', 'vehicle_inspection_overdue', 'vehicle_inspection_due',
+    'vehicle_insurance_expired', 'vehicle_insurance_expiring',
+  ]),
   title: z.string().min(1, "Alert title required"),
   message: z.string().min(1, "Alert message required"),
 }).omit({ id: true, createdAt: true });

@@ -429,7 +429,6 @@ export default function ChatPage() {
     if (callMessage.toUserId !== '1') return; // Not for current user
     
     // Ring notification (already handled by offer)
-    console.log('Ring from:', callMessage.fromUserId);
   }, []);
 
   const handleCallHangup = useCallback((callMessage: any) => {
@@ -1523,7 +1522,6 @@ export default function ChatPage() {
       toUserId: incomingCall.remoteUserId
     };
     
-    console.log('Sending call reject:', callMessage);
     setIncomingCall(null);
   }
 
@@ -1539,8 +1537,6 @@ export default function ChatPage() {
         toUserId: activeCall.remoteUserId
       };
       
-      console.log('Sending call hangup:', callMessage);
-
       // Clean up peer
       if (activeCall.peer) {
         activeCall.peer.destroy();

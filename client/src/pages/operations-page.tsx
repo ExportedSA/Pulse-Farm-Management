@@ -135,7 +135,7 @@ export default function OperationsPage() {
             });
           });
         }
-      } catch (e) { console.log('Visitor feed unavailable'); }
+      } catch { /* Visitor feed unavailable */ }
 
       // Fetch recent jobs
       try {
@@ -154,7 +154,7 @@ export default function OperationsPage() {
             });
           });
         }
-      } catch (e) { console.log('Jobs feed unavailable'); }
+      } catch { /* Jobs feed unavailable */ }
 
       // Fetch recent vehicle inspections
       try {
@@ -173,7 +173,7 @@ export default function OperationsPage() {
             });
           });
         }
-      } catch (e) { console.log('Vehicle feed unavailable'); }
+      } catch { /* Vehicle feed unavailable */ }
 
       // Sort by timestamp and take most recent
       activities.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
