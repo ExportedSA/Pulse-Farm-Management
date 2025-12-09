@@ -12,61 +12,197 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, AlertTriangle, ArrowRight, Download, X, Loader2 } from "lucide-react";
 
-// Comprehensive Minda field mappings
+// Comprehensive Minda field mappings - supports both simple and prefixed column names
 const MINDA_MAPPINGS: Record<string, string> = {
-  'Animal ID': 'cowId', 'AnimalID': 'cowId', 'Cow ID': 'cowId', 'Visual ID': 'visualId', 'VID': 'visualId',
-  'Lifetime ID': 'lifetimeId', 'LID': 'lifetimeId', 'NAIT Number': 'naitTag', 'NAIT': 'naitTag', 'EID': 'eid',
-  'Birth ID': 'birthId', 'Name': 'name', 'Sex': 'sex', 'Gender': 'sex', 'Breed': 'breed', 'Colour': 'color',
-  'Date of Birth': 'dateOfBirth', 'DOB': 'dateOfBirth', 'Birth Date': 'dateOfBirth',
-  'Date Entered Herd': 'purchaseDate', 'Status': 'status', 'Dam ID': 'damId', 'Dam': 'damId',
-  'Sire ID': 'sireId', 'Sire': 'sireId', 'Sire Code': 'sireCode', 'Sire Name': 'sireName',
-  'BW': 'breedingWorth', 'Breeding Worth': 'breedingWorth', 'PW': 'productionWorth', 'Production Worth': 'productionWorth',
-  'LW': 'lactationWorth', 'Reliability': 'reliability', 'Milk BV': 'milkBV', 'Fat BV': 'fatBV', 'Protein BV': 'proteinBV',
-  'Fertility BV': 'fertilityBV', 'SCC BV': 'sccBV', 'TOP': 'topIndex',
-  'Mating Date': 'lastMatingDate', 'Last Mating': 'lastMatingDate', 'Mating Sire': 'matingSire',
-  'Due Date': 'dueDate', 'Expected Calving': 'dueDate', 'In Calf': 'inCalf', 'Pregnancy Status': 'pregnancyStatus',
-  'Lactation Number': 'lactationNumber', 'Parity': 'lactationNumber', 'Calving Ease': 'calvingEase',
-  'Dry Off Date': 'dryOffDate', 'Milk kgMS': 'milkKgMS', 'Milk Solids': 'milkKgMS',
-  'Fat kg': 'fatKg', 'Protein kg': 'proteinKg', 'Fat %': 'fatPercent', 'Protein %': 'proteinPercent',
-  'Days in Milk': 'daysInMilk', 'DIM': 'daysInMilk', 'Peak Milk': 'peakMilk',
-  'SCC': 'somaticCellCount', 'Somatic Cell Count': 'somaticCellCount', 'Cell Count': 'somaticCellCount',
-  'BCS': 'bodyConditionScore', 'Body Condition': 'bodyConditionScore', 'Mastitis Count': 'mastitisCount',
-  'Lameness Score': 'lamenessScore', 'Live Weight': 'liveWeight', 'Liveweight': 'liveWeight', 'Weight': 'liveWeight',
+  // Animal identification
+  'Animal ID': 'cowId', 'AnimalID': 'cowId', 'Cow ID': 'cowId', 'Animal-Animal ID': 'cowId',
+  'Visual ID': 'visualId', 'VID': 'visualId', 'Animal-Management Number': 'visualId',
+  'Lifetime ID': 'lifetimeId', 'LID': 'lifetimeId', 'Animal-Official ID': 'lifetimeId',
+  'NAIT Number': 'naitTag', 'NAIT': 'naitTag', 'Animal-NAIT Number': 'naitTag',
+  'EID': 'eid', 'Animal-EID': 'eid',
+  'Birth ID': 'birthId', 'Animal-Birth ID': 'birthId',
+  'Name': 'name', 'Animal-Name': 'name',
+  // Basic info
+  'Sex': 'sex', 'Gender': 'sex', 'Animal-Sex': 'sex',
+  'Breed': 'breed', 'Animal-Breed': 'breed',
+  'Colour': 'color', 'Color': 'color',
+  'Date of Birth': 'dateOfBirth', 'DOB': 'dateOfBirth', 'Birth Date': 'dateOfBirth', 'Animal-Birth Date': 'dateOfBirth',
+  'Date Entered Herd': 'purchaseDate', 'Animal-Start Date': 'purchaseDate',
+  'Status': 'status', 'Animal-Milk Status': 'milkStatus',
+  'Animal-A2 Status': 'a2Status', 'Animal-Age (Years)': 'ageYears',
+  'Animal-BVD Status': 'bvdStatus', 'Animal-BVD Test Date': 'bvdTestDate',
+  'Animal-DNA Profile': 'dnaProfile', 'Animal-Pedigree Indicator': 'pedigreeIndicator',
+  'Animal-Removal Fate': 'removalFate', 'Animal-Removal Reason': 'removalReason',
+  'Animal-Date Removed': 'dateRemoved', 'Animal-Year Born': 'yearBorn',
+  // Dam info
+  'Dam ID': 'damId', 'Dam': 'damId', 'Dam-Official ID': 'damId',
+  'Dam-Breed': 'damBreed', 'Dam-Management Number': 'damManagementNumber',
+  'Dam-Dam BW-Value': 'damBW', 'Dam-Dam PW-Value': 'damPW', 'Dam-Dam LW-Value': 'damLW',
+  // Sire info
+  'Sire ID': 'sireId', 'Sire': 'sireId', 'Sire-Sire ID': 'sireId',
+  'Sire Code': 'sireCode', 'Sire Name': 'sireName', 'Sire-Name': 'sireName',
+  'Sire-Breed': 'sireBreed', 'Sire-Sire BW-Value': 'sireBW', 'Sire-Sire Parentage': 'sireParentage',
+  // Breeding values
+  'BW': 'breedingWorth', 'Breeding Worth': 'breedingWorth', 'Animal-BW-Value': 'breedingWorth',
+  'Animal-BW-Reliability': 'bwReliability',
+  'PW': 'productionWorth', 'Production Worth': 'productionWorth', 'Animal-PW-Value': 'productionWorth',
+  'Animal-PW-Reliability': 'pwReliability',
+  'LW': 'lactationWorth', 'Animal-LW': 'lactationWorth',
+  'Reliability': 'reliability',
+  // Detailed breeding values
+  'Breeding Values-Fat (kg)-Value': 'fatBV', 'Breeding Values-Fat (kg)-Reliability': 'fatBVReliability',
+  'Breeding Values-Protein (kg)-Value': 'proteinBV', 'Breeding Values-Protein (kg)-Reliability': 'proteinBVReliability',
+  'Breeding Values-Milk (ltr)-Value': 'milkBV', 'Breeding Values-Milk (ltr)-Reliability': 'milkBVReliability',
+  'Breeding Values-Fertility (%)-Value': 'fertilityBV', 'Breeding Values-Fertility (%)-Reliability': 'fertilityBVReliability',
+  'Breeding Values-Somatic Cell-Value': 'sccBV', 'Breeding Values-Somatic Cell-Reliability': 'sccBVReliability',
+  'Breeding Values-Liveweight (kg)-Value': 'liveweightBV', 'Breeding Values-Liveweight (kg)-Reliability': 'liveweightBVReliability',
+  'Breeding Values-Functional Survival (%)-Value': 'survivalBV', 'Breeding Values-Functional Survival (%)-Reliability': 'survivalBVReliability',
+  'Breeding Values-Gestation Length (days)-Value': 'gestationBV', 'Breeding Values-Gestation Length (days)-Reliability': 'gestationBVReliability',
+  'Breeding Values-Calving Difficulty-Value': 'calvingDifficultyBV', 'Breeding Values-Calving Difficulty-Reliability': 'calvingDifficultyBVReliability',
+  'Breeding Values-Body Condition Score-Value': 'bcsBV', 'Breeding Values-Body Condition Score-Reliability': 'bcsBVReliability',
+  'Breeding Values-Stature-Value': 'statureBV', 'Breeding Values-Capacity-Value': 'capacityBV',
+  'Breeding Values-Rump angle-Value': 'rumpAngleBV', 'Breeding Values-Rump width-Value': 'rumpWidthBV',
+  'Breeding Values-Rear leg set-Value': 'rearLegBV', 'Breeding Values-Udder Overall-Value': 'udderOverallBV',
+  'Breeding Values-Udder support-Value': 'udderSupportBV', 'Breeding Values-Fore udder-Value': 'foreUdderBV',
+  'Breeding Values-Rear udder-Value': 'rearUdderBV', 'Breeding Values-Front teat placement-Value': 'frontTeatBV',
+  'Breeding Values-Rear teat placement-Value': 'rearTeatBV', 'Breeding Values-Teat Length-Value': 'teatLengthBV',
+  'Breeding Values-Dairy conformation-Value': 'dairyConformationBV',
+  'Breeding Values-Milking speed-Value': 'milkingSpeedBV', 'Breeding Values-Adaptability to milking-Value': 'adaptabilityBV',
+  'Breeding Values-Shed temperament-Value': 'temperamentBV', 'Breeding Values-Overall opinion-Value': 'overallOpinionBV',
+  // Reproduction / Mating
+  'Mating Date': 'lastMatingDate', 'Last Mating': 'lastMatingDate', 'Mating-Mating Date': 'lastMatingDate',
+  'Mating Sire': 'matingSire', 'Mating-Sire ID': 'matingSire',
+  'Due Date': 'dueDate', 'Expected Calving': 'dueDate', 'Pre-Calving-Expected Calving Date': 'dueDate',
+  'In Calf': 'inCalf', 'Pregnancy Status': 'pregnancyStatus', 'Mating-Pregnancy Diagnosis': 'pregnancyStatus',
+  'Mating-Days Pregnant': 'daysPregnant', 'Mating-Expected Mating Date': 'expectedMatingDate',
+  'Mating-Heat Date': 'heatDate', 'Mating-Mating Type': 'matingType',
+  'Mating-Non-Cycling': 'nonCycling', 'Mating-At Risk Cow': 'atRiskCow',
+  'Mating-Charge Type': 'chargeType', 'Mating-Foetal Count': 'foetalCount',
+  'Lactation Number': 'lactationNumber', 'Parity': 'lactationNumber',
+  'Calving Ease': 'calvingEase', 'Calf-Assistance Level': 'calvingAssistance',
+  'Dry Off Date': 'dryOffDate', 'Lactation-Dry Off Date': 'dryOffDate',
+  'Animal-Calving Date': 'calvingDate',
+  // Calf info
+  'Calf-Birth ID': 'calfBirthId', 'Calf-Birth Date': 'calfBirthDate', 'Calf-Sex': 'calfSex',
+  'Calf-Breed': 'calfBreed', 'Calf-BW-Value': 'calfBW', 'Calf-Calf Fate': 'calfFate',
+  'Calf-Calving Comments': 'calvingComments', 'Calf-Termination Reason': 'calfTerminationReason',
+  // Pre-calving
+  'Pre-Calving-Expected Calf BW-Value': 'expectedCalfBW', 'Pre-Calving-Expected Calf Sire ID': 'expectedCalfSireId',
+  // Lactation / Production
+  'Milk kgMS': 'milkKgMS', 'Milk Solids': 'milkKgMS', 'Lactation-Solids (kg)': 'milkKgMS',
+  'Fat kg': 'fatKg', 'Lactation-Fat (kg)': 'fatKg',
+  'Protein kg': 'proteinKg', 'Lactation-Prt (kg)': 'proteinKg',
+  'Fat %': 'fatPercent', 'Lactation-Fat (%)': 'fatPercent',
+  'Protein %': 'proteinPercent', 'Lactation-Prt (%)': 'proteinPercent',
+  'Days in Milk': 'daysInMilk', 'DIM': 'daysInMilk', 'Lactation-Days in Milk': 'daysInMilk',
+  'Lactation-Milk (l)': 'milkLitres', 'Lactation-Start Date': 'lactationStartDate',
+  'Lactation-Days Lactating': 'daysLactating',
+  // Herd test results
+  'Herd Test Results-Date': 'herdTestDate', 'Herd Test Results-Milk Total (l)': 'herdTestMilk',
+  'Herd Test Results-Fat (%)': 'herdTestFatPercent', 'Herd Test Results-Fat (kg)': 'herdTestFatKg',
+  'Herd Test Results-Protein (%)': 'herdTestProteinPercent', 'Herd Test Results-Protein (kg)': 'herdTestProteinKg',
+  'Herd Test Results-Milk Solids (kg)': 'herdTestMS', 'Herd Test Results-SCC (000)': 'herdTestSCC',
+  'Herd Test Results-Assessment': 'herdTestAssessment', 'Herd Test Results-Abnormal Code': 'herdTestAbnormalCode',
+  // Health
+  'SCC': 'somaticCellCount', 'Somatic Cell Count': 'somaticCellCount',
+  'BCS': 'bodyConditionScore', 'Body Condition': 'bodyConditionScore', 'Animal-BCS': 'bodyConditionScore',
+  'Animal-BCS Date': 'bcsDate',
+  'Mastitis Count': 'mastitisCount', 'Health-Mastitis Cases': 'mastitisCount',
+  'Lameness Score': 'lamenessScore', 'Health-Lameness Cases': 'lamenessCount',
+  'Health-Condition': 'healthCondition', 'Health-Condition Category': 'healthConditionCategory',
+  'Health-Event Date': 'healthEventDate', 'Health-Date Separated': 'healthDateSeparated',
+  'Health-Treatment': 'healthTreatment', 'Health-Product Category': 'healthProductCategory',
+  'Health-Dose Amount': 'healthDoseAmount', 'Health-Dose Unit': 'healthDoseUnit',
+  'Health-No. of Doses': 'healthDoseCount', 'Health-Quarters': 'healthQuarters',
+  'Health-Meat W/H days': 'meatWithholdDays', 'Health-Milk W/H hours': 'milkWithholdHours',
+  'Health-RTV': 'healthRTV', 'Health-Last Treatment Date': 'lastTreatmentDate',
+  'Health-Vet Name': 'vetName',
+  // Weight
+  'Live Weight': 'liveWeight', 'Liveweight': 'liveWeight', 'Weight': 'liveWeight',
+  'Animal-Liveweight': 'liveWeight', 'Animal-Liveweight Aggregated': 'liveWeightAggregated',
+  'Animal-Liveweight Date': 'liveWeightDate',
   'Birth Weight': 'birthWeight', 'Weaning Weight': 'weaningWeight', 'ADG': 'averageDailyGain',
-  'Mob': 'currentMob', 'Current Mob': 'currentMob', 'Paddock': 'currentPaddock',
-  'Purchase Price': 'purchasePrice', 'Notes': 'notes', 'Comments': 'notes',
-  'Friesian %': 'friesianPercent', 'Jersey %': 'jerseyPercent', 'Dam Breed': 'damBreed', 'Sire Breed': 'sireBreed',
+  // Location
+  'Mob': 'currentMob', 'Current Mob': 'currentMob', 'Animal-NAIT Description': 'naitDescription',
+  'Paddock': 'currentPaddock',
+  // Financial
+  'Purchase Price': 'purchasePrice',
+  // Other
+  'Notes': 'notes', 'Comments': 'notes',
+  'Friesian %': 'friesianPercent', 'Jersey %': 'jerseyPercent',
+  'Animal-AHB ID': 'ahbId',
 };
 
 const PULSE_FIELDS = [
+  // Identification
   { key: 'cowId', label: 'Cow ID', cat: 'ID' }, { key: 'visualId', label: 'Visual ID', cat: 'ID' },
   { key: 'lifetimeId', label: 'Lifetime ID', cat: 'ID' }, { key: 'naitTag', label: 'NAIT Tag', cat: 'ID' },
   { key: 'eid', label: 'EID', cat: 'ID' }, { key: 'birthId', label: 'Birth ID', cat: 'ID' },
+  { key: 'ahbId', label: 'AHB ID', cat: 'ID' },
+  // Basic info
   { key: 'name', label: 'Name', cat: 'Basic' }, { key: 'sex', label: 'Sex', cat: 'Basic', required: true },
   { key: 'breed', label: 'Breed', cat: 'Basic' }, { key: 'color', label: 'Color', cat: 'Basic' },
-  { key: 'dateOfBirth', label: 'Date of Birth', cat: 'Basic' }, { key: 'purchaseDate', label: 'Purchase Date', cat: 'Basic' },
-  { key: 'status', label: 'Status', cat: 'Basic' }, { key: 'damId', label: 'Dam ID', cat: 'Genetics' },
-  { key: 'sireId', label: 'Sire ID', cat: 'Genetics' }, { key: 'sireCode', label: 'Sire Code', cat: 'Genetics' },
-  { key: 'sireName', label: 'Sire Name', cat: 'Genetics' }, { key: 'damBreed', label: 'Dam Breed', cat: 'Genetics' },
-  { key: 'sireBreed', label: 'Sire Breed', cat: 'Genetics' }, { key: 'friesianPercent', label: 'Friesian %', cat: 'Genetics' },
-  { key: 'jerseyPercent', label: 'Jersey %', cat: 'Genetics' },
-  { key: 'breedingWorth', label: 'BW', cat: 'BV' }, { key: 'productionWorth', label: 'PW', cat: 'BV' },
-  { key: 'lactationWorth', label: 'LW', cat: 'BV' }, { key: 'reliability', label: 'Reliability', cat: 'BV' },
+  { key: 'dateOfBirth', label: 'Date of Birth', cat: 'Basic' }, { key: 'yearBorn', label: 'Year Born', cat: 'Basic' },
+  { key: 'ageYears', label: 'Age (Years)', cat: 'Basic' },
+  { key: 'purchaseDate', label: 'Start Date', cat: 'Basic' }, { key: 'dateRemoved', label: 'Date Removed', cat: 'Basic' },
+  { key: 'milkStatus', label: 'Milk Status', cat: 'Basic' }, { key: 'a2Status', label: 'A2 Status', cat: 'Basic' },
+  { key: 'bvdStatus', label: 'BVD Status', cat: 'Basic' }, { key: 'dnaProfile', label: 'DNA Profile', cat: 'Basic' },
+  { key: 'removalFate', label: 'Removal Fate', cat: 'Basic' }, { key: 'removalReason', label: 'Removal Reason', cat: 'Basic' },
+  // Genetics / Parentage
+  { key: 'damId', label: 'Dam ID', cat: 'Genetics' }, { key: 'damBreed', label: 'Dam Breed', cat: 'Genetics' },
+  { key: 'damManagementNumber', label: 'Dam Mgmt #', cat: 'Genetics' },
+  { key: 'damBW', label: 'Dam BW', cat: 'Genetics' }, { key: 'damPW', label: 'Dam PW', cat: 'Genetics' },
+  { key: 'sireId', label: 'Sire ID', cat: 'Genetics' }, { key: 'sireName', label: 'Sire Name', cat: 'Genetics' },
+  { key: 'sireBreed', label: 'Sire Breed', cat: 'Genetics' }, { key: 'sireBW', label: 'Sire BW', cat: 'Genetics' },
+  // Breeding Values
+  { key: 'breedingWorth', label: 'BW', cat: 'BV' }, { key: 'bwReliability', label: 'BW Rel', cat: 'BV' },
+  { key: 'productionWorth', label: 'PW', cat: 'BV' }, { key: 'pwReliability', label: 'PW Rel', cat: 'BV' },
+  { key: 'lactationWorth', label: 'LW', cat: 'BV' },
   { key: 'milkBV', label: 'Milk BV', cat: 'BV' }, { key: 'fatBV', label: 'Fat BV', cat: 'BV' },
   { key: 'proteinBV', label: 'Protein BV', cat: 'BV' }, { key: 'fertilityBV', label: 'Fertility BV', cat: 'BV' },
+  { key: 'sccBV', label: 'SCC BV', cat: 'BV' }, { key: 'liveweightBV', label: 'Liveweight BV', cat: 'BV' },
+  { key: 'survivalBV', label: 'Survival BV', cat: 'BV' }, { key: 'gestationBV', label: 'Gestation BV', cat: 'BV' },
+  { key: 'calvingDifficultyBV', label: 'Calving Diff BV', cat: 'BV' }, { key: 'bcsBV', label: 'BCS BV', cat: 'BV' },
+  // Reproduction / Mating
   { key: 'lastMatingDate', label: 'Mating Date', cat: 'Repro' }, { key: 'matingSire', label: 'Mating Sire', cat: 'Repro' },
-  { key: 'dueDate', label: 'Due Date', cat: 'Repro' }, { key: 'inCalf', label: 'In Calf', cat: 'Repro' },
-  { key: 'pregnancyStatus', label: 'Pregnancy Status', cat: 'Repro' }, { key: 'lactationNumber', label: 'Lactation #', cat: 'Repro' },
-  { key: 'calvingEase', label: 'Calving Ease', cat: 'Repro' }, { key: 'dryOffDate', label: 'Dry Off Date', cat: 'Repro' },
-  { key: 'milkKgMS', label: 'Milk kgMS', cat: 'Prod' }, { key: 'fatKg', label: 'Fat kg', cat: 'Prod' },
-  { key: 'proteinKg', label: 'Protein kg', cat: 'Prod' }, { key: 'fatPercent', label: 'Fat %', cat: 'Prod' },
-  { key: 'proteinPercent', label: 'Protein %', cat: 'Prod' }, { key: 'daysInMilk', label: 'Days in Milk', cat: 'Prod' },
-  { key: 'somaticCellCount', label: 'SCC', cat: 'Health' }, { key: 'bodyConditionScore', label: 'BCS', cat: 'Health' },
-  { key: 'mastitisCount', label: 'Mastitis Count', cat: 'Health' }, { key: 'lamenessScore', label: 'Lameness', cat: 'Health' },
-  { key: 'liveWeight', label: 'Live Weight', cat: 'Weight' }, { key: 'birthWeight', label: 'Birth Weight', cat: 'Weight' },
-  { key: 'weaningWeight', label: 'Weaning Weight', cat: 'Weight' }, { key: 'averageDailyGain', label: 'ADG', cat: 'Weight' },
-  { key: 'currentMob', label: 'Current Mob', cat: 'Location' }, { key: 'currentPaddock', label: 'Paddock', cat: 'Location' },
-  { key: 'purchasePrice', label: 'Purchase Price', cat: 'Financial' }, { key: 'notes', label: 'Notes', cat: 'Other' },
+  { key: 'matingType', label: 'Mating Type', cat: 'Repro' }, { key: 'heatDate', label: 'Heat Date', cat: 'Repro' },
+  { key: 'dueDate', label: 'Due Date', cat: 'Repro' }, { key: 'daysPregnant', label: 'Days Pregnant', cat: 'Repro' },
+  { key: 'pregnancyStatus', label: 'Pregnancy Status', cat: 'Repro' }, { key: 'foetalCount', label: 'Foetal Count', cat: 'Repro' },
+  { key: 'calvingDate', label: 'Calving Date', cat: 'Repro' }, { key: 'calvingAssistance', label: 'Calving Assist', cat: 'Repro' },
+  { key: 'lactationNumber', label: 'Lactation #', cat: 'Repro' }, { key: 'dryOffDate', label: 'Dry Off Date', cat: 'Repro' },
+  { key: 'atRiskCow', label: 'At Risk', cat: 'Repro' }, { key: 'nonCycling', label: 'Non-Cycling', cat: 'Repro' },
+  // Calf info
+  { key: 'calfBirthId', label: 'Calf Birth ID', cat: 'Calf' }, { key: 'calfBirthDate', label: 'Calf Birth Date', cat: 'Calf' },
+  { key: 'calfSex', label: 'Calf Sex', cat: 'Calf' }, { key: 'calfBreed', label: 'Calf Breed', cat: 'Calf' },
+  { key: 'calfBW', label: 'Calf BW', cat: 'Calf' }, { key: 'calfFate', label: 'Calf Fate', cat: 'Calf' },
+  // Production / Lactation
+  { key: 'milkKgMS', label: 'Milk kgMS', cat: 'Prod' }, { key: 'milkLitres', label: 'Milk (L)', cat: 'Prod' },
+  { key: 'fatKg', label: 'Fat kg', cat: 'Prod' }, { key: 'fatPercent', label: 'Fat %', cat: 'Prod' },
+  { key: 'proteinKg', label: 'Protein kg', cat: 'Prod' }, { key: 'proteinPercent', label: 'Protein %', cat: 'Prod' },
+  { key: 'daysInMilk', label: 'Days in Milk', cat: 'Prod' }, { key: 'daysLactating', label: 'Days Lactating', cat: 'Prod' },
+  { key: 'lactationStartDate', label: 'Lactation Start', cat: 'Prod' },
+  // Herd Test
+  { key: 'herdTestDate', label: 'Herd Test Date', cat: 'Test' }, { key: 'herdTestMilk', label: 'Test Milk (L)', cat: 'Test' },
+  { key: 'herdTestMS', label: 'Test MS (kg)', cat: 'Test' }, { key: 'herdTestSCC', label: 'Test SCC', cat: 'Test' },
+  { key: 'herdTestFatPercent', label: 'Test Fat %', cat: 'Test' }, { key: 'herdTestProteinPercent', label: 'Test Prt %', cat: 'Test' },
+  // Health
+  { key: 'bodyConditionScore', label: 'BCS', cat: 'Health' }, { key: 'bcsDate', label: 'BCS Date', cat: 'Health' },
+  { key: 'somaticCellCount', label: 'SCC', cat: 'Health' },
+  { key: 'mastitisCount', label: 'Mastitis Cases', cat: 'Health' }, { key: 'lamenessCount', label: 'Lameness Cases', cat: 'Health' },
+  { key: 'healthCondition', label: 'Condition', cat: 'Health' }, { key: 'healthConditionCategory', label: 'Condition Cat', cat: 'Health' },
+  { key: 'healthTreatment', label: 'Treatment', cat: 'Health' }, { key: 'healthEventDate', label: 'Event Date', cat: 'Health' },
+  { key: 'healthDoseAmount', label: 'Dose Amount', cat: 'Health' }, { key: 'healthDoseUnit', label: 'Dose Unit', cat: 'Health' },
+  { key: 'meatWithholdDays', label: 'Meat W/H Days', cat: 'Health' }, { key: 'milkWithholdHours', label: 'Milk W/H Hrs', cat: 'Health' },
+  { key: 'vetName', label: 'Vet Name', cat: 'Health' },
+  // Weight
+  { key: 'liveWeight', label: 'Live Weight', cat: 'Weight' }, { key: 'liveWeightDate', label: 'Weight Date', cat: 'Weight' },
+  { key: 'birthWeight', label: 'Birth Weight', cat: 'Weight' }, { key: 'weaningWeight', label: 'Weaning Weight', cat: 'Weight' },
+  // Location
+  { key: 'naitDescription', label: 'NAIT Location', cat: 'Location' }, { key: 'currentPaddock', label: 'Paddock', cat: 'Location' },
+  // Financial
+  { key: 'purchasePrice', label: 'Purchase Price', cat: 'Financial' },
+  // Other
+  { key: 'notes', label: 'Notes', cat: 'Other' },
 ];
 
 function parseCSV(text: string) {
@@ -80,18 +216,54 @@ function parseCSV(text: string) {
   return { headers: parse(lines[0]), rows: lines.slice(1).map(parse).filter(r => r.some(c => c)) };
 }
 
+const MONTHS: Record<string, string> = {
+  'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04', 'may': '05', 'jun': '06',
+  'jul': '07', 'aug': '08', 'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12'
+};
+
 function normalizeValue(val: string, key: string): any {
   if (!val?.trim()) return null;
   const v = val.trim(), l = v.toLowerCase();
   if (key === 'sex') return ['f','female','cow','heifer'].includes(l) ? 'female' : ['m','male','bull','steer'].includes(l) ? 'male' : v;
-  if (key === 'status') return ['active','alive','present'].includes(l) ? 'active' : ['sold','gone'].includes(l) ? 'sold' : ['dead','deceased'].includes(l) ? 'deceased' : 'active';
-  if (key === 'inCalf') return ['yes','y','1','true'].includes(l);
-  if (key.includes('Date') || key === 'dateOfBirth' || key === 'dueDate') {
-    const m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
-    return v.match(/^\d{4}-\d{2}-\d{2}$/) ? v : null;
+  if (key === 'status' || key === 'milkStatus') {
+    if (['active','alive','present','in milk','in-milk'].includes(l)) return 'active';
+    if (['sold','gone'].includes(l)) return 'sold';
+    if (['dead','deceased'].includes(l)) return 'deceased';
+    if (['dry','dried off'].includes(l)) return 'dry';
+    return v;
   }
-  const nums = ['breedingWorth','productionWorth','lactationWorth','reliability','milkBV','fatBV','proteinBV','milkKgMS','fatKg','proteinKg','fatPercent','proteinPercent','somaticCellCount','bodyConditionScore','liveWeight','birthWeight','lactationNumber','friesianPercent','jerseyPercent','purchasePrice'];
+  if (key === 'inCalf' || key === 'atRiskCow' || key === 'nonCycling') return ['yes','y','1','true'].includes(l);
+  // Date parsing - multiple formats
+  if (key.includes('Date') || key === 'dateOfBirth' || key === 'dueDate' || key === 'calvingDate' || key === 'heatDate') {
+    // DD/MM/YYYY format
+    let m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+    // DD Mon YYYY format (e.g., "31 Jul 2019")
+    m = v.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
+    if (m) {
+      const month = MONTHS[m[2].toLowerCase()];
+      if (month) return `${m[3]}-${month}-${m[1].padStart(2,'0')}`;
+    }
+    // YYYY-MM-DD format (already correct)
+    if (v.match(/^\d{4}-\d{2}-\d{2}$/)) return v;
+    return null;
+  }
+  // Numeric fields
+  const nums = [
+    'breedingWorth','productionWorth','lactationWorth','reliability','bwReliability','pwReliability',
+    'milkBV','fatBV','proteinBV','fertilityBV','sccBV','liveweightBV','survivalBV','gestationBV',
+    'calvingDifficultyBV','bcsBV','statureBV','capacityBV','rumpAngleBV','rumpWidthBV','rearLegBV',
+    'udderOverallBV','udderSupportBV','foreUdderBV','rearUdderBV','frontTeatBV','rearTeatBV','teatLengthBV',
+    'dairyConformationBV','milkingSpeedBV','adaptabilityBV','temperamentBV','overallOpinionBV',
+    'damBW','damPW','damLW','sireBW','calfBW','expectedCalfBW',
+    'milkKgMS','fatKg','proteinKg','fatPercent','proteinPercent','milkLitres',
+    'herdTestMilk','herdTestFatPercent','herdTestFatKg','herdTestProteinPercent','herdTestProteinKg','herdTestMS','herdTestSCC',
+    'somaticCellCount','bodyConditionScore','mastitisCount','lamenessCount',
+    'healthDoseAmount','healthDoseCount','meatWithholdDays','milkWithholdHours',
+    'liveWeight','liveWeightAggregated','birthWeight','weaningWeight','averageDailyGain',
+    'lactationNumber','daysInMilk','daysLactating','daysPregnant','foetalCount','ageYears',
+    'friesianPercent','jerseyPercent','purchasePrice'
+  ];
   if (nums.includes(key)) { const n = parseFloat(v.replace(/[$,]/g,'')); return isNaN(n) ? null : n; }
   return v;
 }
