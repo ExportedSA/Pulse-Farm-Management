@@ -168,15 +168,36 @@ export const animals = pgTable('animals', {
   eid: varchar('eid', { length: 50 }).unique(), // Electronic ID for RFID tags
   cowId: varchar('cow_id', { length: 50 }).unique(), // Legacy Visual ID field
   birthId: jsonb('birth_id').$type<{ participantCode: string; year: string; number: string }>(),
+  ahbId: varchar('ahb_id', { length: 50 }), // Animal Health Board ID
+  name: varchar('name', { length: 100 }), // Animal name
   breed: varchar('breed', { length: 100 }),
   dateOfBirth: varchar('date_of_birth', { length: 10 }),
+  yearBorn: integer('year_born'),
   sex: animalSexEnum('sex'),
   herd: varchar('herd', { length: 100 }),
   currentPastureId: uuid('current_pasture_id').references(() => pastures.id),
   status: animalStatusEnum('status').default('active').notNull(),
-  bodyConditionScore: integer('body_condition_score'),
+  // Minda status fields
+  milkStatus: varchar('milk_status', { length: 50 }), // In Milk, Dry, etc.
+  a2Status: varchar('a2_status', { length: 20 }), // A2/A2, A1/A2, etc.
+  bvdStatus: varchar('bvd_status', { length: 50 }), // BVD test status
+  bvdTestDate: date('bvd_test_date'),
+  dnaProfile: varchar('dna_profile', { length: 20 }), // GEv, G3, etc.
+  pedigreeIndicator: varchar('pedigree_indicator', { length: 20 }),
+  // Removal info
+  dateRemoved: date('date_removed'),
+  removalFate: varchar('removal_fate', { length: 50 }), // Sold, Died, etc.
+  removalReason: varchar('removal_reason', { length: 100 }),
+  startDate: date('start_date'), // Date entered herd
+  // Health scores
+  bodyConditionScore: numeric('body_condition_score', { precision: 3, scale: 1 }),
+  bcsDate: date('bcs_date'),
+  liveWeight: numeric('live_weight', { precision: 6, scale: 1 }),
+  liveWeightDate: date('live_weight_date'),
   photoUrl: text('photo_url'),
   notes: text('notes'),
+  // NAIT location
+  naitDescription: varchar('nait_description', { length: 100 }), // e.g., "Hinterlands"
   // Lineage tracking
   damId: uuid('dam_id'), // Mother - self-reference handled at app level
   sireId: uuid('sire_id'), // Father - self-reference handled at app level  
@@ -186,11 +207,118 @@ export const animals = pgTable('animals', {
     registrationNumber?: string;
     externalId?: string; // For AI sires not in system
   }>(),
+  // Dam info from Minda
+  damInfo: jsonb('dam_info').$type<{
+    officialId?: string;
+    breed?: string;
+    managementNumber?: string;
+    bw?: number;
+    pw?: number;
+    lw?: number;
+  }>(),
+  // Breeding Values (BW, PW, LW with reliability)
+  breedingValues: jsonb('breeding_values').$type<{
+    bw?: number; bwReliability?: number;
+    pw?: number; pwReliability?: number;
+    lw?: number;
+    // Production BVs
+    milkBV?: number; milkBVReliability?: number;
+    fatBV?: number; fatBVReliability?: number;
+    proteinBV?: number; proteinBVReliability?: number;
+    // Functional BVs
+    fertilityBV?: number; fertilityBVReliability?: number;
+    sccBV?: number; sccBVReliability?: number;
+    liveweightBV?: number; liveweightBVReliability?: number;
+    survivalBV?: number; survivalBVReliability?: number;
+    gestationBV?: number; gestationBVReliability?: number;
+    calvingDifficultyBV?: number; calvingDifficultyBVReliability?: number;
+    bcsBV?: number; bcsBVReliability?: number;
+    // Conformation BVs
+    statureBV?: number; capacityBV?: number;
+    rumpAngleBV?: number; rumpWidthBV?: number;
+    rearLegBV?: number;
+    // Udder BVs
+    udderOverallBV?: number; udderSupportBV?: number;
+    foreUdderBV?: number; rearUdderBV?: number;
+    frontTeatBV?: number; rearTeatBV?: number; teatLengthBV?: number;
+    // Workability BVs
+    dairyConformationBV?: number;
+    milkingSpeedBV?: number; adaptabilityBV?: number;
+    temperamentBV?: number; overallOpinionBV?: number;
+  }>(),
   geneticInfo: jsonb('genetic_info').$type<{
     breedingValue?: number;
     inbreedingCoefficient?: number;
     geneticMerit?: string;
     dnaTestResults?: Record<string, any>;
+  }>(),
+  // Current lactation summary
+  lactationInfo: jsonb('lactation_info').$type<{
+    lactationNumber?: number;
+    lactationStartDate?: string;
+    daysInMilk?: number;
+    daysLactating?: number;
+    milkKgMS?: number;
+    milkLitres?: number;
+    fatKg?: number; fatPercent?: number;
+    proteinKg?: number; proteinPercent?: number;
+    dryOffDate?: string;
+  }>(),
+  // Current reproduction status
+  reproductionStatus: jsonb('reproduction_status').$type<{
+    lastMatingDate?: string;
+    matingType?: string;
+    matingSire?: string;
+    heatDate?: string;
+    daysPregnant?: number;
+    pregnancyStatus?: string; // Confirmed, Nominated, etc.
+    dueDate?: string;
+    foetalCount?: number;
+    atRiskCow?: boolean;
+    nonCycling?: boolean;
+    calvingDate?: string;
+    calvingAssistance?: string;
+  }>(),
+  // Last calf info
+  lastCalfInfo: jsonb('last_calf_info').$type<{
+    calfBirthId?: string;
+    calfBirthDate?: string;
+    calfSex?: string;
+    calfBreed?: string;
+    calfBW?: number;
+    calfFate?: string;
+  }>(),
+  // Latest herd test results
+  latestHerdTest: jsonb('latest_herd_test').$type<{
+    testDate?: string;
+    milkTotal?: number;
+    fatPercent?: number; fatKg?: number;
+    proteinPercent?: number; proteinKg?: number;
+    milkSolidsKg?: number;
+    scc?: number;
+    assessment?: string;
+    abnormalCode?: string;
+  }>(),
+  // Health summary
+  healthSummary: jsonb('health_summary').$type<{
+    mastitisCount?: number;
+    lamenessCount?: number;
+    lastCondition?: string;
+    lastConditionCategory?: string;
+    lastTreatment?: string;
+    lastTreatmentDate?: string;
+    lastHealthEventDate?: string;
+    meatWithholdDays?: number;
+    milkWithholdHours?: number;
+    vetName?: string;
+  }>(),
+  // Pre-calving info (for pregnant cows)
+  preCalvingInfo: jsonb('pre_calving_info').$type<{
+    expectedCalfBW?: number;
+    expectedCalfSireId?: string;
+    expectedCalfSireBreed?: string;
+    expectedCalfSireName?: string;
+    expectedCalfSireBW?: number;
   }>(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -303,6 +431,34 @@ export const healthScores = pgTable('health_scores', {
   source: varchar('source', { length: 50 }).default('manual'), // 'manual', 'sensor', 'imported'
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Herd Test Results (Individual animal milk testing from LIC/Minda)
+export const herdTestResults = pgTable('herd_test_results', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  animalId: uuid('animal_id').references(() => animals.id).notNull(),
+  testDate: date('test_date').notNull(),
+  // Milk production
+  milkAmLitres: numeric('milk_am_litres', { precision: 6, scale: 2 }),
+  milkPmLitres: numeric('milk_pm_litres', { precision: 6, scale: 2 }),
+  milkTotalLitres: numeric('milk_total_litres', { precision: 6, scale: 2 }),
+  // Components
+  fatPercent: numeric('fat_percent', { precision: 4, scale: 2 }),
+  fatKg: numeric('fat_kg', { precision: 6, scale: 2 }),
+  proteinPercent: numeric('protein_percent', { precision: 4, scale: 2 }),
+  proteinKg: numeric('protein_kg', { precision: 6, scale: 2 }),
+  milkSolidsKg: numeric('milk_solids_kg', { precision: 6, scale: 2 }),
+  // Health indicators
+  scc: integer('scc'), // Somatic Cell Count (000s)
+  // Assessment
+  assessment: varchar('assessment', { length: 50 }), // Not Assessed, etc.
+  abnormalCode: varchar('abnormal_code', { length: 20 }),
+  // Lactation context
+  daysInMilk: integer('days_in_milk'),
+  lactationNumber: integer('lactation_number'),
+  // Metadata
+  source: varchar('source', { length: 50 }).default('minda'), // 'minda', 'lic', 'manual'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
 // Mortality Records (Death tracking with cause analysis)
@@ -2339,6 +2495,7 @@ export type BatchLifecycleEvent = typeof batchLifecycleEvents.$inferSelect; // P
 export type Condition = typeof conditions.$inferSelect;
 export type Animal = typeof animals.$inferSelect;
 export type AnimalTagHistory = typeof animalTagHistory.$inferSelect;
+export type HerdTestResult = typeof herdTestResults.$inferSelect;
 export type Pasture = typeof pastures.$inferSelect;
 export type AnimalTreatment = typeof animalTreatments.$inferSelect;
 export type TreatmentEvent = typeof treatmentEvents.$inferSelect;

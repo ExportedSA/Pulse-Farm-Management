@@ -320,17 +320,161 @@ export default function CSVImportPage() {
       for (let i = 0; i < animals.length; i++) {
         const a = animals[i];
         try {
-          const res = await fetch('/api/animals', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ farmId: '1', cowId: a.cowId, visualId: a.visualId, lifetimeId: a.lifetimeId, naitTag: a.naitTag, eid: a.eid, birthId: a.birthId, name: a.name, sex: a.sex || 'female', breed: a.breed, color: a.color, dateOfBirth: a.dateOfBirth, purchaseDate: a.purchaseDate, status: a.status || 'active', damId: a.damId, sireId: a.sireId, breedingWorth: a.breedingWorth, productionWorth: a.productionWorth, notes: a.notes }) });
+          // Build comprehensive animal payload with all Minda fields
+          const animalPayload: Record<string, any> = {
+            farmId: '1',
+            // Identification
+            cowId: a.cowId, visualId: a.visualId, lifetimeId: a.lifetimeId,
+            naitTag: a.naitTag, eid: a.eid, birthId: a.birthId, ahbId: a.ahbId,
+            // Basic info
+            name: a.name, sex: a.sex || 'female', breed: a.breed,
+            dateOfBirth: a.dateOfBirth, yearBorn: a.yearBorn,
+            status: a.status || 'active', notes: a.notes,
+            // Minda status fields
+            milkStatus: a.milkStatus, a2Status: a.a2Status,
+            bvdStatus: a.bvdStatus, bvdTestDate: a.bvdTestDate,
+            dnaProfile: a.dnaProfile, pedigreeIndicator: a.pedigreeIndicator,
+            // Removal info
+            dateRemoved: a.dateRemoved, removalFate: a.removalFate, removalReason: a.removalReason,
+            startDate: a.purchaseDate,
+            // Health scores
+            bodyConditionScore: a.bodyConditionScore, bcsDate: a.bcsDate,
+            liveWeight: a.liveWeight, liveWeightDate: a.liveWeightDate,
+            // Location
+            naitDescription: a.naitDescription,
+          };
+          // Dam info
+          if (a.damId || a.damBreed || a.damManagementNumber || a.damBW) {
+            animalPayload.damInfo = { officialId: a.damId, breed: a.damBreed, managementNumber: a.damManagementNumber, bw: a.damBW, pw: a.damPW, lw: a.damLW };
+          }
+          // Sire info
+          if (a.sireId || a.sireName || a.sireBreed || a.sireBW) {
+            animalPayload.sireInfo = { name: a.sireName, breed: a.sireBreed, externalId: a.sireId };
+          }
+          // Breeding values
+          const bvs: Record<string, any> = {};
+          if (a.breedingWorth !== undefined) { bvs.bw = a.breedingWorth; bvs.bwReliability = a.bwReliability; }
+          if (a.productionWorth !== undefined) { bvs.pw = a.productionWorth; bvs.pwReliability = a.pwReliability; }
+          if (a.lactationWorth !== undefined) bvs.lw = a.lactationWorth;
+          if (a.milkBV !== undefined) { bvs.milkBV = a.milkBV; bvs.milkBVReliability = a.milkBVReliability; }
+          if (a.fatBV !== undefined) { bvs.fatBV = a.fatBV; bvs.fatBVReliability = a.fatBVReliability; }
+          if (a.proteinBV !== undefined) { bvs.proteinBV = a.proteinBV; bvs.proteinBVReliability = a.proteinBVReliability; }
+          if (a.fertilityBV !== undefined) { bvs.fertilityBV = a.fertilityBV; bvs.fertilityBVReliability = a.fertilityBVReliability; }
+          if (a.sccBV !== undefined) { bvs.sccBV = a.sccBV; bvs.sccBVReliability = a.sccBVReliability; }
+          if (a.liveweightBV !== undefined) { bvs.liveweightBV = a.liveweightBV; bvs.liveweightBVReliability = a.liveweightBVReliability; }
+          if (a.survivalBV !== undefined) { bvs.survivalBV = a.survivalBV; bvs.survivalBVReliability = a.survivalBVReliability; }
+          if (a.gestationBV !== undefined) { bvs.gestationBV = a.gestationBV; }
+          if (a.calvingDifficultyBV !== undefined) { bvs.calvingDifficultyBV = a.calvingDifficultyBV; }
+          if (a.bcsBV !== undefined) { bvs.bcsBV = a.bcsBV; }
+          if (a.statureBV !== undefined) bvs.statureBV = a.statureBV;
+          if (a.capacityBV !== undefined) bvs.capacityBV = a.capacityBV;
+          if (a.udderOverallBV !== undefined) bvs.udderOverallBV = a.udderOverallBV;
+          if (a.milkingSpeedBV !== undefined) bvs.milkingSpeedBV = a.milkingSpeedBV;
+          if (a.temperamentBV !== undefined) bvs.temperamentBV = a.temperamentBV;
+          if (Object.keys(bvs).length > 0) animalPayload.breedingValues = bvs;
+          // Lactation info
+          if (a.lactationNumber || a.daysInMilk || a.milkKgMS || a.fatKg || a.proteinKg) {
+            animalPayload.lactationInfo = {
+              lactationNumber: a.lactationNumber, lactationStartDate: a.lactationStartDate,
+              daysInMilk: a.daysInMilk, daysLactating: a.daysLactating,
+              milkKgMS: a.milkKgMS, milkLitres: a.milkLitres,
+              fatKg: a.fatKg, fatPercent: a.fatPercent,
+              proteinKg: a.proteinKg, proteinPercent: a.proteinPercent,
+              dryOffDate: a.dryOffDate,
+            };
+          }
+          // Reproduction status
+          if (a.lastMatingDate || a.pregnancyStatus || a.dueDate || a.calvingDate) {
+            animalPayload.reproductionStatus = {
+              lastMatingDate: a.lastMatingDate, matingType: a.matingType, matingSire: a.matingSire,
+              heatDate: a.heatDate, daysPregnant: a.daysPregnant,
+              pregnancyStatus: a.pregnancyStatus, dueDate: a.dueDate, foetalCount: a.foetalCount,
+              atRiskCow: a.atRiskCow, nonCycling: a.nonCycling,
+              calvingDate: a.calvingDate, calvingAssistance: a.calvingAssistance,
+            };
+          }
+          // Last calf info
+          if (a.calfBirthId || a.calfBirthDate || a.calfSex) {
+            animalPayload.lastCalfInfo = {
+              calfBirthId: a.calfBirthId, calfBirthDate: a.calfBirthDate,
+              calfSex: a.calfSex, calfBreed: a.calfBreed, calfBW: a.calfBW, calfFate: a.calfFate,
+            };
+          }
+          // Latest herd test
+          if (a.herdTestDate || a.herdTestMilk || a.herdTestSCC) {
+            animalPayload.latestHerdTest = {
+              testDate: a.herdTestDate, milkTotal: a.herdTestMilk,
+              fatPercent: a.herdTestFatPercent, fatKg: a.herdTestFatKg,
+              proteinPercent: a.herdTestProteinPercent, proteinKg: a.herdTestProteinKg,
+              milkSolidsKg: a.herdTestMS, scc: a.herdTestSCC,
+              assessment: a.herdTestAssessment, abnormalCode: a.herdTestAbnormalCode,
+            };
+          }
+          // Health summary
+          if (a.mastitisCount || a.lamenessCount || a.healthCondition || a.healthTreatment) {
+            animalPayload.healthSummary = {
+              mastitisCount: a.mastitisCount, lamenessCount: a.lamenessCount,
+              lastCondition: a.healthCondition, lastConditionCategory: a.healthConditionCategory,
+              lastTreatment: a.healthTreatment, lastTreatmentDate: a.lastTreatmentDate,
+              lastHealthEventDate: a.healthEventDate,
+              meatWithholdDays: a.meatWithholdDays, milkWithholdHours: a.milkWithholdHours,
+              vetName: a.vetName,
+            };
+          }
+          // Pre-calving info
+          if (a.expectedCalfBW || a.expectedCalfSireId) {
+            animalPayload.preCalvingInfo = {
+              expectedCalfBW: a.expectedCalfBW, expectedCalfSireId: a.expectedCalfSireId,
+            };
+          }
+
+          const res = await fetch('/api/animals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(animalPayload) });
           if (res.ok) {
             s.animals++;
             const animal = await res.json();
-            if (a.liveWeight) { await fetch('/api/weight-records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ animalId: animal.id, weight: a.liveWeight, recordedAt: new Date().toISOString() }) }).catch(() => {}); s.weight++; }
-            if (a.bodyConditionScore || a.somaticCellCount) { await fetch('/api/health-records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ animalId: animal.id, bodyConditionScore: a.bodyConditionScore, somaticCellCount: a.somaticCellCount, recordedAt: new Date().toISOString() }) }).catch(() => {}); s.health++; }
-            if (a.lastMatingDate || a.dueDate) { await fetch('/api/reproduction-events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ animalId: animal.id, eventType: 'mating', eventDate: a.lastMatingDate || new Date().toISOString(), sireId: a.matingSire, dueDate: a.dueDate }) }).catch(() => {}); s.repro++; }
-            if (a.milkKgMS) { await fetch('/api/milk-production', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ animalId: animal.id, milkKgMS: a.milkKgMS, fatKg: a.fatKg, proteinKg: a.proteinKg, recordedAt: new Date().toISOString() }) }).catch(() => {}); s.prod++; }
+            // Create weight record if liveWeight present
+            if (a.liveWeight) {
+              await fetch('/api/weight-records', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ animalId: animal.id, weight: a.liveWeight, date: a.liveWeightDate || new Date().toISOString().split('T')[0], recordedBy: '1' })
+              }).catch(() => {});
+              s.weight++;
+            }
+            // Create herd test record if present
+            if (a.herdTestDate && (a.herdTestMilk || a.herdTestSCC)) {
+              await fetch('/api/herd-test-results', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  animalId: animal.id, testDate: a.herdTestDate,
+                  milkTotalLitres: a.herdTestMilk, fatPercent: a.herdTestFatPercent, fatKg: a.herdTestFatKg,
+                  proteinPercent: a.herdTestProteinPercent, proteinKg: a.herdTestProteinKg,
+                  milkSolidsKg: a.herdTestMS, scc: a.herdTestSCC,
+                  assessment: a.herdTestAssessment, daysInMilk: a.daysInMilk,
+                })
+              }).catch(() => {});
+              s.prod++;
+            }
+            // Create reproduction event if mating data present
+            if (a.lastMatingDate || a.dueDate) {
+              await fetch('/api/reproduction-events', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ animalId: animal.id, eventType: a.pregnancyStatus ? 'pregnancy_check' : 'ai',
+                  eventDate: a.lastMatingDate || new Date().toISOString().split('T')[0],
+                  pregnancyDetails: a.dueDate ? { isPregnant: true, dueDate: a.dueDate, daysPregnant: a.daysPregnant } : undefined,
+                })
+              }).catch(() => {});
+              s.repro++;
+            }
+            // Create health record if condition present
+            if (a.healthCondition || a.healthTreatment) {
+              await fetch('/api/health-records', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ animalId: animal.id, recordDate: a.healthEventDate || new Date().toISOString().split('T')[0],
+                  somaticCellCount: a.somaticCellCount, bodyConditionScore: a.bodyConditionScore,
+                  notes: `${a.healthConditionCategory || ''}: ${a.healthCondition || ''} - ${a.healthTreatment || ''}`.trim(),
+                  recordedBy: '1',
+                })
+              }).catch(() => {});
+              s.health++;
+            }
           }
-        } catch (e) { console.error(e); }
+        } catch (e) { console.error('Import error:', e); }
         setProgress(Math.round(((i + 1) / animals.length) * 100));
       }
       return s;
