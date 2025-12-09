@@ -177,9 +177,11 @@ export default function AlertsPage() {
                           </p>
                         </div>
                         <Link href="/app/treatments/current">
-                          <Button size="sm" variant="outline" data-testid={`button-view-${withholding.id}`}>
-                            View
-                          </Button>
+                          <a>
+                            <Button size="sm" variant="outline" data-testid={`button-view-${withholding.id}`}>
+                              View
+                            </Button>
+                          </a>
                         </Link>
                       </div>
                     );
@@ -227,9 +229,11 @@ export default function AlertsPage() {
                           </p>
                         </div>
                         <Link href="/app/medicines">
-                          <Button size="sm" variant="outline" data-testid={`button-view-${batch.id}`}>
-                            View
-                          </Button>
+                          <a>
+                            <Button size="sm" variant="outline" data-testid={`button-view-${batch.id}`}>
+                              View
+                            </Button>
+                          </a>
                         </Link>
                       </div>
                     );
@@ -272,9 +276,11 @@ export default function AlertsPage() {
                         </p>
                       </div>
                       <Link href="/app/medicines">
-                        <Button size="sm" variant="outline" data-testid={`button-view-${batch.id}`}>
-                          View
-                        </Button>
+                        <a>
+                          <Button size="sm" variant="outline" data-testid={`button-view-${batch.id}`}>
+                            View
+                          </Button>
+                        </a>
                       </Link>
                     </div>
                   ))}
@@ -370,9 +376,11 @@ export default function AlertsPage() {
                           </p>
                         </div>
                         <Link href="/app/treatments/current">
-                          <Button size="sm" variant="outline" data-testid={`button-view-${treatment.id}`}>
-                            View
-                          </Button>
+                          <a>
+                            <Button size="sm" variant="outline" data-testid={`button-view-${treatment.id}`}>
+                              View
+                            </Button>
+                          </a>
                         </Link>
                       </div>
                     ))}

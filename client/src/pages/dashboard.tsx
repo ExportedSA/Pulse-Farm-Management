@@ -633,100 +633,100 @@ export default function Dashboard() {
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
               <Link href="/app/operations">
-                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-green-300 transition-colors cursor-pointer">
+                <a className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-green-300 transition-colors cursor-pointer">
                   <div className="p-3 bg-green-100 rounded-full mb-2">
                     <Wrench className="h-6 w-6 text-green-600" />
                   </div>
                   <span className="text-sm font-medium text-center">Operations Hub</span>
-                </div>
+                </a>
               </Link>
               <Link href="/app/operations/visitors">
-                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-green-300 transition-colors cursor-pointer">
+                <a className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-green-300 transition-colors cursor-pointer">
                   <div className="p-3 bg-blue-100 rounded-full mb-2">
                     <UserCheck className="h-6 w-6 text-blue-600" />
                   </div>
                   <span className="text-sm font-medium text-center">Visitors</span>
-                </div>
+                </a>
               </Link>
               <Link href="/app/operations/vehicles">
-                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-blue-300 transition-colors cursor-pointer">
+                <a className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-blue-300 transition-colors cursor-pointer">
                   <div className="p-3 bg-blue-100 rounded-full mb-2">
                     <Car className="h-6 w-6 text-blue-600" />
                   </div>
                   <span className="text-sm font-medium text-center">Vehicles</span>
-                </div>
+                </a>
               </Link>
               <Link href="/app/operations/qrcodes">
-                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-purple-300 transition-colors cursor-pointer">
+                <a className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-purple-300 transition-colors cursor-pointer">
                   <div className="p-3 bg-purple-100 rounded-full mb-2">
                     <QrCode className="h-6 w-6 text-purple-600" />
                   </div>
                   <span className="text-sm font-medium text-center">QR Codes</span>
-                </div>
+                </a>
               </Link>
               <Link href="/app/operations/staff">
-                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-indigo-300 transition-colors cursor-pointer">
+                <a className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-indigo-300 transition-colors cursor-pointer">
                   <div className="p-3 bg-indigo-100 rounded-full mb-2">
                     <Users className="h-6 w-6 text-indigo-600" />
                   </div>
                   <span className="text-sm font-medium text-center">Team</span>
-                </div>
+                </a>
               </Link>
               <Link href="/app/health-safety">
-                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-red-300 transition-colors cursor-pointer">
+                <a className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-red-300 transition-colors cursor-pointer">
                   <div className="p-3 bg-red-100 rounded-full mb-2">
                     <AlertTriangle className="h-6 w-6 text-red-600" />
                   </div>
                   <span className="text-sm font-medium text-center">Health & Safety</span>
-                </div>
+                </a>
               </Link>
               <Link href="/app/shed">
-                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-amber-300 transition-colors cursor-pointer">
+                <a className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-amber-300 transition-colors cursor-pointer">
                   <div className="p-3 bg-amber-100 rounded-full mb-2">
                     <Warehouse className="h-6 w-6 text-amber-600" />
                   </div>
                   <span className="text-sm font-medium text-center">Shed</span>
-                </div>
+                </a>
               </Link>
               <Link href="/app/jobs">
-                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-orange-300 transition-colors cursor-pointer">
+                <a className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-orange-300 transition-colors cursor-pointer">
                   <div className="p-3 bg-orange-100 rounded-full mb-2">
                     <Briefcase className="h-6 w-6 text-orange-600" />
                   </div>
                   <span className="text-sm font-medium text-center">Job Scheduler</span>
-                </div>
+                </a>
               </Link>
               <Link href="/app/asset-registry">
-                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-teal-300 transition-colors cursor-pointer">
+                <a className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-teal-300 transition-colors cursor-pointer">
                   <div className="p-3 bg-teal-100 rounded-full mb-2">
                     <Package className="h-6 w-6 text-teal-600" />
                   </div>
                   <span className="text-sm font-medium text-center">Assets</span>
-                </div>
+                </a>
               </Link>
               <Link href="/app/farm-finance">
-                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-emerald-300 transition-colors cursor-pointer">
+                <a className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-emerald-300 transition-colors cursor-pointer">
                   <div className="p-3 bg-emerald-100 rounded-full mb-2">
                     <DollarSign className="h-6 w-6 text-emerald-600" />
                   </div>
                   <span className="text-sm font-medium text-center">Finance</span>
-                </div>
+                </a>
               </Link>
               <Link href="/app/timesheets">
-                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-cyan-300 transition-colors cursor-pointer">
+                <a className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-cyan-300 transition-colors cursor-pointer">
                   <div className="p-3 bg-cyan-100 rounded-full mb-2">
                     <Clock className="h-6 w-6 text-cyan-600" />
                   </div>
                   <span className="text-sm font-medium text-center">Timesheets</span>
-                </div>
+                </a>
               </Link>
               <Link href="/app/weather">
-                <div className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-sky-300 transition-colors cursor-pointer">
+                <a className="flex flex-col items-center p-4 rounded-lg border hover:bg-gray-50 hover:border-sky-300 transition-colors cursor-pointer">
                   <div className="p-3 bg-sky-100 rounded-full mb-2">
                     <Activity className="h-6 w-6 text-sky-600" />
                   </div>
                   <span className="text-sm font-medium text-center">Weather</span>
-                </div>
+                </a>
               </Link>
             </div>
           </CardContent>

@@ -101,7 +101,7 @@ function PedigreeNode({ node, depth = 0 }: { node: LineageNode | { external: tru
   return (
     <div className="flex flex-col items-center">
       <Link href={`/app/animals/${animal.id}/lineage`}>
-        <div className={`p-3 rounded-lg border-2 cursor-pointer hover:shadow-md transition-shadow ${
+        <a className={`block p-3 rounded-lg border-2 cursor-pointer hover:shadow-md transition-shadow ${
           animal.sex === 'female' 
             ? 'border-pink-300 bg-pink-50' 
             : 'border-blue-300 bg-blue-50'
@@ -123,7 +123,7 @@ function PedigreeNode({ node, depth = 0 }: { node: LineageNode | { external: tru
           <Badge variant={animal.status === 'active' ? 'default' : 'secondary'} className="mt-1 text-xs">
             {animal.status}
           </Badge>
-        </div>
+        </a>
       </Link>
       
       {(lineageNode.dam || lineageNode.sire) && depth < 3 && (
@@ -317,7 +317,7 @@ export default function AnimalLineagePage() {
             <AlertCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
             <p>No animal selected</p>
             <Link href="/app/animals">
-              <Button className="mt-4">Go to Animals</Button>
+              <a><Button className="mt-4">Go to Animals</Button></a>
             </Link>
           </CardContent>
         </Card>
@@ -330,9 +330,9 @@ export default function AnimalLineagePage() {
       {/* Header */}
       <div className="flex items-center gap-4">
         <Link href="/app/animals">
-          <Button variant="ghost" size="icon">
+          <a><Button variant="ghost" size="icon">
             <ArrowLeft className="h-5 w-5" />
-          </Button>
+          </Button></a>
         </Link>
         <div className="flex-1">
           <h1 className="text-3xl font-bold flex items-center gap-2">
@@ -496,9 +496,9 @@ export default function AnimalLineagePage() {
                         </TableCell>
                         <TableCell>
                           <Link href={`/app/animals/${offspring.id}/lineage`}>
-                            <Button size="sm" variant="ghost">
+                            <a><Button size="sm" variant="ghost">
                               <ChevronRight className="h-4 w-4" />
-                            </Button>
+                            </Button></a>
                           </Link>
                         </TableCell>
                       </TableRow>

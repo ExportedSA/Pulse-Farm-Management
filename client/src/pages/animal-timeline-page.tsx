@@ -167,7 +167,7 @@ export default function AnimalTimelinePage() {
             <AlertCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
             <p>No animal selected</p>
             <Link href="/app/animals">
-              <Button className="mt-4">Go to Animals</Button>
+              <a><Button className="mt-4">Go to Animals</Button></a>
             </Link>
           </CardContent>
         </Card>
@@ -182,9 +182,9 @@ export default function AnimalTimelinePage() {
       {/* Header */}
       <div className="flex items-center gap-4">
         <Link href="/app/animals">
-          <Button variant="ghost" size="icon">
+          <a><Button variant="ghost" size="icon">
             <ArrowLeft className="h-5 w-5" />
-          </Button>
+          </Button></a>
         </Link>
         <div className="flex-1">
           <h1 className="text-3xl font-bold flex items-center gap-2">
