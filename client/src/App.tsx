@@ -98,6 +98,7 @@ import GeneticMeritPage from "@/pages/genetic-merit-page";
 import FeedPlanningPage from "@/pages/feed-planning-page";
 import IoTDashboardPage from "@/pages/iot-dashboard-page";
 import MultiFarmPage from "@/pages/multi-farm-page";
+import CSVImportPage from "@/pages/csv-import-page";
 
 function Router() {
   const [location] = useLocation();
@@ -155,6 +156,7 @@ function Router() {
         <Route path="/app/treatments/:section?" component={Home} />
         <Route path="/app/batch-treatment" component={BatchTreatmentPage} />
         <Route path="/app/animals" component={AnimalsList} />
+        <Route path="/app/import" component={CSVImportPage} />
         <Route path="/app/stock-reconciliation" component={StockReconciliationPage} />
         <Route path="/app/map-tasks" component={MapTasksPage} />
         <Route path="/app/groups" component={GroupsManagement} />

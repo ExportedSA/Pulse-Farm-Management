@@ -42,6 +42,7 @@ const menuItems = [
     icon: Users,
     subItems: [
       { title: "All Animals", url: "/app/animals" },
+      { title: "Import from CSV", url: "/app/import" },
       { title: "Stock Reconciliation", url: "/app/stock-reconciliation" },
       {
         title: "Groups",
