@@ -712,6 +712,47 @@ export class DatabaseStorage implements IStorage {
     return animal;
   }
 
+  async createAnimalsInBatch(dataArray: InsertAnimal[]): Promise<{ created: Animal[], failed: { data: InsertAnimal, error: string }[] }> {
+    if (dataArray.length === 0) return { created: [], failed: [] };
+    const created: Animal[] = [];
+    const failed: { data: InsertAnimal, error: string }[] = [];
+    
+    for (const data of dataArray) {
+      try {
+        const [animal] = await db.insert(animals).values(data).returning();
+        created.push(animal);
+      } catch (e: any) {
+        // Extract meaningful error message
+        let errorMsg = e.message || 'Unknown error';
+        if (e.code === '23505') { // Unique violation
+          const detail = e.detail || '';
+          if (detail.includes('cow_id')) errorMsg = `Duplicate Cow ID: ${data.cowId}`;
+          else if (detail.includes('eid')) errorMsg = `Duplicate EID: ${data.eid}`;
+          else if (detail.includes('lifetime_id')) errorMsg = `Duplicate Lifetime ID: ${data.lifetimeId}`;
+          else errorMsg = `Duplicate key: ${detail}`;
+        } else if (e.code === '23502') { // Not null violation
+          errorMsg = `Missing required field: ${e.column || 'unknown'}`;
+        } else if (e.code === '22008') { // Date/time out of range
+          // Extract the problematic value from the error message
+          const match = e.message?.match(/"([^"]+)"/);
+          const badValue = match ? match[1] : 'unknown';
+          errorMsg = `Invalid date format: "${badValue}" - expected YYYY-MM-DD`;
+        }
+        failed.push({ data, error: errorMsg });
+        
+        // Log first few errors
+        if (failed.length <= 5) {
+          console.error(`Insert error: ${errorMsg} (cowId=${data.cowId})`);
+        }
+      }
+    }
+    
+    if (failed.length > 0) {
+      console.error(`Batch complete: ${created.length} created, ${failed.length} failed`);
+    }
+    return { created, failed };
+  }
+
   async updateAnimal(id: string, data: Partial<InsertAnimal>): Promise<Animal> {
     const currentAnimal = await this.getAnimal(id);
     if (!currentAnimal) throw new Error("Animal not found");

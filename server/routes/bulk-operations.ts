@@ -243,6 +243,61 @@ router.post("/animals/update", async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/bulk/animals/import-fast - Fast batch import for animals
+router.post("/animals/import-fast", async (req: Request, res: Response) => {
+  try {
+    const { animals } = req.body;
+    if (!Array.isArray(animals) || animals.length === 0) {
+      return res.status(400).json({ error: "No animals provided" });
+    }
+    
+    console.log(`Fast import: received ${animals.length} animals`);
+    
+    // Process in batches of 100 for optimal performance
+    const BATCH_SIZE = 100;
+    const results = { 
+      created: 0, 
+      skipped: 0, 
+      failed: [] as { cowId: string, visualId: string, error: string, data: Record<string, any> }[] 
+    };
+    
+    for (let i = 0; i < animals.length; i += BATCH_SIZE) {
+      const batch = animals.slice(i, i + BATCH_SIZE);
+      try {
+        const { created, failed } = await storage.createAnimalsInBatch(batch);
+        results.created += created.length;
+        results.skipped += failed.length;
+        
+        // Collect failed imports with identifying info
+        for (const f of failed) {
+          results.failed.push({
+            cowId: f.data.cowId || '',
+            visualId: f.data.visualId || '',
+            error: f.error,
+            data: f.data as Record<string, any>
+          });
+        }
+        
+        console.log(`Batch ${Math.floor(i/BATCH_SIZE) + 1}: ${created.length} created, ${failed.length} failed`);
+      } catch (e: any) {
+        console.error("Batch insert error:", e.message);
+        results.skipped += batch.length;
+      }
+    }
+    
+    console.log(`Fast import complete: ${results.created} created, ${results.skipped} failed`);
+    
+    res.status(201).json({
+      message: `Import complete: ${results.created} created, ${results.skipped} failed`,
+      ...results,
+      total: animals.length,
+    });
+  } catch (error: any) {
+    console.error("Error in fast import:", error.message, error.code, error.detail);
+    res.status(500).json({ error: "Failed to import animals", detail: error.message });
+  }
+});
+
 // POST /api/bulk/animals/import - CSV import for animals
 router.post("/animals/import", async (req: Request, res: Response) => {
   try {

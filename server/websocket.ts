@@ -276,3 +276,106 @@ class ChatWebSocketServer {
 
 // Singleton instance
 export const chatWebSocket = new ChatWebSocketServer();
+
+// Scanner WebSocket Server for mobile barcode scanning
+interface ScannerSession {
+  host: WebSocket | null;
+  clients: Set<WebSocket>;
+}
+
+class ScannerWebSocketServer {
+  private wss: WebSocketServer | null = null;
+  private sessions: Map<string, ScannerSession> = new Map();
+
+  initialize(server: Server) {
+    this.wss = new WebSocketServer({ 
+      server,
+      path: '/ws/scanner'
+    });
+
+    this.wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+      const url = new URL(req.url || '', `http://${req.headers.host}`);
+      const sessionId = url.searchParams.get('session');
+      const role = url.searchParams.get('role'); // 'host' for desktop, undefined for mobile
+
+      if (!sessionId) {
+        ws.close(1008, 'Session ID required');
+        return;
+      }
+
+      console.log(`[Scanner WS] Connection: session=${sessionId}, role=${role || 'client'}`);
+
+      // Get or create session
+      if (!this.sessions.has(sessionId)) {
+        this.sessions.set(sessionId, { host: null, clients: new Set() });
+      }
+      const session = this.sessions.get(sessionId)!;
+
+      if (role === 'host') {
+        // Desktop connecting as host
+        session.host = ws;
+        console.log(`[Scanner WS] Host connected for session ${sessionId}`);
+      } else {
+        // Mobile connecting as client
+        session.clients.add(ws);
+        console.log(`[Scanner WS] Client connected for session ${sessionId}`);
+        
+        // Notify host that client connected
+        if (session.host && session.host.readyState === WebSocket.OPEN) {
+          session.host.send(JSON.stringify({ type: 'client_connected' }));
+        }
+      }
+
+      ws.on('message', (data: Buffer) => {
+        try {
+          const message = JSON.parse(data.toString());
+          
+          if (message.type === 'barcode' && session.host && session.host.readyState === WebSocket.OPEN) {
+            // Forward barcode from mobile to desktop
+            session.host.send(JSON.stringify({
+              type: 'barcode',
+              barcode: message.barcode
+            }));
+            console.log(`[Scanner WS] Barcode forwarded: ${message.barcode}`);
+          }
+        } catch (error) {
+          console.error('[Scanner WS] Error parsing message:', error);
+        }
+      });
+
+      ws.on('close', () => {
+        if (role === 'host') {
+          session.host = null;
+          console.log(`[Scanner WS] Host disconnected for session ${sessionId}`);
+          // Notify all clients
+          session.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({ type: 'host_disconnected' }));
+            }
+          });
+        } else {
+          session.clients.delete(ws);
+          console.log(`[Scanner WS] Client disconnected for session ${sessionId}`);
+          // Notify host
+          if (session.host && session.host.readyState === WebSocket.OPEN) {
+            session.host.send(JSON.stringify({ type: 'client_disconnected' }));
+          }
+        }
+
+        // Clean up empty sessions
+        if (!session.host && session.clients.size === 0) {
+          this.sessions.delete(sessionId);
+          console.log(`[Scanner WS] Session ${sessionId} cleaned up`);
+        }
+      });
+
+      ws.on('error', (error) => {
+        console.error(`[Scanner WS] Error:`, error);
+      });
+    });
+
+    console.log('[Scanner WS] Scanner WebSocket server initialized on /ws/scanner');
+  }
+}
+
+export const scannerWebSocket = new ScannerWebSocketServer();
