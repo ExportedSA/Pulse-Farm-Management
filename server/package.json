@@ -1,0 +1,18 @@
+{
+  "name": "pulse-server",
+  "private": true,
+  "scripts": {
+    "dev": "cross-env NODE_ENV=development PORT=4000 BACKEND_ONLY=1 tsx index.ts",
+    "check:env": "node -e \"require('dotenv').config(); console.log('dotenv_error=', 'none'); console.log('DATABASE_URL=', process.env.DATABASE_URL ? 'SET' : 'MISSING'); console.log('PORT=', process.env.PORT || '(unset)'); console.log('BACKEND_ONLY=', process.env.BACKEND_ONLY || '(unset)'); console.log('NODE_ENV=', process.env.NODE_ENV || '(unset)');\"",
+    "check:health": "node -e \"fetch('http://localhost:4000/api/health').then(r=>r.json()).then(j=>console.log('/api/health', j)).catch(e=>console.error('health_fail', e.message));\"",
+    "build": "cd .. && npm run build",
+    "start": "cross-env NODE_ENV=production PORT=4000 node ../dist/index.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3"
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0",
+    "tsx": "^4.20.5"
+  }
+}

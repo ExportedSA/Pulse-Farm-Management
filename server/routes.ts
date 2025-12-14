@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { pool } from "./db";
 import passport from "passport";
 import { sanitizeUser, sanitizeUsers } from "./auth-utils";
 import groupsRouter from "./routes/groups";
@@ -53,6 +54,14 @@ import externalApisRouter from "./routes/external-apis";
 import iotRouter from "./routes/iot";
 import multiFarmRouter from "./routes/multi-farm";
 import animalTagsRouter from "./routes/animal-tags";
+// Phase overlay routes
+import medCoreRouter from "./routes/med.core";
+import medWithholdRouter from "./routes/med.withhold";
+import medWithholdIdsRouter from "./routes/med.withhold.ids";
+import reproExtrasRouter from "./routes/repro.extras";
+import reproPlanRouter from "./routes/repro.plan";
+import syncCoreRouter from "./routes/sync.core";
+import naitCoreRouter from "./routes/nait.core";
 import { z } from "zod";
 import {
   insertUserSchema,
@@ -72,6 +81,26 @@ import {
 } from "@shared/schema";
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // ===== CORE HEALTH CHECKS =====
+  app.get("/api/health", (_req, res) => {
+    res.json({
+      ok: true,
+      version: process.env.npm_package_version ?? "unknown",
+      env: process.env.NODE_ENV ?? "development",
+      time: new Date().toISOString(),
+    });
+  });
+
+  app.get("/api/health/db", async (_req, res) => {
+    try {
+      const result = await pool.query("select 1");
+      res.json({ ok: true, result: result.rows?.[0] ?? null });
+    } catch (error: any) {
+      console.error("DB health check failed:", error);
+      res.status(500).json({ ok: false, error: String(error?.message ?? error) });
+    }
+  });
+
   // ===== PHASE 4: ANIMAL GROUPS =====
   app.use("/api/groups", groupsRouter);
 
@@ -113,6 +142,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ===== ANIMAL TAG MANAGEMENT =====
   app.use(animalTagsRouter);
+
+  // ===== PHASE OVERLAY: MEDICINE & WITHHOLD =====
+  app.use("/api/med", medCoreRouter);
+  app.use("/api/med/withhold", medWithholdRouter);
+  app.use("/api/med/withhold-ids", medWithholdIdsRouter);
+
+  // ===== PHASE OVERLAY: REPRODUCTION EXTRAS =====
+  app.use("/api/repro", reproExtrasRouter);
+  app.use("/api/repro/plan", reproPlanRouter);
+
+  // ===== PHASE OVERLAY: OFFLINE SYNC =====
+  app.use("/api/sync", syncCoreRouter);
+
+  // ===== PHASE OVERLAY: NAIT CORE =====
+  app.use("/api/nait/core", naitCoreRouter);
 
   // ===== MOBILE & FIELD FEATURES =====
   app.use("/api/mobile", mobileFeaturesRouter);
@@ -757,8 +801,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error.name === 'ZodError') {
         return res.status(400).json({ error: error.message });
       }
-      console.error("Failed to create animal:", error);
-      res.status(500).json({ error: "Failed to create animal" });
+      console.error("Failed to create animal:", error.message || error);
+      console.error("Error details:", error.code, error.detail, error.constraint);
+      res.status(500).json({ error: "Failed to create animal", detail: error.message });
     }
   });
 

@@ -1,4 +1,4 @@
-import { Home, Syringe, Pill, Users, Sprout, Heart, Settings, BarChart3, ChevronDown, MessageSquare, Shield, FileText, Briefcase, Wrench, Scale, ChevronRight } from "lucide-react";
+import { Home, Syringe, Pill, Users, Sprout, Heart, Settings, BarChart3, ChevronDown, MessageSquare, Shield, FileText, Briefcase, Wrench, Scale, ChevronRight, GitFork, Rocket, Stethoscope, Baby, ClipboardList } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useState, ComponentProps } from "react";
 import { useChatContext } from "@/contexts/ChatContext";
@@ -43,23 +43,40 @@ const menuItems = [
     ],
   },
   
-  // Health & Treatments - consolidated (batch treatment now inside treatments)
+  // Health & Treatments - consolidated
   {
     title: "Health",
     icon: Syringe,
     subItems: [
       { title: "Treatments", url: "/app/treatments/current" },
+      { title: "Treat Animal", url: "/app/health/treat" },
       { title: "Vaccination", url: "/app/vaccination" },
-      { title: "Medicines", url: "/app/medicines" },
+      { title: "Medicines", url: "/app/health/medicines" },
+      { title: "Inventory", url: "/app/health/inventory" },
+      { title: "Health Reports", url: "/app/health/reports" },
     ],
   },
   
-  // Reproduction - simplified
+  // Drafting
+  {
+    title: "Drafting",
+    icon: GitFork,
+    subItems: [
+      { title: "Shed", url: "/app/shed" },
+      { title: "Smart Groups", url: "/app/smart-groups" },
+      { title: "Bulk Operations", url: "/app/bulk-operations" },
+    ],
+  },
+  
+  // Reproduction
   {
     title: "Reproduction",
     icon: Heart,
     subItems: [
+      { title: "Dashboard", url: "/app/reproduction-management" },
       { title: "Events", url: "/app/reproduction" },
+      { title: "Run Sheet", url: "/app/repro/runsheet" },
+      { title: "Preg Testing", url: "/app/repro/preg" },
       { title: "Milk Production", url: "/app/milk-production" },
     ],
   },
@@ -85,7 +102,7 @@ const menuItems = [
     subItems: [
       { title: "Hub", url: "/app/operations" },
       { title: "Jobs", url: "/app/jobs" },
-      { title: "Calendar", url: "/app/task-calendar" },
+      { title: "Calendar", url: "/app/calendar" },
       { title: "Staff", url: "/app/operations/staff" },
     ],
   },
@@ -107,13 +124,24 @@ const menuItems = [
     icon: BarChart3,
     subItems: [
       { title: "Analytics", url: "/app/analytics" },
+      { title: "Herd Reports", url: "/app/herd-reports" },
       { title: "Export", url: "/app/reports" },
     ],
   },
   
-  // System
+  // Setup & System
+  {
+    title: "Setup",
+    icon: Rocket,
+    subItems: [
+      { title: "Onboarding", url: "/app/setup" },
+      { title: "Settings", url: "/app/settings" },
+      { title: "Multi-Farm", url: "/app/multi-farm" },
+    ],
+  },
+  
+  // Communication
   { title: "Chat", url: "/app/chat", icon: MessageSquare },
-  { title: "Settings", url: "/app/settings", icon: Settings },
 ];
 
 export function AppSidebar({ ...props }: AppSidebarProps) {

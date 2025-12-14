@@ -1,13 +1,16 @@
+import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
+import path from "path";
 import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
 import { setupAuth } from "./auth";
 import { storage } from "./storage";
 import { startHardwareSimulator } from "./sim/hardwareSimulator";
 import { isDemoMode } from "./config/demoMode";
-import { chatWebSocket } from "./websocket";
+import { chatWebSocket, scannerWebSocket } from "./websocket";
+import { log } from "./logger";
 
 const app = express();
+const isBackendOnly = process.env.BACKEND_ONLY === "1" || process.env.BACKEND_ONLY === "true";
 
 declare module 'http' {
   interface IncomingMessage {
@@ -22,7 +25,7 @@ app.use(express.json({
 app.use(express.urlencoded({ extended: false }));
 
 // Serve uploaded files statically
-app.use('/uploads', express.static('uploads'));
+app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads")));
 
 setupAuth(app, storage);
 
@@ -59,8 +62,9 @@ app.use((req, res, next) => {
 (async () => {
   const server = await registerRoutes(app);
 
-  // Initialize WebSocket server for real-time chat
+  // Initialize WebSocket servers
   chatWebSocket.initialize(server);
+  scannerWebSocket.initialize(server);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
@@ -73,10 +77,15 @@ app.use((req, res, next) => {
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
-  if (app.get("env") === "development") {
-    await setupVite(app, server);
-  } else {
-    serveStatic(app);
+  // When running in BACKEND_ONLY mode, skip Vite and static serving entirely
+  if (!isBackendOnly) {
+    if (app.get("env") === "development") {
+      const { setupVite } = await import("./vite");
+      await setupVite(app, server);
+    } else {
+      const { serveStatic } = await import("./vite");
+      serveStatic(app);
+    }
   }
 
   // ALWAYS serve the app on the port specified in the environment variable PORT
