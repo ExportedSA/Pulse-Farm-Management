@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Plus, Edit, Trash2, Users } from "lucide-react";
+import { Link } from "wouter";
+import { Plus, Edit, Trash2, Users, Filter, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -408,13 +409,20 @@ export default function GroupsManagement() {
           </h1>
           <p className="text-muted-foreground">Organize your herd into custom groups</p>
         </div>
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <DialogTrigger asChild>
-            <Button data-testid="button-create-group">
-              <Plus className="h-4 w-4 mr-2" />
-              Create Group
+        <div className="flex gap-2">
+          <Link href="/app/smart-groups">
+            <Button variant="outline" data-testid="button-custom-reports">
+              <Filter className="h-4 w-4 mr-2" />
+              Custom Reports
             </Button>
-          </DialogTrigger>
+          </Link>
+          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+            <DialogTrigger asChild>
+              <Button data-testid="button-create-group">
+                <Plus className="h-4 w-4 mr-2" />
+                Create Group
+              </Button>
+            </DialogTrigger>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Create New Group</DialogTitle>
@@ -424,7 +432,8 @@ export default function GroupsManagement() {
             </DialogHeader>
             <GroupForm onClose={() => setIsCreateDialogOpen(false)} />
           </DialogContent>
-        </Dialog>
+          </Dialog>
+        </div>
       </div>
 
       {/* Groups Grid */}

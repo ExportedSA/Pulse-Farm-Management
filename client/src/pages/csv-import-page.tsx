@@ -234,7 +234,14 @@ function normalizeValue(val: string, key: string): any {
   }
   if (key === 'inCalf' || key === 'atRiskCow' || key === 'nonCycling') return ['yes','y','1','true'].includes(l);
   // Date parsing - multiple formats
-  if (key.includes('Date') || key === 'dateOfBirth' || key === 'dueDate' || key === 'calvingDate' || key === 'heatDate') {
+  // Check if this is a date field by name pattern
+  const isDateField = key.includes('Date') || key.includes('date') || 
+    ['dateOfBirth', 'dueDate', 'calvingDate', 'heatDate', 'startDate', 'purchaseDate', 
+     'bcsDate', 'bvdTestDate', 'dateRemoved', 'liveWeightDate', 'lactationStartDate',
+     'herdTestDate', 'healthEventDate', 'healthDateSeparated', 'lastTreatmentDate',
+     'calfBirthDate', 'expectedMatingDate', 'lastMatingDate', 'dryOffDate'].includes(key);
+  
+  if (isDateField) {
     // DD/MM/YYYY format
     let m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
     if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
@@ -246,10 +253,12 @@ function normalizeValue(val: string, key: string): any {
     }
     // YYYY-MM-DD format (already correct)
     if (v.match(/^\d{4}-\d{2}-\d{2}$/)) return v;
+    // If it looks like a date but doesn't match, return null to skip it
+    if (v.match(/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/)) return null;
     return null;
   }
-  // Numeric fields
-  const nums = [
+  // Numeric fields - these get parsed as numbers
+   const nums = [
     'breedingWorth','productionWorth','lactationWorth','reliability','bwReliability','pwReliability',
     'milkBV','fatBV','proteinBV','fertilityBV','sccBV','liveweightBV','survivalBV','gestationBV',
     'calvingDifficultyBV','bcsBV','statureBV','capacityBV','rumpAngleBV','rumpWidthBV','rearLegBV',
@@ -258,13 +267,16 @@ function normalizeValue(val: string, key: string): any {
     'damBW','damPW','damLW','sireBW','calfBW','expectedCalfBW',
     'milkKgMS','fatKg','proteinKg','fatPercent','proteinPercent','milkLitres',
     'herdTestMilk','herdTestFatPercent','herdTestFatKg','herdTestProteinPercent','herdTestProteinKg','herdTestMS','herdTestSCC',
-    'somaticCellCount','bodyConditionScore','mastitisCount','lamenessCount',
+    'somaticCellCount','mastitisCount','lamenessCount',
     'healthDoseAmount','healthDoseCount','meatWithholdDays','milkWithholdHours',
-    'liveWeight','liveWeightAggregated','birthWeight','weaningWeight','averageDailyGain',
-    'lactationNumber','daysInMilk','daysLactating','daysPregnant','foetalCount','ageYears',
+    'liveWeightAggregated','birthWeight','weaningWeight','averageDailyGain',
+    'lactationNumber','daysInMilk','daysLactating','daysPregnant','foetalCount','ageYears','yearBorn',
     'friesianPercent','jerseyPercent','purchasePrice'
   ];
   if (nums.includes(key)) { const n = parseFloat(v.replace(/[$,]/g,'')); return isNaN(n) ? null : n; }
+  // String fields that look like numbers but should stay as strings
+  const strFields = ['bodyConditionScore', 'liveWeight'];
+  if (strFields.includes(key)) return v;
   return v;
 }
 
@@ -275,9 +287,11 @@ export default function CSVImportPage() {
   const [csv, setCsv] = useState<{ headers: string[]; rows: string[][] } | null>(null);
   const [mappings, setMappings] = useState<Record<string, string>>({});
   const [parsed, setParsed] = useState<ParsedRow[]>([]);
-  const [step, setStep] = useState<'upload' | 'map' | 'preview' | 'importing' | 'done'>('upload');
+  const [step, setStep] = useState<'upload' | 'map' | 'preview' | 'importing' | 'done' | 'fix'>('upload');
   const [progress, setProgress] = useState(0);
   const [stats, setStats] = useState({ animals: 0, health: 0, repro: 0, weight: 0, prod: 0 });
+  const [failedImports, setFailedImports] = useState<{ cowId: string, visualId: string, error: string, data: Record<string, any> }[]>([]);
+  const [editingFailed, setEditingFailed] = useState<Record<number, Record<string, any>>>({});
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const qc = useQueryClient();
 
@@ -305,185 +319,236 @@ export default function CSVImportPage() {
       const mapped: Record<string, any> = {};
       csv.headers.forEach((h, j) => { const k = mappings[h]; if (k) { const v = normalizeValue(row[j], k); if (v !== null) mapped[k] = v; } });
       const errors: string[] = [], warnings: string[] = [];
-      if (!mapped.sex) errors.push('Sex required');
+      if (!mapped.sex) warnings.push('No sex - defaulting to female');
       if (!mapped.cowId && !mapped.naitTag && !mapped.visualId && !mapped.eid) warnings.push('No ID');
       return { idx: i, mapped, errors, warnings };
     });
     setParsed(rows);
-    setSelected(new Set(rows.filter(r => !r.errors.length).map(r => r.idx)));
+    const validRows = rows.filter(r => !r.errors.length);
+    console.log(`Parsed ${rows.length} rows, ${validRows.length} valid (no errors)`);
+    console.log(`Mapped headers:`, Object.keys(mappings).length, mappings);
+    if (rows.length > 0) console.log('Sample mapped row:', rows[0].mapped);
+    setSelected(new Set(validRows.map(r => r.idx)));
     setStep('preview');
+  };
+
+  // Helper to build animal payload
+  const buildAnimalPayload = (a: Record<string, any>) => {
+    // Helper to convert empty strings to undefined (for unique constraint fields)
+    const nonEmpty = (v: any) => (v === '' || v === null || v === undefined) ? undefined : v;
+    
+    // Helper to ensure date is in YYYY-MM-DD format
+    const sanitizeDate = (v: any): string | undefined => {
+      if (!v || v === '' || v === null) return undefined;
+      const s = String(v).trim();
+      // Already in YYYY-MM-DD format
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      // DD/MM/YYYY format - convert
+      const m1 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (m1) return `${m1[3]}-${m1[2].padStart(2,'0')}-${m1[1].padStart(2,'0')}`;
+      // DD Mon YYYY format
+      const m2 = s.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
+      if (m2) {
+        const months: Record<string, string> = { jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12' };
+        const month = months[m2[2].toLowerCase()];
+        if (month) return `${m2[3]}-${month}-${m2[1].padStart(2,'0')}`;
+      }
+      // Invalid date format - return undefined to skip
+      return undefined;
+    };
+    
+    const payload: Record<string, any> = {
+      farmId: '1',
+      // Unique fields - must be undefined (not empty string) to avoid duplicate key violations
+      cowId: nonEmpty(a.cowId), 
+      visualId: nonEmpty(a.visualId), 
+      lifetimeId: nonEmpty(a.lifetimeId),
+      naitTag: nonEmpty(a.naitTag), 
+      eid: nonEmpty(a.eid), 
+      // Non-unique fields
+      birthId: a.birthId, ahbId: a.ahbId,
+      name: a.name, sex: a.sex || 'female', breed: a.breed,
+      dateOfBirth: sanitizeDate(a.dateOfBirth), yearBorn: a.yearBorn,
+      status: a.status || 'active', notes: a.notes,
+      milkStatus: a.milkStatus, a2Status: a.a2Status,
+      bvdStatus: a.bvdStatus, bvdTestDate: sanitizeDate(a.bvdTestDate),
+      dnaProfile: a.dnaProfile, pedigreeIndicator: a.pedigreeIndicator,
+      dateRemoved: sanitizeDate(a.dateRemoved), removalFate: a.removalFate, removalReason: a.removalReason,
+      startDate: sanitizeDate(a.purchaseDate),
+      bodyConditionScore: a.bodyConditionScore, bcsDate: sanitizeDate(a.bcsDate),
+      liveWeight: a.liveWeight, liveWeightDate: sanitizeDate(a.liveWeightDate),
+      naitDescription: a.naitDescription,
+    };
+    if (a.damId || a.damBreed) payload.damInfo = { officialId: a.damId, breed: a.damBreed, managementNumber: a.damManagementNumber, bw: a.damBW, pw: a.damPW, lw: a.damLW };
+    if (a.sireId || a.sireName) payload.sireInfo = { name: a.sireName, breed: a.sireBreed, externalId: a.sireId };
+    const bvs: Record<string, any> = {};
+    if (a.breedingWorth !== undefined) { bvs.bw = a.breedingWorth; bvs.bwReliability = a.bwReliability; }
+    if (a.productionWorth !== undefined) { bvs.pw = a.productionWorth; bvs.pwReliability = a.pwReliability; }
+    if (a.lactationWorth !== undefined) bvs.lw = a.lactationWorth;
+    if (Object.keys(bvs).length > 0) payload.breedingValues = bvs;
+    if (a.lactationNumber || a.daysInMilk || a.milkKgMS) {
+      payload.lactationInfo = { lactationNumber: a.lactationNumber, daysInMilk: a.daysInMilk, milkKgMS: a.milkKgMS, fatKg: a.fatKg, proteinKg: a.proteinKg };
+    }
+    if (a.lastMatingDate || a.pregnancyStatus || a.dueDate) {
+      payload.reproductionStatus = { lastMatingDate: a.lastMatingDate, pregnancyStatus: a.pregnancyStatus, dueDate: a.dueDate, daysPregnant: a.daysPregnant };
+    }
+    if (a.herdTestDate || a.herdTestMilk) {
+      payload.latestHerdTest = { testDate: a.herdTestDate, milkTotal: a.herdTestMilk, scc: a.herdTestSCC };
+    }
+    
+    // Remove undefined values from payload to keep it clean
+    Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
+    
+    return payload;
   };
 
   const importMut = useMutation({
     mutationFn: async (animals: Record<string, any>[]) => {
       const s = { animals: 0, health: 0, repro: 0, weight: 0, prod: 0 };
-      for (let i = 0; i < animals.length; i++) {
-        const a = animals[i];
+      const allFailed: { cowId: string, visualId: string, error: string, data: Record<string, any> }[] = [];
+      
+      // Build all payloads
+      const payloads = animals.map(buildAnimalPayload);
+      
+      // Use fast bulk import endpoint - process in batches of 50
+      const BATCH_SIZE = 50;
+      for (let i = 0; i < payloads.length; i += BATCH_SIZE) {
+        const batch = payloads.slice(i, i + BATCH_SIZE);
         try {
-          // Build comprehensive animal payload with all Minda fields
-          const animalPayload: Record<string, any> = {
-            farmId: '1',
-            // Identification
-            cowId: a.cowId, visualId: a.visualId, lifetimeId: a.lifetimeId,
-            naitTag: a.naitTag, eid: a.eid, birthId: a.birthId, ahbId: a.ahbId,
-            // Basic info
-            name: a.name, sex: a.sex || 'female', breed: a.breed,
-            dateOfBirth: a.dateOfBirth, yearBorn: a.yearBorn,
-            status: a.status || 'active', notes: a.notes,
-            // Minda status fields
-            milkStatus: a.milkStatus, a2Status: a.a2Status,
-            bvdStatus: a.bvdStatus, bvdTestDate: a.bvdTestDate,
-            dnaProfile: a.dnaProfile, pedigreeIndicator: a.pedigreeIndicator,
-            // Removal info
-            dateRemoved: a.dateRemoved, removalFate: a.removalFate, removalReason: a.removalReason,
-            startDate: a.purchaseDate,
-            // Health scores
-            bodyConditionScore: a.bodyConditionScore, bcsDate: a.bcsDate,
-            liveWeight: a.liveWeight, liveWeightDate: a.liveWeightDate,
-            // Location
-            naitDescription: a.naitDescription,
-          };
-          // Dam info
-          if (a.damId || a.damBreed || a.damManagementNumber || a.damBW) {
-            animalPayload.damInfo = { officialId: a.damId, breed: a.damBreed, managementNumber: a.damManagementNumber, bw: a.damBW, pw: a.damPW, lw: a.damLW };
-          }
-          // Sire info
-          if (a.sireId || a.sireName || a.sireBreed || a.sireBW) {
-            animalPayload.sireInfo = { name: a.sireName, breed: a.sireBreed, externalId: a.sireId };
-          }
-          // Breeding values
-          const bvs: Record<string, any> = {};
-          if (a.breedingWorth !== undefined) { bvs.bw = a.breedingWorth; bvs.bwReliability = a.bwReliability; }
-          if (a.productionWorth !== undefined) { bvs.pw = a.productionWorth; bvs.pwReliability = a.pwReliability; }
-          if (a.lactationWorth !== undefined) bvs.lw = a.lactationWorth;
-          if (a.milkBV !== undefined) { bvs.milkBV = a.milkBV; bvs.milkBVReliability = a.milkBVReliability; }
-          if (a.fatBV !== undefined) { bvs.fatBV = a.fatBV; bvs.fatBVReliability = a.fatBVReliability; }
-          if (a.proteinBV !== undefined) { bvs.proteinBV = a.proteinBV; bvs.proteinBVReliability = a.proteinBVReliability; }
-          if (a.fertilityBV !== undefined) { bvs.fertilityBV = a.fertilityBV; bvs.fertilityBVReliability = a.fertilityBVReliability; }
-          if (a.sccBV !== undefined) { bvs.sccBV = a.sccBV; bvs.sccBVReliability = a.sccBVReliability; }
-          if (a.liveweightBV !== undefined) { bvs.liveweightBV = a.liveweightBV; bvs.liveweightBVReliability = a.liveweightBVReliability; }
-          if (a.survivalBV !== undefined) { bvs.survivalBV = a.survivalBV; bvs.survivalBVReliability = a.survivalBVReliability; }
-          if (a.gestationBV !== undefined) { bvs.gestationBV = a.gestationBV; }
-          if (a.calvingDifficultyBV !== undefined) { bvs.calvingDifficultyBV = a.calvingDifficultyBV; }
-          if (a.bcsBV !== undefined) { bvs.bcsBV = a.bcsBV; }
-          if (a.statureBV !== undefined) bvs.statureBV = a.statureBV;
-          if (a.capacityBV !== undefined) bvs.capacityBV = a.capacityBV;
-          if (a.udderOverallBV !== undefined) bvs.udderOverallBV = a.udderOverallBV;
-          if (a.milkingSpeedBV !== undefined) bvs.milkingSpeedBV = a.milkingSpeedBV;
-          if (a.temperamentBV !== undefined) bvs.temperamentBV = a.temperamentBV;
-          if (Object.keys(bvs).length > 0) animalPayload.breedingValues = bvs;
-          // Lactation info
-          if (a.lactationNumber || a.daysInMilk || a.milkKgMS || a.fatKg || a.proteinKg) {
-            animalPayload.lactationInfo = {
-              lactationNumber: a.lactationNumber, lactationStartDate: a.lactationStartDate,
-              daysInMilk: a.daysInMilk, daysLactating: a.daysLactating,
-              milkKgMS: a.milkKgMS, milkLitres: a.milkLitres,
-              fatKg: a.fatKg, fatPercent: a.fatPercent,
-              proteinKg: a.proteinKg, proteinPercent: a.proteinPercent,
-              dryOffDate: a.dryOffDate,
-            };
-          }
-          // Reproduction status
-          if (a.lastMatingDate || a.pregnancyStatus || a.dueDate || a.calvingDate) {
-            animalPayload.reproductionStatus = {
-              lastMatingDate: a.lastMatingDate, matingType: a.matingType, matingSire: a.matingSire,
-              heatDate: a.heatDate, daysPregnant: a.daysPregnant,
-              pregnancyStatus: a.pregnancyStatus, dueDate: a.dueDate, foetalCount: a.foetalCount,
-              atRiskCow: a.atRiskCow, nonCycling: a.nonCycling,
-              calvingDate: a.calvingDate, calvingAssistance: a.calvingAssistance,
-            };
-          }
-          // Last calf info
-          if (a.calfBirthId || a.calfBirthDate || a.calfSex) {
-            animalPayload.lastCalfInfo = {
-              calfBirthId: a.calfBirthId, calfBirthDate: a.calfBirthDate,
-              calfSex: a.calfSex, calfBreed: a.calfBreed, calfBW: a.calfBW, calfFate: a.calfFate,
-            };
-          }
-          // Latest herd test
-          if (a.herdTestDate || a.herdTestMilk || a.herdTestSCC) {
-            animalPayload.latestHerdTest = {
-              testDate: a.herdTestDate, milkTotal: a.herdTestMilk,
-              fatPercent: a.herdTestFatPercent, fatKg: a.herdTestFatKg,
-              proteinPercent: a.herdTestProteinPercent, proteinKg: a.herdTestProteinKg,
-              milkSolidsKg: a.herdTestMS, scc: a.herdTestSCC,
-              assessment: a.herdTestAssessment, abnormalCode: a.herdTestAbnormalCode,
-            };
-          }
-          // Health summary
-          if (a.mastitisCount || a.lamenessCount || a.healthCondition || a.healthTreatment) {
-            animalPayload.healthSummary = {
-              mastitisCount: a.mastitisCount, lamenessCount: a.lamenessCount,
-              lastCondition: a.healthCondition, lastConditionCategory: a.healthConditionCategory,
-              lastTreatment: a.healthTreatment, lastTreatmentDate: a.lastTreatmentDate,
-              lastHealthEventDate: a.healthEventDate,
-              meatWithholdDays: a.meatWithholdDays, milkWithholdHours: a.milkWithholdHours,
-              vetName: a.vetName,
-            };
-          }
-          // Pre-calving info
-          if (a.expectedCalfBW || a.expectedCalfSireId) {
-            animalPayload.preCalvingInfo = {
-              expectedCalfBW: a.expectedCalfBW, expectedCalfSireId: a.expectedCalfSireId,
-            };
-          }
-
-          const res = await fetch('/api/animals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(animalPayload) });
+          const res = await fetch('/api/bulk/animals/import-fast', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ animals: batch })
+          });
           if (res.ok) {
-            s.animals++;
-            const animal = await res.json();
-            // Create weight record if liveWeight present
-            if (a.liveWeight) {
-              await fetch('/api/weight-records', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ animalId: animal.id, weight: a.liveWeight, date: a.liveWeightDate || new Date().toISOString().split('T')[0], recordedBy: '1' })
-              }).catch(() => {});
-              s.weight++;
+            const result = await res.json();
+            s.animals += result.created || 0;
+            if (result.failed && result.failed.length > 0) {
+              allFailed.push(...result.failed);
             }
-            // Create herd test record if present
-            if (a.herdTestDate && (a.herdTestMilk || a.herdTestSCC)) {
-              await fetch('/api/herd-test-results', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  animalId: animal.id, testDate: a.herdTestDate,
-                  milkTotalLitres: a.herdTestMilk, fatPercent: a.herdTestFatPercent, fatKg: a.herdTestFatKg,
-                  proteinPercent: a.herdTestProteinPercent, proteinKg: a.herdTestProteinKg,
-                  milkSolidsKg: a.herdTestMS, scc: a.herdTestSCC,
-                  assessment: a.herdTestAssessment, daysInMilk: a.daysInMilk,
-                })
-              }).catch(() => {});
-              s.prod++;
-            }
-            // Create reproduction event if mating data present
-            if (a.lastMatingDate || a.dueDate) {
-              await fetch('/api/reproduction-events', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ animalId: animal.id, eventType: a.pregnancyStatus ? 'pregnancy_check' : 'ai',
-                  eventDate: a.lastMatingDate || new Date().toISOString().split('T')[0],
-                  pregnancyDetails: a.dueDate ? { isPregnant: true, dueDate: a.dueDate, daysPregnant: a.daysPregnant } : undefined,
-                })
-              }).catch(() => {});
-              s.repro++;
-            }
-            // Create health record if condition present
-            if (a.healthCondition || a.healthTreatment) {
-              await fetch('/api/health-records', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ animalId: animal.id, recordDate: a.healthEventDate || new Date().toISOString().split('T')[0],
-                  somaticCellCount: a.somaticCellCount, bodyConditionScore: a.bodyConditionScore,
-                  notes: `${a.healthConditionCategory || ''}: ${a.healthCondition || ''} - ${a.healthTreatment || ''}`.trim(),
-                  recordedBy: '1',
-                })
-              }).catch(() => {});
-              s.health++;
-            }
+            console.log(`Batch ${Math.floor(i/BATCH_SIZE) + 1}: ${result.created} created, ${result.skipped} failed`);
+          } else {
+            const errText = await res.text();
+            console.error(`Batch import failed: status=${res.status} ${res.statusText}`, errText);
           }
-        } catch (e) { console.error('Import error:', e); }
-        setProgress(Math.round(((i + 1) / animals.length) * 100));
+        } catch (e: any) {
+          console.error('Batch error:', e?.message || e?.toString() || JSON.stringify(e));
+        }
+        setProgress(Math.round(((i + BATCH_SIZE) / payloads.length) * 100));
       }
+      
+      setFailedImports(allFailed);
       return s;
     },
-    onSuccess: s => { setStats(s); setStep('done'); qc.invalidateQueries({ queryKey: ['/api/animals'] }); toast.success(`Imported ${s.animals} animals!`); },
+    onSuccess: s => { 
+      setStats(s); 
+      setStep('done'); 
+      qc.invalidateQueries({ queryKey: ['/api/animals'] }); 
+      if (failedImports.length > 0) {
+        toast.warning(`Imported ${s.animals} animals, ${failedImports.length} failed`);
+      } else {
+        toast.success(`Imported ${s.animals} animals!`);
+      }
+    },
   });
 
-  const startImport = () => { setStep('importing'); setProgress(0); importMut.mutate(parsed.filter(r => selected.has(r.idx)).map(r => r.mapped)); };
-  const reset = () => { setFile(null); setCsv(null); setMappings({}); setParsed([]); setStep('upload'); setProgress(0); setSelected(new Set()); };
+  const startImport = () => { 
+    const selectedAnimals = parsed.filter(r => selected.has(r.idx)).map(r => r.mapped);
+    console.log(`Starting import: ${selectedAnimals.length} animals selected out of ${parsed.length} parsed`);
+    if (selectedAnimals.length === 0) {
+      toast.error('No animals selected for import');
+      return;
+    }
+    setStep('importing'); 
+    setProgress(0); 
+    importMut.mutate(selectedAnimals); 
+  };
+  const reset = () => { setFile(null); setCsv(null); setMappings({}); setParsed([]); setStep('upload'); setProgress(0); setSelected(new Set()); setFailedImports([]); setEditingFailed({}); };
+
+  // Get readable error description
+  const getErrorDescription = (error: string): { field: string, issue: string, suggestion: string } => {
+    if (error.includes('Duplicate Cow ID')) {
+      const id = error.match(/Duplicate Cow ID: (.+)/)?.[1] || '';
+      return { field: 'Cow ID', issue: `"${id}" already exists in database`, suggestion: 'Change to a unique ID or leave blank' };
+    }
+    if (error.includes('Duplicate EID')) {
+      const id = error.match(/Duplicate EID: (.+)/)?.[1] || '';
+      return { field: 'EID', issue: `"${id}" already exists`, suggestion: 'Change to a unique EID or clear the field' };
+    }
+    if (error.includes('Duplicate Lifetime ID')) {
+      const id = error.match(/Duplicate Lifetime ID: (.+)/)?.[1] || '';
+      return { field: 'Lifetime ID', issue: `"${id}" already exists`, suggestion: 'Change to a unique Lifetime ID or clear the field' };
+    }
+    if (error.includes('Missing required')) {
+      const field = error.match(/Missing required field: (.+)/)?.[1] || 'unknown';
+      return { field, issue: 'This field is required but empty', suggestion: 'Provide a value for this field' };
+    }
+    return { field: 'Unknown', issue: error, suggestion: 'Review and correct the data' };
+  };
+
+  // Update a failed import's data
+  const updateFailedData = (idx: number, field: string, value: string) => {
+    setEditingFailed(prev => ({
+      ...prev,
+      [idx]: { ...(prev[idx] || failedImports[idx].data), [field]: value || undefined }
+    }));
+  };
+
+  // Retry importing fixed animals
+  const retryFailedImports = async () => {
+    const toRetry = failedImports.map((f, i) => editingFailed[i] || f.data);
+    setStep('importing');
+    setProgress(0);
+    
+    const s = { animals: 0, health: 0, repro: 0, weight: 0, prod: 0 };
+    const stillFailed: { cowId: string, visualId: string, error: string, data: Record<string, any> }[] = [];
+    
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < toRetry.length; i += BATCH_SIZE) {
+      const batch = toRetry.slice(i, i + BATCH_SIZE);
+      try {
+        const res = await fetch('/api/bulk/animals/import-fast', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ animals: batch })
+        });
+        if (res.ok) {
+          const result = await res.json();
+          s.animals += result.created || 0;
+          if (result.failed) stillFailed.push(...result.failed);
+        }
+      } catch (e) {
+        console.error('Retry batch error:', e);
+      }
+      setProgress(Math.round(((i + BATCH_SIZE) / toRetry.length) * 100));
+    }
+    
+    setFailedImports(stillFailed);
+    setEditingFailed({});
+    setStats(prev => ({ ...prev, animals: prev.animals + s.animals }));
+    setStep('done');
+    qc.invalidateQueries({ queryKey: ['/api/animals'] });
+    
+    if (stillFailed.length > 0) {
+      toast.warning(`Fixed ${s.animals} animals, ${stillFailed.length} still have issues`);
+    } else {
+      toast.success(`Successfully imported ${s.animals} fixed animals!`);
+    }
+  };
+
+  const downloadFailedCSV = () => {
+    if (failedImports.length === 0) return;
+    const headers = ['Cow ID', 'Visual ID', 'Error'];
+    const rows = failedImports.map(f => [f.cowId, f.visualId, `"${f.error}"`].join(','));
+    const csvContent = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'failed_imports.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const downloadTemplate = () => {
     const h = ['Animal ID','Visual ID','NAIT Number','Name','Sex','Breed','Date of Birth','Status','Dam ID','Sire ID','BW','PW','Mating Date','Due Date','In Calf','Lactation Number','Milk kgMS','Fat %','Protein %','SCC','BCS','Live Weight','Current Mob','Notes'];
@@ -563,11 +628,14 @@ export default function CSVImportPage() {
       {step === 'preview' && (
         <Card>
           <CardHeader>
-            <CardTitle>Preview Import</CardTitle>
+            <CardTitle>Preview Import - {parsed.length} Total Rows</CardTitle>
             <div className="flex gap-4 mt-2">
               <Badge className="bg-emerald-100 text-emerald-800"><CheckCircle2 className="h-3 w-3 mr-1" />{parsed.filter(r => !r.errors.length).length} Ready</Badge>
               <Badge className="bg-amber-100 text-amber-800"><AlertTriangle className="h-3 w-3 mr-1" />{parsed.filter(r => r.warnings.length && !r.errors.length).length} Warnings</Badge>
               <Badge className="bg-red-100 text-red-800"><AlertCircle className="h-3 w-3 mr-1" />{parsed.filter(r => r.errors.length).length} Errors</Badge>
+              <Button size="sm" variant="outline" onClick={() => setSelected(new Set(parsed.filter(r => !r.errors.length).map(r => r.idx)))}>
+                Select All Valid ({parsed.filter(r => !r.errors.length).length})
+              </Button>
             </div>
           </CardHeader>
           <CardContent>
@@ -623,9 +691,137 @@ export default function CSVImportPage() {
               <div className="text-center"><p className="text-2xl font-bold text-emerald-700">{stats.weight}</p><p className="text-sm text-emerald-600">Weights</p></div>
               <div className="text-center"><p className="text-2xl font-bold text-emerald-700">{stats.prod}</p><p className="text-sm text-emerald-600">Production</p></div>
             </div>
+            
+            {failedImports.length > 0 && (
+              <div className="mb-6 p-4 bg-amber-100 border border-amber-300 rounded-lg max-w-2xl mx-auto">
+                <div className="flex items-center justify-center gap-2 mb-3">
+                  <AlertTriangle className="h-5 w-5 text-amber-600" />
+                  <span className="font-semibold text-amber-800">{failedImports.length} animals failed to import</span>
+                </div>
+                <p className="text-sm text-amber-700 mb-3">You can fix these issues and retry the import</p>
+                <div className="flex gap-2 justify-center">
+                  <Button size="sm" onClick={() => setStep('fix')} className="bg-amber-600 hover:bg-amber-700">
+                    <AlertCircle className="h-4 w-4 mr-2" />Fix Issues & Retry
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={downloadFailedCSV} className="border-amber-400 text-amber-700 hover:bg-amber-200">
+                    <Download className="h-4 w-4 mr-2" />Download CSV
+                  </Button>
+                </div>
+              </div>
+            )}
+            
             <div className="flex gap-4 justify-center">
               <Button variant="outline" onClick={reset}>Import More</Button>
               <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={() => window.location.href = '/app/animals'}>View Animals</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {step === 'fix' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-600" />
+              Fix Import Issues ({failedImports.length} animals)
+            </CardTitle>
+            <CardDescription>Review and fix the issues below, then retry the import</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="h-[500px] border rounded-lg">
+              <div className="divide-y">
+                {failedImports.map((failed, idx) => {
+                  const errorInfo = getErrorDescription(failed.error);
+                  const currentData = editingFailed[idx] || failed.data;
+                  
+                  return (
+                    <div key={idx} className="p-4 hover:bg-gray-50">
+                      <div className="flex items-start gap-4">
+                        <div className="flex-shrink-0 w-16 text-center">
+                          <span className="text-lg font-bold text-gray-700">{failed.cowId || failed.visualId || `#${idx + 1}`}</span>
+                        </div>
+                        
+                        <div className="flex-1">
+                          {/* Error Banner */}
+                          <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded-lg">
+                            <div className="flex items-center gap-2">
+                              <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
+                              <div>
+                                <span className="font-semibold text-red-700">{errorInfo.field}:</span>
+                                <span className="text-red-600 ml-1">{errorInfo.issue}</span>
+                              </div>
+                            </div>
+                            <p className="text-sm text-red-500 mt-1 ml-6">💡 {errorInfo.suggestion}</p>
+                          </div>
+                          
+                          {/* Editable Fields */}
+                          <div className="grid grid-cols-4 gap-3">
+                            <div>
+                              <label className="text-xs text-gray-500">Cow ID</label>
+                              <input
+                                type="text"
+                                value={currentData.cowId || ''}
+                                onChange={(e) => updateFailedData(idx, 'cowId', e.target.value)}
+                                className={`w-full px-2 py-1 text-sm border rounded ${errorInfo.field === 'Cow ID' ? 'border-red-400 bg-red-50' : 'border-gray-300'}`}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-xs text-gray-500">Visual ID</label>
+                              <input
+                                type="text"
+                                value={currentData.visualId || ''}
+                                onChange={(e) => updateFailedData(idx, 'visualId', e.target.value)}
+                                className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-xs text-gray-500">EID</label>
+                              <input
+                                type="text"
+                                value={currentData.eid || ''}
+                                onChange={(e) => updateFailedData(idx, 'eid', e.target.value)}
+                                className={`w-full px-2 py-1 text-sm border rounded ${errorInfo.field === 'EID' ? 'border-red-400 bg-red-50' : 'border-gray-300'}`}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-xs text-gray-500">Lifetime ID</label>
+                              <input
+                                type="text"
+                                value={currentData.lifetimeId || ''}
+                                onChange={(e) => updateFailedData(idx, 'lifetimeId', e.target.value)}
+                                className={`w-full px-2 py-1 text-sm border rounded ${errorInfo.field === 'Lifetime ID' ? 'border-red-400 bg-red-50' : 'border-gray-300'}`}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setFailedImports(prev => prev.filter((_, i) => i !== idx))}
+                          className="text-gray-400 hover:text-red-500"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </ScrollArea>
+            
+            <div className="flex gap-4 justify-between mt-4">
+              <Button variant="outline" onClick={() => setStep('done')}>
+                Back to Summary
+              </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => { setFailedImports([]); setStep('done'); }}>
+                  Skip All Failed
+                </Button>
+                <Button onClick={retryFailedImports} className="bg-emerald-600 hover:bg-emerald-700">
+                  Retry Import ({failedImports.length} animals)
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>

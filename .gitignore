@@ -1,24 +1,53 @@
+# Dependencies
 node_modules
+
+# Build outputs
 dist
+.vite
+
+# Cache
+.cache
+.prisma
+
+# Test coverage
+coverage
+
+# OS files
 .DS_Store
+
+# Server
 server/public
 vite.config.ts.*
+
+# Archives
 *.tar.gz
-uploads/
+
+# Uploads (keep placeholder files)
+uploads/*
+!uploads/.gitkeep
+!uploads/chat/.gitkeep
+!uploads/photos/.gitkeep
+!uploads/voice-notes/.gitkeep
+
+# Deployment
 .vercel
+
+# Environment
 .env*.local
 .env
 .local
+
+# Project specific
 pulse
 attached_assets
+
+# Logs & databases
 *.log
 *.sql
 *.db
-.cache
+
+# Temp directories
 tmp
 temp
 integration_temp
-temp_overlay
-temp_p28
-temp_p29
 testing

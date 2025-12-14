@@ -49,7 +49,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-50 to-slate-100">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-50 to-slate-100 login-background">
       <Card className="w-full max-w-md bg-white shadow-xl border border-slate-200">
         <CardHeader className="space-y-4 text-center">
           <div>

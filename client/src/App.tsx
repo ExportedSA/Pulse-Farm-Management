@@ -10,9 +10,11 @@ import { Button } from "@/components/ui/button";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { PWAProvider, usePWA } from "@/lib/pwa-context";
+import { FarmProvider } from "@/lib/farm-context";
 import { RequireAuth } from "@/components/RequireAuth";
 import { ChatProvider } from "@/contexts/ChatContext";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
+import { FarmSwitcher } from "@/components/FarmSwitcher";
 import { Home as HomeIcon, LogOut, Wifi, WifiOff, Bell, MapPin } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -53,6 +55,7 @@ import ContractorManagementPage from "@/pages/contractor-management-page";
 import RecurringTasksPage from "@/pages/recurring-tasks-page";
 import TaskTemplatesPage from "@/pages/task-templates-page";
 import TaskCalendarPage from "@/pages/task-calendar-page";
+import FarmCalendarPage from "@/pages/farm-calendar-page";
 import WeatherPage from "@/pages/weather-page";
 import { NotificationCenter } from "@/components/NotificationCenter";
 import TimesheetsPage from "@/pages/timesheets-page";
@@ -82,6 +85,8 @@ import HerdReportsPage from "@/pages/herd-reports-page";
 import PastureWalkPage from "@/pages/pasture-walk-page";
 import RosterSchedulingPage from "@/pages/roster-scheduling-page";
 import HealthSafetyPage from "@/pages/health-safety-page";
+import SafetyPage from "@/pages/safety-page";
+import PeoplePage from "@/pages/people-page";
 import AssetRegistryPage from "@/pages/asset-registry-page";
 import FarmFinancePage from "@/pages/farm-finance-page";
 import QRCodeManagementPage from "@/pages/qr-code-management-page";
@@ -99,16 +104,26 @@ import FeedPlanningPage from "@/pages/feed-planning-page";
 import IoTDashboardPage from "@/pages/iot-dashboard-page";
 import MultiFarmPage from "@/pages/multi-farm-page";
 import CSVImportPage from "@/pages/csv-import-page";
+import MobileScanner from "@/pages/mobile-scanner";
+// Phase overlay imports
+import RunSheet from "@/pages/RunSheet";
+import PregQuick from "@/pages/PregQuick";
+import Treat from "@/pages/Treat";
+import Medicines from "@/pages/Medicines";
+import Inventory from "@/pages/Inventory";
+import HealthReports from "@/pages/Reports";
+import OnboardingWizard from "@/pages/OnboardingWizard";
 
 function Router() {
   const [location] = useLocation();
-  const isPublicRoute = location === "/login" || location.startsWith("/visitor-signin/");
+  const isPublicRoute = location === "/login" || location.startsWith("/visitor-signin/") || location.startsWith("/app/mobile-scanner");
 
   if (isPublicRoute) {
     return (
       <Switch>
         <Route path="/login" component={LoginPage} />
         <Route path="/visitor-signin/:code" component={VisitorPortalPage} />
+        <Route path="/app/mobile-scanner" component={MobileScanner} />
         <Route component={NotFound} />
       </Switch>
     );
@@ -124,7 +139,7 @@ function Router() {
         <Route path="/app/jobs" component={JobsPage} />
         <Route path="/app/recurring-tasks" component={RecurringTasksPage} />
         <Route path="/app/task-templates" component={TaskTemplatesPage} />
-        <Route path="/app/calendar" component={TaskCalendarPage} />
+        <Route path="/app/calendar" component={FarmCalendarPage} />
         <Route path="/app/weather" component={WeatherPage} />
         <Route path="/app/timesheets" component={TimesheetsPage} />
         <Route path="/app/kanban" component={KanbanPage} />
@@ -140,6 +155,8 @@ function Router() {
         <Route path="/app/operations/contractors" component={ContractorManagementPage} />
         <Route path="/app/operations/roster" component={RosterSchedulingPage} />
         <Route path="/app/health-safety" component={HealthSafetyPage} />
+        <Route path="/app/safety" component={SafetyPage} />
+        <Route path="/app/people" component={PeoplePage} />
         <Route path="/app/asset-registry" component={AssetRegistryPage} />
         <Route path="/app/farm-finance" component={FarmFinancePage} />
         <Route path="/app/financial-analytics" component={FinancialAnalyticsPage} />
@@ -195,6 +212,14 @@ function Router() {
         <Route path="/app/feed-planning" component={FeedPlanningPage} />
         <Route path="/app/iot" component={IoTDashboardPage} />
         <Route path="/app/multi-farm" component={MultiFarmPage} />
+        {/* Phase overlay routes */}
+        <Route path="/app/repro/runsheet" component={RunSheet} />
+        <Route path="/app/repro/preg" component={PregQuick} />
+        <Route path="/app/health/treat" component={Treat} />
+        <Route path="/app/health/medicines" component={Medicines} />
+        <Route path="/app/health/inventory" component={Inventory} />
+        <Route path="/app/health/reports" component={HealthReports} />
+        <Route path="/app/setup" component={OnboardingWizard} />
         <Route component={NotFound} />
       </Switch>
     </RequireAuth>
@@ -331,6 +356,8 @@ function AppHeader() {
             <span className="hidden md:inline font-medium">Dashboard</span>
           </Link>
         </Button>
+        <div className="hidden md:block border-l h-6 mx-2" />
+        <FarmSwitcher />
       </div>
       <div className="flex items-center gap-3">
         <NotificationCenter />
@@ -416,7 +443,7 @@ function AppShell() {
   return (
     <>
       <SidebarProvider defaultOpen={false} style={style as React.CSSProperties}>
-        <div className="flex h-screen w-full">
+        <div className="flex h-screen w-full app-background">
           <AppSidebar />
           <div className="flex flex-col flex-1 overflow-hidden min-w-0">
             <AppHeader />
@@ -438,11 +465,13 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <PWAProvider>
         <AuthProvider>
-          <ChatProvider>
-            <TooltipProvider>
-              <AppShell />
-            </TooltipProvider>
-          </ChatProvider>
+          <FarmProvider>
+            <ChatProvider>
+              <TooltipProvider>
+                <AppShell />
+              </TooltipProvider>
+            </ChatProvider>
+          </FarmProvider>
         </AuthProvider>
       </PWAProvider>
     </QueryClientProvider>

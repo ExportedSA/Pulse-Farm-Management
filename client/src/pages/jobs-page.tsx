@@ -762,11 +762,32 @@ export default function JobsPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="text-sm font-medium mb-2 block">Location *</label>
-                      <Input
-                        value={newJob.location}
-                        onChange={(e) => setNewJob({ ...newJob, location: e.target.value })}
-                        placeholder="e.g., Paddock A"
-                      />
+                      <div className="flex gap-2">
+                        <Input
+                          value={newJob.location}
+                          onChange={(e) => setNewJob({ ...newJob, location: e.target.value })}
+                          placeholder="e.g., Paddock A"
+                          className="flex-1"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          onClick={() => {
+                            const mapSection = document.getElementById('job-map-picker');
+                            mapSection?.scrollIntoView({ behavior: 'smooth' });
+                          }}
+                          title="Pin location on map"
+                        >
+                          <MapPin className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      {newJob.latitude && newJob.longitude && (
+                        <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
+                          <MapPin className="h-3 w-3" />
+                          GPS: {newJob.latitude.toFixed(5)}, {newJob.longitude.toFixed(5)}
+                        </p>
+                      )}
                     </div>
 
                     <div>
@@ -968,7 +989,7 @@ export default function JobsPage() {
                     <label className="text-sm font-medium mb-2 block">Assign To *</label>
                     <div className="space-y-2 max-h-48 overflow-y-auto border rounded-lg p-3">
                       {availableUsers.map(user => (
-                        <label key={user.id} className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                        <label key={user.id} className="flex items-center gap-3 p-2 hover:bg-accent rounded cursor-pointer">
                           <input
                             type="checkbox"
                             checked={newJob.assignedTo.includes(user.id)}
@@ -1080,9 +1101,12 @@ export default function JobsPage() {
                   />
 
                   {/* Location Picker Section */}
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">Pin Location on Map</label>
-                    <p className="text-xs text-gray-500 mb-3">Click on the map to set the exact location for this job</p>
+                  <div id="job-map-picker">
+                    <label className="text-sm font-medium mb-2 block flex items-center gap-2">
+                      <MapPin className="h-4 w-4 text-primary" />
+                      Pin Location on Map
+                    </label>
+                    <p className="text-xs text-muted-foreground mb-3">Click on the map to set the exact GPS location. The assigned person can view this on their device.</p>
                     <JobLocationPicker
                       latitude={newJob.latitude}
                       longitude={newJob.longitude}
@@ -1580,6 +1604,40 @@ export default function JobsPage() {
                     <span>{selectedJob.assignedToNames?.join(', ')}</span>
                   </div>
                 </div>
+
+                {/* Location Map - Show if GPS coordinates exist */}
+                {selectedJob.latitude && selectedJob.longitude && (
+                  <div className="border rounded-lg overflow-hidden">
+                    <div className="bg-muted/50 px-4 py-2 border-b flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <MapPin className="h-4 w-4 text-primary" />
+                        <span className="text-sm font-medium">Pinned Location</span>
+                      </div>
+                      <a
+                        href={`https://www.google.com/maps?q=${selectedJob.latitude},${selectedJob.longitude}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-primary hover:underline flex items-center gap-1"
+                      >
+                        <Navigation className="h-3 w-3" />
+                        Open in Google Maps
+                      </a>
+                    </div>
+                    <div className="h-48">
+                      <Suspense fallback={<div className="h-full flex items-center justify-center bg-muted"><MapPin className="h-8 w-8 text-muted-foreground animate-pulse" /></div>}>
+                        <JobLocationPicker
+                          latitude={selectedJob.latitude}
+                          longitude={selectedJob.longitude}
+                          onLocationChange={() => {}}
+                          className="pointer-events-none"
+                        />
+                      </Suspense>
+                    </div>
+                    <div className="bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+                      GPS: {selectedJob.latitude.toFixed(6)}, {selectedJob.longitude.toFixed(6)}
+                    </div>
+                  </div>
+                )}
 
                 {/* Checklist Section */}
                 {selectedJob.checklistItems && selectedJob.checklistItems.length > 0 ? (

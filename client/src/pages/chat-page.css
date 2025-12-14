@@ -1,15 +1,17 @@
+/* Chat Page - Cream/Dark Green Theme */
 .chat-page {
   display: flex;
   height: 100%;
-  background: white;
+  background: #faf8f5; /* Cream background */
 }
 
 .channel-list {
   width: 250px;
-  border-right: 1px solid #ddd;
+  border-right: 1px solid #e8e4de; /* Warm gray border */
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  background: #faf8f5;
 }
 
 .channel-list h3 {
@@ -17,8 +19,9 @@
   margin: 0;
   font-size: 0.9rem;
   text-transform: uppercase;
-  color: #666;
-  border-bottom: 1px solid #eee;
+  color: #1a3a2f; /* Dark green text */
+  opacity: 0.7;
+  border-bottom: 1px solid #e8e4de;
 }
 
 .channel-item {
@@ -29,16 +32,18 @@
   padding: 0.75rem 1rem;
   cursor: pointer;
   transition: background 0.2s;
-  border-bottom: 1px solid #f5f5f5;
+  border-bottom: 1px solid #e8e4de;
+  color: #1a3a2f; /* Dark green text */
 }
 
 .channel-item:hover {
-  background: #f9f9f9;
+  background: #f0ebe4; /* Light beige hover */
 }
 
 .channel-item.active {
-  background: #e8eeea;
-  border-left: 3px solid #1e3932;
+  background: #1a3a2f; /* Dark green background */
+  color: white; /* White text for active */
+  border-left: 3px solid #1a3a2f;
 }
 
 .channel-item.muted {
@@ -59,15 +64,17 @@
   cursor: pointer;
   font-size: 1rem;
   padding: 0;
-  color: #999;
+  color: #1a3a2f;
+  opacity: 0.5;
 }
 
 .channel-item.active .channel-mute-btn {
-  color: #1e3932;
+  color: white;
+  opacity: 0.8;
 }
 
 .channel-mute-btn.muted {
-  color: #bdc3c7;
+  opacity: 0.3;
 }
 
 .chat-main {
@@ -75,18 +82,19 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: #faf8f5;
 }
 
 .chat-header {
   padding: 1rem;
-  border-bottom: 1px solid #ddd;
-  background: white;
+  border-bottom: 1px solid #e8e4de;
+  background: #faf8f5;
 }
 
 .chat-header h2 {
   margin: 0;
   font-size: 1.2rem;
-  color: #333;
+  color: #1a3a2f; /* Dark green text */
 }
 
 .message-list {
@@ -96,6 +104,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  background: #faf8f5;
 }
 
 .no-channel {
@@ -103,6 +112,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #999;
+  color: #1a3a2f;
+  opacity: 0.5;
   font-size: 1.1rem;
 }

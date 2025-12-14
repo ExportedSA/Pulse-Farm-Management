@@ -371,7 +371,7 @@ export default function AnimalPerformancePage() {
                       const adgStatus = getAdgStatus(animal.adg, animal.adgTarget);
                       const weightProgress = (animal.currentWeight / animal.targetWeight) * 100;
                       return (
-                        <tr key={animal.id} className="hover:bg-gray-50">
+                        <tr key={animal.id} className="hover:bg-accent">
                           <td className="p-4">
                             <div>
                               <p className="font-medium">{animal.tagNumber}</p>
@@ -461,7 +461,7 @@ export default function AnimalPerformancePage() {
                     {mockAnimalPerformance.sort((a, b) => b.profitability - a.profitability).map(animal => {
                       const roi = animal.totalCosts > 0 ? ((animal.profitability / animal.totalCosts) * 100) : 0;
                       return (
-                        <tr key={animal.id} className="hover:bg-gray-50">
+                        <tr key={animal.id} className="hover:bg-accent">
                           <td className="p-4"><p className="font-medium">{animal.tagNumber}</p>{animal.name && <p className="text-xs text-gray-500">{animal.name}</p>}</td>
                           <td className="p-4 text-sm">{animal.mob}</td>
                           <td className="p-4 text-right text-green-600">${animal.totalRevenue.toLocaleString()}</td>

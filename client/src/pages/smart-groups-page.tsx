@@ -34,20 +34,50 @@ const OPERATORS = [
   { value: "is_not_null", label: "Is Not Empty" },
 ];
 
-// Available fields for rules
+// Available fields for rules - grouped by category
 const RULE_FIELDS = [
-  { value: "status", label: "Status", type: "select", options: ["active", "sold", "deceased"] },
-  { value: "sex", label: "Sex", type: "select", options: ["male", "female"] },
-  { value: "breed", label: "Breed", type: "text" },
-  { value: "ageMonths", label: "Age (Months)", type: "number" },
-  { value: "ageDays", label: "Age (Days)", type: "number" },
-  { value: "currentPastureId", label: "Current Pasture", type: "pasture" },
-  { value: "reproductionStatus", label: "Reproduction Status", type: "select", options: ["open", "bred", "confirmed_pregnant", "dry"] },
-  { value: "lactationStatus", label: "Lactation Status", type: "select", options: ["milking", "dry", "never_milked"] },
-  { value: "cowId", label: "Cow ID", type: "text" },
-  { value: "naitTag", label: "NAIT Tag", type: "text" },
-  { value: "sireId", label: "Has Sire", type: "exists" },
-  { value: "damId", label: "Has Dam", type: "exists" },
+  // Identification
+  { value: "cowId", label: "Cow ID", type: "text", category: "Identification" },
+  { value: "visualId", label: "Visual ID (VID)", type: "text", category: "Identification" },
+  { value: "naitTag", label: "NAIT Tag", type: "text", category: "Identification" },
+  { value: "eid", label: "EID (Electronic ID)", type: "text", category: "Identification" },
+  { value: "lifetimeId", label: "Lifetime ID", type: "text", category: "Identification" },
+  { value: "name", label: "Name", type: "text", category: "Identification" },
+  
+  // Basic Info
+  { value: "status", label: "Status", type: "select", options: ["active", "sold", "deceased", "culled"], category: "Basic Info" },
+  { value: "sex", label: "Sex", type: "select", options: ["male", "female"], category: "Basic Info" },
+  { value: "breed", label: "Breed", type: "text", category: "Basic Info" },
+  { value: "ageMonths", label: "Age (Months)", type: "number", category: "Basic Info" },
+  { value: "ageDays", label: "Age (Days)", type: "number", category: "Basic Info" },
+  { value: "yearBorn", label: "Year Born", type: "number", category: "Basic Info" },
+  { value: "dateOfBirth", label: "Date of Birth", type: "date", category: "Basic Info" },
+  
+  // Location
+  { value: "currentPastureId", label: "Current Pasture", type: "pasture", category: "Location" },
+  
+  // Reproduction
+  { value: "reproductionStatus", label: "Reproduction Status", type: "select", options: ["open", "bred", "confirmed_pregnant", "dry"], category: "Reproduction" },
+  { value: "sireId", label: "Has Sire", type: "exists", category: "Reproduction" },
+  { value: "damId", label: "Has Dam", type: "exists", category: "Reproduction" },
+  
+  // Milk & Production
+  { value: "lactationStatus", label: "Lactation Status", type: "select", options: ["milking", "dry", "never_milked"], category: "Production" },
+  { value: "milkStatus", label: "Milk Status", type: "text", category: "Production" },
+  { value: "a2Status", label: "A2 Status", type: "select", options: ["A2/A2", "A1/A2", "A1/A1", "unknown"], category: "Production" },
+  
+  // Health
+  { value: "bvdStatus", label: "BVD Status", type: "select", options: ["negative", "positive", "unknown", "not_tested"], category: "Health" },
+  { value: "bodyConditionScore", label: "Body Condition Score", type: "number", category: "Health" },
+  { value: "liveWeight", label: "Live Weight (kg)", type: "number", category: "Health" },
+  
+  // Genetics
+  { value: "dnaProfile", label: "DNA Profile", type: "text", category: "Genetics" },
+  { value: "pedigreeIndicator", label: "Pedigree Indicator", type: "text", category: "Genetics" },
+  
+  // Other
+  { value: "notes", label: "Notes (contains)", type: "text", category: "Other" },
+  { value: "removalReason", label: "Removal Reason", type: "text", category: "Other" },
 ];
 
 // Preset templates for common groups
@@ -111,6 +141,60 @@ const GROUP_TEMPLATES = [
     criteria: {
       rules: [
         { field: "ageMonths", operator: "less_than", value: 12 },
+      ],
+      logic: "and" as const,
+    },
+  },
+  {
+    name: "A2/A2 Cows",
+    description: "Cows with A2/A2 beta-casein status",
+    criteria: {
+      rules: [
+        { field: "a2Status", operator: "equals", value: "A2/A2" },
+        { field: "status", operator: "equals", value: "active" },
+      ],
+      logic: "and" as const,
+    },
+  },
+  {
+    name: "BVD Negative",
+    description: "Animals tested negative for BVD",
+    criteria: {
+      rules: [
+        { field: "bvdStatus", operator: "equals", value: "negative" },
+      ],
+      logic: "and" as const,
+    },
+  },
+  {
+    name: "Low Body Condition",
+    description: "Animals with BCS below 4.0",
+    criteria: {
+      rules: [
+        { field: "bodyConditionScore", operator: "less_than", value: 4 },
+        { field: "status", operator: "equals", value: "active" },
+      ],
+      logic: "and" as const,
+    },
+  },
+  {
+    name: "Ready to Breed",
+    description: "Open cows ready for mating",
+    criteria: {
+      rules: [
+        { field: "reproductionStatus", operator: "equals", value: "open" },
+        { field: "sex", operator: "equals", value: "female" },
+        { field: "ageMonths", operator: "greater_than", value: 14 },
+      ],
+      logic: "and" as const,
+    },
+  },
+  {
+    name: "Cull List",
+    description: "Animals marked for culling",
+    criteria: {
+      rules: [
+        { field: "status", operator: "equals", value: "culled" },
       ],
       logic: "and" as const,
     },
@@ -370,11 +454,11 @@ export default function SmartGroupsPage() {
       <div className="flex justify-between items-start">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2">
-            <Zap className="h-8 w-8 text-purple-600" />
-            Smart Groups
+            <Filter className="h-8 w-8 text-purple-600" />
+            Custom Reports & Smart Groups
           </h1>
           <p className="text-muted-foreground mt-1">
-            Create dynamic groups that automatically update based on rules
+            Build custom queries to find specific animals, save as groups for drafting
           </p>
         </div>
         <div className="flex items-center gap-2">

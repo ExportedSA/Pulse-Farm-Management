@@ -142,6 +142,10 @@ const menuItems = [
   
   // Communication
   { title: "Chat", url: "/app/chat", icon: MessageSquare },
+  
+  // Safety & People
+  { title: "Safety", url: "/app/safety", icon: Shield },
+  { title: "People", url: "/app/people", icon: Users },
 ];
 
 export function AppSidebar({ ...props }: AppSidebarProps) {

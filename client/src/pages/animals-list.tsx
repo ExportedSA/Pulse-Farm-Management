@@ -402,136 +402,160 @@ export default function AnimalsList() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="space-y-2">
+          {/* Table Header */}
+          <div className="hidden md:grid md:grid-cols-12 gap-4 px-4 py-2 bg-muted/50 rounded-lg text-sm font-medium text-muted-foreground">
+            <div className="col-span-2">VID / Cow ID</div>
+            <div className="col-span-2">NAIT Tag</div>
+            <div className="col-span-2">EID</div>
+            <div className="col-span-2">Breed</div>
+            <div className="col-span-1">Status</div>
+            <div className="col-span-3 text-right">Actions</div>
+          </div>
+          
           {displayedAnimals.map((animal) => (
             <Card 
               key={animal.id} 
-              className="hover-elevate cursor-pointer" 
+              className="hover:bg-muted/30 cursor-pointer transition-colors" 
               onClick={() => setViewingAnimal(animal)}
               data-testid={`card-animal-${animal.id}`}
             >
-              <CardContent className="p-6">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex-1">
-                    <div className="font-mono text-lg font-semibold mb-1">
-                      {animal.naitTag || animal.cowId || "No ID"}
+              <CardContent className="p-4">
+                {/* Desktop Row Layout */}
+                <div className="hidden md:grid md:grid-cols-12 gap-4 items-center">
+                  <div className="col-span-2">
+                    <div className="font-mono font-semibold">
+                      {animal.visualId || animal.cowId || "—"}
                     </div>
-                    <div className="text-sm text-muted-foreground">
-                      {animal.breed || "Unknown breed"}
+                  </div>
+                  <div className="col-span-2">
+                    <div className="font-mono text-sm">
+                      {animal.naitTag || "—"}
                     </div>
-                    {(animal as any).eid && (
-                      <div className="text-xs text-muted-foreground mt-1">
-                        EID: {(animal as any).eid}
-                      </div>
-                    )}
                   </div>
-                  <Badge variant="secondary" data-testid={`badge-status-${animal.id}`}>
-                    {animal.status}
-                  </Badge>
-                </div>
-                {animal.herd && (
-                  <div className="text-sm mb-2">
-                    <span className="text-muted-foreground">Herd:</span> {animal.herd}
+                  <div className="col-span-2">
+                    <div className="font-mono text-xs text-muted-foreground">
+                      {animal.eid || "—"}
+                    </div>
                   </div>
-                )}
-                {animal.currentPastureId && (
-                  <div className="text-sm mb-2">
-                    <span className="text-muted-foreground">Pasture:</span>{' '}
-                    {pastures.find(p => p.id === animal.currentPastureId)?.name || animal.currentPastureId}
+                  <div className="col-span-2">
+                    <div className="text-sm">
+                      {animal.breed || "Unknown"}
+                    </div>
                   </div>
-                )}
-                {/* Group badges */}
-                {getAnimalGroups(animal.id).length > 0 && (
-                  <div className="flex flex-wrap gap-1 mb-3">
-                    {getAnimalGroups(animal.id).map((group) => (
-                      <Badge
-                        key={group.id}
-                        variant="secondary"
-                        className="gap-1"
-                        style={{ 
-                          backgroundColor: group.color || undefined,
-                          color: group.color ? '#ffffff' : undefined,
-                          borderColor: group.color || undefined,
-                        }}
-                        data-testid={`badge-group-${group.id}`}
-                      >
-                        {group.name}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            removeFromGroupMutation.mutate({ groupId: group.id, animalId: animal.id });
-                          }}
-                          className="ml-1 hover:opacity-70"
-                          title={`Remove from ${group.name}`}
+                  <div className="col-span-1">
+                    <Badge variant="secondary" className="text-xs" data-testid={`badge-status-${animal.id}`}>
+                      {animal.status}
+                    </Badge>
+                  </div>
+                  <div className="col-span-3 flex justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingAnimal(animal);
+                      }}
+                      data-testid={`button-edit-animal-${animal.id}`}
+                    >
+                      <Edit className="h-4 w-4 mr-1" strokeWidth={1.5} />
+                      Edit
+                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => e.stopPropagation()}
+                          data-testid={`button-add-to-group-${animal.id}`}
                         >
-                          ×
-                        </button>
-                      </Badge>
-                    ))}
+                          <FolderTree className="h-4 w-4" strokeWidth={1.5} />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuLabel>Add to Group</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        {groups.filter(g => !getAnimalGroups(animal.id).some(ag => ag.id === g.id)).length === 0 ? (
+                          <DropdownMenuItem disabled>
+                            Already in all groups
+                          </DropdownMenuItem>
+                        ) : (
+                          groups
+                            .filter(g => !getAnimalGroups(animal.id).some(ag => ag.id === g.id))
+                            .map((group) => (
+                              <DropdownMenuItem
+                                key={group.id}
+                                onClick={() => addToGroupMutation.mutate({ groupId: group.id, animalId: animal.id })}
+                                data-testid={`menu-add-to-${group.id}`}
+                              >
+                                <span
+                                  className="inline-block h-3 w-3 rounded-full mr-2"
+                                  style={{ backgroundColor: group.color || '#1e3932' }}
+                                />
+                                {group.name}
+                              </DropdownMenuItem>
+                            ))
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeletingAnimal(animal);
+                      }}
+                      data-testid={`button-delete-animal-${animal.id}`}
+                    >
+                      <Trash2 className="h-4 w-4" strokeWidth={1.5} />
+                    </Button>
                   </div>
-                )}
-                <div className="flex gap-2 mt-4">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditingAnimal(animal);
-                    }}
-                    data-testid={`button-edit-animal-${animal.id}`}
-                  >
-                    <Edit className="h-4 w-4 mr-1" strokeWidth={1.5} />
-                    Edit
-                  </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={(e) => e.stopPropagation()}
-                        data-testid={`button-add-to-group-${animal.id}`}
-                      >
-                        <FolderTree className="h-4 w-4" strokeWidth={1.5} />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuLabel>Add to Group</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      {groups.filter(g => !getAnimalGroups(animal.id).some(ag => ag.id === g.id)).length === 0 ? (
-                        <DropdownMenuItem disabled>
-                          Already in all groups
-                        </DropdownMenuItem>
-                      ) : (
-                        groups
-                          .filter(g => !getAnimalGroups(animal.id).some(ag => ag.id === g.id))
-                          .map((group) => (
-                            <DropdownMenuItem
-                              key={group.id}
-                              onClick={() => addToGroupMutation.mutate({ groupId: group.id, animalId: animal.id })}
-                              data-testid={`menu-add-to-${group.id}`}
-                            >
-                              <span
-                                className="inline-block h-3 w-3 rounded-full mr-2"
-                                style={{ backgroundColor: group.color || '#1e3932' }}
-                              />
-                              {group.name}
-                            </DropdownMenuItem>
-                          ))
+                </div>
+                
+                {/* Mobile Card Layout */}
+                <div className="md:hidden">
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <div className="font-mono font-semibold">
+                        VID: {animal.visualId || animal.cowId || "No ID"}
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        {animal.breed || "Unknown breed"}
+                      </div>
+                      {animal.naitTag && (
+                        <div className="text-xs text-muted-foreground">
+                          NAIT: {animal.naitTag}
+                        </div>
                       )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDeletingAnimal(animal);
-                    }}
-                    data-testid={`button-delete-animal-${animal.id}`}
-                  >
-                    <Trash2 className="h-4 w-4" strokeWidth={1.5} />
-                  </Button>
+                    </div>
+                    <Badge variant="secondary" data-testid={`badge-status-mobile-${animal.id}`}>
+                      {animal.status}
+                    </Badge>
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingAnimal(animal);
+                      }}
+                    >
+                      <Edit className="h-4 w-4 mr-1" strokeWidth={1.5} />
+                      Edit
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeletingAnimal(animal);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" strokeWidth={1.5} />
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>

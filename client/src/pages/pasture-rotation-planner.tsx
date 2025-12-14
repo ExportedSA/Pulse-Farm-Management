@@ -8,7 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import type { Animal, Pasture } from "@shared/schema";
-import { MoveIcon, ArrowRightIcon, CheckIcon } from "lucide-react";
+import { MoveIcon, ArrowRightIcon, CheckIcon, Users, CheckSquare, Leaf } from "lucide-react";
+import { Link } from "wouter";
 import {
   Dialog,
   DialogContent,
@@ -158,7 +159,15 @@ export default function PastureRotationPlanner() {
   return (
     <div className="container mx-auto p-6 max-w-7xl" data-testid="page-rotation-planner">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2">Pasture Rotation Planner</h1>
+        <div className="flex items-center justify-between mb-2">
+          <h1 className="text-3xl font-bold">Pasture Rotation Planner</h1>
+          <Link href="/app/pasture-walk">
+            <Button variant="outline" size="sm">
+              <Leaf className="h-4 w-4 mr-2" />
+              Spring Rotation Planner
+            </Button>
+          </Link>
+        </div>
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <p className="text-muted-foreground">
             Select animals and move them between pastures for optimal rotation management
@@ -178,6 +187,33 @@ export default function PastureRotationPlanner() {
                 ))}
               </SelectContent>
             </Select>
+            {selectedGroupId !== "all" && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  // Select all animals from the current group
+                  const groupAnimalIds = new Set(
+                    memberships
+                      .filter((m) => m.groupId === selectedGroupId)
+                      .map((m) => m.animalId)
+                  );
+                  // Only select active animals that exist
+                  const validIds = animals
+                    .filter((a) => groupAnimalIds.has(a.id) && a.status === "active")
+                    .map((a) => a.id);
+                  setSelectedAnimals(new Set(validIds));
+                  toast({
+                    title: "Group selected",
+                    description: `${validIds.length} animals from group selected`,
+                  });
+                }}
+                data-testid="button-select-group"
+              >
+                <CheckSquare className="h-4 w-4 mr-1" />
+                Select All ({filteredAnimals.filter(a => a.status === "active").length})
+              </Button>
+            )}
           </div>
         </div>
       </div>

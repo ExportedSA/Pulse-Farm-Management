@@ -537,7 +537,7 @@ export default function FinancialAnalyticsPage() {
                     </thead>
                     <tbody className="divide-y">
                       {mockProfitabilityByAnimal.map(item => (
-                        <tr key={item.id} className="hover:bg-gray-50">
+                        <tr key={item.id} className="hover:bg-accent">
                           <td className="p-4 font-medium">{item.name}</td>
                           <td className="p-4 text-right">{item.units}</td>
                           <td className="p-4 text-right text-green-600">${item.revenue.toLocaleString()}</td>
@@ -607,7 +607,7 @@ export default function FinancialAnalyticsPage() {
                         const isPositiveGood = !item.metric.includes('Cost');
                         const changeColor = (item.change > 0 && isPositiveGood) || (item.change < 0 && !isPositiveGood) ? 'text-green-600' : 'text-red-600';
                         return (
-                          <tr key={item.metric} className="hover:bg-gray-50">
+                          <tr key={item.metric} className="hover:bg-accent">
                             <td className="p-4 font-medium">{item.metric}</td>
                             <td className="p-4 text-right font-bold">{item.metric.includes('%') ? `${item.current}%` : `$${item.current.toLocaleString()}`}</td>
                             <td className="p-4 text-right text-gray-500">{item.metric.includes('%') ? `${item.previous}%` : `$${item.previous.toLocaleString()}`}</td>

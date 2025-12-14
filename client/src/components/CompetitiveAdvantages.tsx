@@ -225,7 +225,7 @@ const CompetitiveAdvantages: React.FC<CompetitiveAdvantagesProps> = ({
                       {nzComplianceFeatures.map((feature) => (
                         <div 
                           key={feature.id}
-                          className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-gray-50"
+                          className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-accent"
                           onClick={() => onFeatureClick?.(feature.id)}
                         >
                           <div className="flex items-center gap-3">

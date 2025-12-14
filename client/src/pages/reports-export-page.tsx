@@ -455,7 +455,7 @@ export default function ReportsExportPage() {
                   </thead>
                   <tbody className="divide-y">
                     {generatedReports.map(report => (
-                      <tr key={report.id} className="hover:bg-gray-50">
+                      <tr key={report.id} className="hover:bg-accent">
                         <td className="p-4"><p className="font-medium">{report.name}</p></td>
                         <td className="p-4"><Badge className={getCategoryColor(report.type)}>{report.type}</Badge></td>
                         <td className="p-4 text-sm text-gray-600">{format(new Date(report.generatedAt), 'MMM d, yyyy h:mm a')}</td>

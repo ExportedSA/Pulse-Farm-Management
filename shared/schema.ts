@@ -164,7 +164,7 @@ export const animals = pgTable('animals', {
   // Tag Identification
   visualId: varchar('visual_id', { length: 50 }), // VID - Visual ID (farm tag number)
   lifetimeId: varchar('lifetime_id', { length: 50 }).unique(), // LID - Lifetime ID (NAIT birth tag)
-  naitTag: varchar('nait_tag', { length: 50 }).unique(), // NAIT EID tag number
+  naitTag: varchar('nait_tag', { length: 50 }), // NAIT location number (NOT unique - shared by all animals at location)
   eid: varchar('eid', { length: 50 }).unique(), // Electronic ID for RFID tags
   cowId: varchar('cow_id', { length: 50 }).unique(), // Legacy Visual ID field
   birthId: jsonb('birth_id').$type<{ participantCode: string; year: string; number: string }>(),

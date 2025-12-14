@@ -682,7 +682,7 @@ export default function VehicleRegistryPage() {
                       {vehicles.map((vehicle) => {
                         const complianceStatus = getComplianceStatus(vehicle);
                         return (
-                          <tr key={vehicle.id} className="border-b hover:bg-gray-50">
+                          <tr key={vehicle.id} className="border-b hover:bg-accent">
                             <td className="py-3 px-4 font-medium">{vehicle.registration}</td>
                             <td className="py-3 px-4">
                               <div>

@@ -365,85 +365,85 @@ export default function PastureWalkPage() {
                   <CardDescription>Common tasks and tools for pasture management</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {/* Data Entry */}
-                    <div className="space-y-3">
-                      <h4 className="font-medium text-sm text-muted-foreground">DATA ENTRY</h4>
+                    <div className="space-y-2">
+                      <h4 className="font-medium text-sm text-muted-foreground mb-3">DATA ENTRY</h4>
                       <Button 
-                        className="w-full justify-start" 
+                        className="w-full justify-start h-10" 
                         variant="outline"
                         onClick={() => {
                           setSelectedSession(null);
                           setShowQuickEntryDialog(true);
                         }}
                       >
-                        <Ruler className="h-4 w-4 mr-2" />
+                        <Ruler className="h-4 w-4 mr-2 flex-shrink-0" />
                         Quick Cover Entry
                       </Button>
                       <Button 
-                        className="w-full justify-start" 
+                        className="w-full justify-start h-10" 
                         variant="outline"
                         onClick={() => setShowNewWalkDialog(true)}
                       >
-                        <Play className="h-4 w-4 mr-2" />
+                        <Play className="h-4 w-4 mr-2 flex-shrink-0" />
                         Start New Walk
                       </Button>
                     </div>
 
                     {/* Planning Tools */}
-                    <div className="space-y-3">
-                      <h4 className="font-medium text-sm text-muted-foreground">PLANNING TOOLS</h4>
+                    <div className="space-y-2">
+                      <h4 className="font-medium text-sm text-muted-foreground mb-3">PLANNING TOOLS</h4>
                       <Button 
-                        className="w-full justify-start" 
+                        className="w-full justify-start h-10" 
                         variant="outline"
                         onClick={() => setActiveTab('sequence')}
                       >
-                        <GripVertical className="h-4 w-4 mr-2" />
+                        <GripVertical className="h-4 w-4 mr-2 flex-shrink-0" />
                         Grazing Sequence
                       </Button>
                       <Button 
-                        className="w-full justify-start" 
+                        className="w-full justify-start h-10" 
                         variant="outline"
                         onClick={() => setActiveTab('rotation')}
                       >
-                        <Calendar className="h-4 w-4 mr-2" />
+                        <Calendar className="h-4 w-4 mr-2 flex-shrink-0" />
                         Rotation Planner
                       </Button>
                       <Button 
-                        className="w-full justify-start" 
+                        className="w-full justify-start h-10" 
                         variant="outline"
                         onClick={() => setActiveTab('calculator')}
                       >
-                        <Clock className="h-4 w-4 mr-2" />
+                        <Clock className="h-4 w-4 mr-2 flex-shrink-0" />
                         Rotation Calculator
                       </Button>
                     </div>
 
                     {/* Analysis */}
-                    <div className="space-y-3">
-                      <h4 className="font-medium text-sm text-muted-foreground">ANALYSIS</h4>
+                    <div className="space-y-2">
+                      <h4 className="font-medium text-sm text-muted-foreground mb-3">ANALYSIS</h4>
                       <Button 
-                        className="w-full justify-start" 
+                        className="w-full justify-start h-10" 
                         variant="outline"
                         onClick={() => setActiveTab('feedwedge')}
                       >
-                        <BarChart3 className="h-4 w-4 mr-2" />
+                        <BarChart3 className="h-4 w-4 mr-2 flex-shrink-0" />
                         Feed Wedge
                       </Button>
                       <Button 
-                        className="w-full justify-start" 
+                        className="w-full justify-start h-10" 
                         variant="outline"
                         onClick={() => setActiveTab('metrics')}
                       >
-                        <TrendingUp className="h-4 w-4 mr-2" />
+                        <TrendingUp className="h-4 w-4 mr-2 flex-shrink-0" />
                         Farm Metrics
                       </Button>
                       <Button 
-                        className="w-full justify-start" 
+                        className="w-full justify-start h-10" 
                         variant="outline"
                         onClick={() => setActiveTab('distribution')}
                       >
-                        <MapPin className="h-4 w-4 mr-2" />
+                        <MapPin className="h-4 w-4 mr-2 flex-shrink-0" />
                         Cover Distribution
                       </Button>
                     </div>
