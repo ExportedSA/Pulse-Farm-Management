@@ -40,6 +40,8 @@ import equipmentRouter from "./routes/equipment";
 import taskDependenciesRouter from "./routes/task-dependencies";
 import complianceTagsRouter from "./routes/compliance-tags";
 import weightRouter from "./routes/weight";
+import tasksRouter from "./routes/tasks";
+import timesheetsRouter from "./routes/timesheets";
 import vaccinationRouter from "./routes/vaccination";
 import healthMonitoringRouter from "./routes/health-monitoring";
 import reproductionRouter from "./routes/reproduction";
@@ -230,6 +232,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // ===== JOBS =====
   app.use("/api/jobs", requireAuth, jobsRouter);
+
+  // ===== TASKS & TIMESHEETS =====
+  app.use("/api/tasks", requireAuth, tasksRouter);
+  app.use("/api/timesheets", requireAuth, timesheetsRouter);
 
   // ===== VISITOR MANAGEMENT (PHASE 1) =====
   // Public visitor routes (no authentication required)

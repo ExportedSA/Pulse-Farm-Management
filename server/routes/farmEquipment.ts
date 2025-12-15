@@ -12,8 +12,28 @@ import {
   searchEquipment,
   logServiceHistory,
   getEquipmentServiceHistory,
+  getEquipmentWithDevices,
+  registerDevice,
+  listDevices,
+  getDevice,
+  updateDevice,
+  updateDeviceStatus,
+  deleteDevice,
+  logDeviceData,
+  getDeviceDataLogs,
+  getOfflineDevices,
+  getDevicesWithAlerts,
+  canManageEquipment,
+  canLogMaintenance,
+  EquipmentNotFoundError,
+  DeviceNotFoundError,
+  ValidationError,
 } from "../domain/equipment";
 import { getOrCreateEquipmentChannel } from "../domain/chat";
+import { chatWebSocket } from "../websocket";
+import { db } from "../db";
+import { users } from "@shared/schema";
+import { eq } from "drizzle-orm";
 import logger from "../config/logger";
 
 const router = Router();
@@ -178,6 +198,14 @@ router.post("/", requireAuth, async (req, res) => {
   try {
     const farmId = (req.user as any).farmId;
     const userId = (req.user as any).id;
+    const userRole = (req.user as any).role;
+
+    // Permission check: only managers can create equipment
+    if (!canManageEquipment(userRole)) {
+      logger.warn({ userId, userRole }, "Unauthorized attempt to create equipment");
+      return res.status(403).json({ error: "You do not have permission to create equipment" });
+    }
+
     const data = createEquipmentSchema.parse(req.body);
 
     const equipmentRecord = await createEquipment({
@@ -210,6 +238,16 @@ router.post("/:id/log-service", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const farmId = (req.user as any).farmId;
+    const userId = (req.user as any).id;
+    const userName = (req.user as any).name;
+    const userRole = (req.user as any).role;
+
+    // Permission check: managers or maintenance role
+    if (!canLogMaintenance(userRole)) {
+      logger.warn({ userId, userRole }, "Unauthorized attempt to log maintenance");
+      return res.status(403).json({ error: "You do not have permission to log maintenance" });
+    }
+
     const data = logServiceSchema.parse(req.body);
 
     // Verify equipment exists and belongs to farm
@@ -221,12 +259,38 @@ router.post("/:id/log-service", requireAuth, async (req, res) => {
       return res.status(403).json({ error: "Access denied" });
     }
 
+    // Use current user as performer if not specified
+    const performedBy = data.performedBy || userName || "Unknown";
+
     const serviceRecord = await logServiceHistory({
       ...data,
       equipmentId: id,
+      performedBy,
     });
 
-    res.status(201).json(serviceRecord);
+    // Get updated equipment to return
+    const updatedEquipment = await getEquipment(id);
+
+    // Emit WebSocket event for new maintenance log
+    try {
+      const farmUsers = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.isActive, true));
+      
+      const userIds = farmUsers.map(u => u.id).filter(uid => uid !== userId);
+      if (userIds.length > 0) {
+        chatWebSocket.broadcastNewMaintenanceLog(userIds, id, serviceRecord, updatedEquipment);
+      }
+    } catch (wsError) {
+      logger.error({ error: wsError }, "Failed to broadcast new maintenance log");
+    }
+
+    logger.info({ equipmentId: id, recordId: serviceRecord.id, userId, farmId }, "Maintenance logged successfully");
+    res.status(201).json({
+      record: serviceRecord,
+      equipment: updatedEquipment,
+    });
   } catch (error) {
     logger.error({ error }, "Failed to log service");
     if (error instanceof z.ZodError) {
@@ -241,6 +305,14 @@ router.patch("/:id", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const farmId = (req.user as any).farmId;
+    const userId = (req.user as any).id;
+    const userRole = (req.user as any).role;
+
+    // Permission check
+    if (!canManageEquipment(userRole)) {
+      return res.status(403).json({ error: "You do not have permission to update equipment" });
+    }
+
     const data = updateEquipmentSchema.parse(req.body);
 
     // Check if equipment exists and belongs to the farm
@@ -252,11 +324,30 @@ router.patch("/:id", requireAuth, async (req, res) => {
       return res.status(403).json({ error: "Access denied" });
     }
 
+    const previousStatus = existing.status;
     const equipmentRecord = await updateEquipment(id, data);
     if (!equipmentRecord) {
       return res.status(404).json({ error: "Equipment not found" });
     }
 
+    // Emit WebSocket event if status changed
+    if (data.status && data.status !== previousStatus) {
+      try {
+        const farmUsers = await db
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.isActive, true));
+        
+        const userIds = farmUsers.map(u => u.id).filter(uid => uid !== userId);
+        if (userIds.length > 0) {
+          chatWebSocket.broadcastEquipmentStatusChanged(userIds, equipmentRecord, previousStatus);
+        }
+      } catch (wsError) {
+        logger.error({ error: wsError }, "Failed to broadcast equipment status change");
+      }
+    }
+
+    logger.info({ equipmentId: id, userId, farmId }, "Equipment updated successfully");
     res.json(equipmentRecord);
   } catch (error) {
     logger.error({ error }, "Failed to update equipment");

@@ -3,6 +3,8 @@ import { db } from "../db";
 import { farmHazards, users } from "@shared/schema";
 import { eq, and, isNull, desc } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
+import { triggerComplianceChecks, getComplianceStatus } from "../scheduler";
+import logger from "../config/logger";
 
 const router = Router();
 
@@ -269,6 +271,54 @@ router.post("/checkins", requireAuth, async (req, res) => {
   } catch (error) {
     console.error("Failed to create check-in:", error);
     res.status(500).json({ error: "Failed to create check-in" });
+  }
+});
+
+// ===== AUTOMATED COMPLIANCE CHECKS =====
+
+/**
+ * GET /api/compliance/status
+ * Get current compliance status summary
+ */
+router.get("/status", requireAuth, async (req, res) => {
+  try {
+    const farmId = (req.user as any).farmId;
+    const status = await getComplianceStatus(farmId);
+    res.json(status);
+  } catch (error) {
+    logger.error({ error }, "Failed to get compliance status");
+    res.status(500).json({ error: "Failed to get compliance status" });
+  }
+});
+
+/**
+ * POST /api/compliance/run-checks
+ * Manually trigger compliance checks (admin only)
+ */
+router.post("/run-checks", requireAuth, async (req, res) => {
+  try {
+    const farmId = (req.user as any).farmId;
+    const userId = (req.user as any).id;
+    const userRole = (req.user as any).role;
+
+    // Only allow managers/admins to trigger checks
+    const allowedRoles = ['owner', 'manager', 'admin'];
+    if (!userRole || !allowedRoles.includes(userRole.toLowerCase())) {
+      return res.status(403).json({ error: "You do not have permission to run compliance checks" });
+    }
+
+    logger.info({ userId, farmId }, "Manual compliance check triggered via API");
+    
+    const result = await triggerComplianceChecks(farmId);
+    
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(500).json(result);
+    }
+  } catch (error) {
+    logger.error({ error }, "Failed to run compliance checks");
+    res.status(500).json({ error: "Failed to run compliance checks" });
   }
 });
 

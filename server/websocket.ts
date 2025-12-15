@@ -352,6 +352,415 @@ class ChatWebSocketServer {
   isUserOnline(userId: string): boolean {
     return this.userConnections.has(userId) && this.userConnections.get(userId)!.size > 0;
   }
+
+  /**
+   * Broadcast a new health record event to users subscribed to an animal's channel
+   * @param animalChannelId - The chat channel ID for the animal (e.g., 'animal-{animalId}')
+   * @param animalId - The animal ID
+   * @param record - The new health record data
+   */
+  broadcastNewHealthRecord(animalChannelId: string, animalId: string, record: any) {
+    const payload = {
+      type: 'NEW_HEALTH_RECORD',
+      animalId,
+      channelId: animalChannelId,
+      data: record,
+      timestamp: new Date().toISOString()
+    };
+
+    if (isRedisAvailable()) {
+      // Publish to Redis for cross-instance broadcasting
+      publishToRedis(REDIS_CHANNELS.CHAT_MESSAGES, payload);
+    } else {
+      // Local broadcasting only
+      this.broadcastToChannel(animalChannelId, payload);
+    }
+    
+    logger.info(`[WebSocket] Broadcast NEW_HEALTH_RECORD for animal ${animalId}`);
+  }
+
+  /**
+   * Broadcast a notification to a specific user
+   * @param userId - The user ID to send the notification to
+   * @param notification - The notification data
+   */
+  broadcastNotification(userId: string, notification: any) {
+    const payload = {
+      type: 'NEW_NOTIFICATION',
+      data: notification,
+      timestamp: new Date().toISOString()
+    };
+
+    this.sendToUser(userId, payload);
+    logger.debug(`[WebSocket] Sent notification to user ${userId}`);
+  }
+
+  /**
+   * Broadcast a notification to multiple users
+   * @param userIds - Array of user IDs to send the notification to
+   * @param notification - The notification data
+   */
+  broadcastNotificationToUsers(userIds: string[], notification: any) {
+    const payload = {
+      type: 'NEW_NOTIFICATION',
+      data: notification,
+      timestamp: new Date().toISOString()
+    };
+
+    userIds.forEach(userId => {
+      this.sendToUser(userId, payload);
+    });
+    
+    logger.debug(`[WebSocket] Broadcast notification to ${userIds.length} users`);
+  }
+
+  // ===== ANIMAL RECORD EVENTS =====
+
+  /**
+   * Broadcast when a new animal is added to the farm
+   * @param userIds - Array of user IDs (farm members) to notify
+   * @param animal - The new animal data
+   */
+  broadcastAnimalAdded(userIds: string[], animal: any) {
+    const payload = {
+      type: 'ANIMAL_ADDED',
+      data: animal,
+      timestamp: new Date().toISOString()
+    };
+
+    userIds.forEach(userId => {
+      this.sendToUser(userId, payload);
+    });
+
+    logger.info(`[WebSocket] Broadcast ANIMAL_ADDED for animal ${animal.id} to ${userIds.length} users`);
+  }
+
+  /**
+   * Broadcast when an animal record is updated
+   * @param userIds - Array of user IDs (farm members) to notify
+   * @param animal - The updated animal data
+   */
+  broadcastAnimalUpdated(userIds: string[], animal: any) {
+    const payload = {
+      type: 'ANIMAL_UPDATED',
+      data: animal,
+      timestamp: new Date().toISOString()
+    };
+
+    userIds.forEach(userId => {
+      this.sendToUser(userId, payload);
+    });
+
+    logger.info(`[WebSocket] Broadcast ANIMAL_UPDATED for animal ${animal.id} to ${userIds.length} users`);
+  }
+
+  /**
+   * Broadcast when an animal is removed (soft-deleted or permanently deleted)
+   * @param userIds - Array of user IDs (farm members) to notify
+   * @param animalId - The ID of the removed animal
+   * @param status - The new status (e.g., 'sold', 'deceased') or 'deleted' for permanent removal
+   */
+  broadcastAnimalRemoved(userIds: string[], animalId: string, status: string) {
+    const payload = {
+      type: 'ANIMAL_REMOVED',
+      data: { id: animalId, status },
+      timestamp: new Date().toISOString()
+    };
+
+    userIds.forEach(userId => {
+      this.sendToUser(userId, payload);
+    });
+
+    logger.info(`[WebSocket] Broadcast ANIMAL_REMOVED for animal ${animalId} to ${userIds.length} users`);
+  }
+
+  // ===== TASK EVENTS =====
+
+  /**
+   * Broadcast when a task is assigned to a user
+   * @param assigneeId - The user ID of the assignee
+   * @param task - The task data
+   */
+  broadcastTaskAssigned(assigneeId: string, task: any) {
+    const payload = {
+      type: 'TASK_ASSIGNED',
+      data: task,
+      timestamp: new Date().toISOString()
+    };
+
+    this.sendToUser(assigneeId, payload);
+    logger.info(`[WebSocket] Broadcast TASK_ASSIGNED for task ${task.id} to user ${assigneeId}`);
+  }
+
+  /**
+   * Broadcast when a new task is created (to managers/farm members)
+   * @param userIds - Array of user IDs to notify
+   * @param task - The new task data
+   */
+  broadcastTaskCreated(userIds: string[], task: any) {
+    const payload = {
+      type: 'TASK_CREATED',
+      data: task,
+      timestamp: new Date().toISOString()
+    };
+
+    userIds.forEach(userId => {
+      this.sendToUser(userId, payload);
+    });
+
+    logger.info(`[WebSocket] Broadcast TASK_CREATED for task ${task.id} to ${userIds.length} users`);
+  }
+
+  /**
+   * Broadcast when a task is updated
+   * @param userIds - Array of user IDs to notify
+   * @param task - The updated task data
+   */
+  broadcastTaskUpdated(userIds: string[], task: any) {
+    const payload = {
+      type: 'TASK_UPDATED',
+      data: task,
+      timestamp: new Date().toISOString()
+    };
+
+    userIds.forEach(userId => {
+      this.sendToUser(userId, payload);
+    });
+
+    logger.info(`[WebSocket] Broadcast TASK_UPDATED for task ${task.id} to ${userIds.length} users`);
+  }
+
+  /**
+   * Broadcast when a task is completed
+   * @param userIds - Array of user IDs to notify (e.g., manager, creator)
+   * @param task - The completed task data
+   * @param completedByName - Name of the user who completed the task
+   */
+  broadcastTaskCompleted(userIds: string[], task: any, completedByName: string) {
+    const payload = {
+      type: 'TASK_COMPLETED',
+      data: { ...task, completedByName },
+      timestamp: new Date().toISOString()
+    };
+
+    userIds.forEach(userId => {
+      this.sendToUser(userId, payload);
+    });
+
+    logger.info(`[WebSocket] Broadcast TASK_COMPLETED for task ${task.id} to ${userIds.length} users`);
+  }
+
+  // ===== ROSTER EVENTS =====
+
+  /**
+   * Broadcast when a new shift is scheduled
+   * @param staffUserId - The user ID of the staff member assigned to the shift
+   * @param rosterEntry - The roster entry data
+   */
+  broadcastShiftScheduled(staffUserId: string, rosterEntry: any) {
+    const payload = {
+      type: 'SHIFT_SCHEDULED',
+      data: rosterEntry,
+      timestamp: new Date().toISOString()
+    };
+
+    this.sendToUser(staffUserId, payload);
+    logger.info(`[WebSocket] Broadcast SHIFT_SCHEDULED for roster ${rosterEntry.id} to user ${staffUserId}`);
+  }
+
+  /**
+   * Broadcast roster update to managers
+   * @param userIds - Array of manager user IDs
+   * @param rosterEntry - The roster entry data
+   */
+  broadcastRosterUpdated(userIds: string[], rosterEntry: any) {
+    const payload = {
+      type: 'ROSTER_UPDATED',
+      data: rosterEntry,
+      timestamp: new Date().toISOString()
+    };
+
+    userIds.forEach(userId => {
+      this.sendToUser(userId, payload);
+    });
+
+    logger.info(`[WebSocket] Broadcast ROSTER_UPDATED for roster ${rosterEntry.id} to ${userIds.length} users`);
+  }
+
+  // ===== TIMESHEET EVENTS =====
+
+  /**
+   * Broadcast when a user clocks in
+   * @param userIds - Array of user IDs to notify (e.g., managers)
+   * @param staffName - Name of the staff who clocked in
+   * @param staffProfileId - Staff profile ID
+   */
+  broadcastUserClockedIn(userIds: string[], staffName: string, staffProfileId: string) {
+    const payload = {
+      type: 'USER_CLOCKED_IN',
+      data: { staffName, staffProfileId, clockedInAt: new Date().toISOString() },
+      timestamp: new Date().toISOString()
+    };
+
+    userIds.forEach(userId => {
+      this.sendToUser(userId, payload);
+    });
+
+    logger.info(`[WebSocket] Broadcast USER_CLOCKED_IN for ${staffName} to ${userIds.length} users`);
+  }
+
+  /**
+   * Broadcast when a user clocks out
+   * @param userIds - Array of user IDs to notify (e.g., managers)
+   * @param staffName - Name of the staff who clocked out
+   * @param staffProfileId - Staff profile ID
+   * @param totalHours - Total hours worked
+   */
+  broadcastUserClockedOut(userIds: string[], staffName: string, staffProfileId: string, totalHours: string) {
+    const payload = {
+      type: 'USER_CLOCKED_OUT',
+      data: { staffName, staffProfileId, totalHours, clockedOutAt: new Date().toISOString() },
+      timestamp: new Date().toISOString()
+    };
+
+    userIds.forEach(userId => {
+      this.sendToUser(userId, payload);
+    });
+
+    logger.info(`[WebSocket] Broadcast USER_CLOCKED_OUT for ${staffName} to ${userIds.length} users`);
+  }
+
+  // ===== EQUIPMENT & DEVICE EVENTS =====
+
+  /**
+   * Broadcast when equipment status changes
+   * @param userIds - Array of user IDs to notify (farm users)
+   * @param equipment - The updated equipment object
+   * @param previousStatus - The previous status before change
+   */
+  broadcastEquipmentStatusChanged(userIds: string[], equipment: any, previousStatus?: string) {
+    const payload = {
+      type: 'EQUIPMENT_STATUS_CHANGED',
+      data: { 
+        equipmentId: equipment.id,
+        equipment,
+        previousStatus,
+        newStatus: equipment.status,
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    userIds.forEach(userId => {
+      this.sendToUser(userId, payload);
+    });
+
+    logger.info(`[WebSocket] Broadcast EQUIPMENT_STATUS_CHANGED for ${equipment.name} (${equipment.id}) to ${userIds.length} users`);
+  }
+
+  /**
+   * Broadcast when a new maintenance log is added
+   * @param userIds - Array of user IDs to notify (farm users)
+   * @param equipmentId - Equipment ID
+   * @param maintenanceRecord - The new maintenance record
+   * @param equipment - The updated equipment object (optional)
+   */
+  broadcastNewMaintenanceLog(userIds: string[], equipmentId: string, maintenanceRecord: any, equipment?: any) {
+    const payload = {
+      type: 'NEW_MAINTENANCE_LOG',
+      data: { 
+        equipmentId,
+        maintenanceRecord,
+        equipment,
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    userIds.forEach(userId => {
+      this.sendToUser(userId, payload);
+    });
+
+    logger.info(`[WebSocket] Broadcast NEW_MAINTENANCE_LOG for equipment ${equipmentId} to ${userIds.length} users`);
+  }
+
+  /**
+   * Broadcast device reading/data update
+   * @param userIds - Array of user IDs to notify (farm users)
+   * @param deviceId - Device ID
+   * @param data - The sensor reading data
+   * @param equipmentId - Associated equipment ID (optional)
+   */
+  broadcastDeviceReading(userIds: string[], deviceId: string, data: any, equipmentId?: string) {
+    const payload = {
+      type: 'DEVICE_READING',
+      data: { 
+        deviceId,
+        equipmentId,
+        reading: data,
+        receivedAt: new Date().toISOString(),
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    userIds.forEach(userId => {
+      this.sendToUser(userId, payload);
+    });
+
+    logger.info(`[WebSocket] Broadcast DEVICE_READING for device ${deviceId} to ${userIds.length} users`);
+  }
+
+  /**
+   * Broadcast device status change (online/offline/error)
+   * @param userIds - Array of user IDs to notify (farm users)
+   * @param deviceId - Device ID
+   * @param status - New device status
+   * @param deviceName - Device name for display
+   * @param equipmentId - Associated equipment ID (optional)
+   */
+  broadcastDeviceStatus(userIds: string[], deviceId: string, status: string, deviceName?: string, equipmentId?: string) {
+    const payload = {
+      type: 'DEVICE_STATUS',
+      data: { 
+        deviceId,
+        equipmentId,
+        status,
+        deviceName,
+        changedAt: new Date().toISOString(),
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    userIds.forEach(userId => {
+      this.sendToUser(userId, payload);
+    });
+
+    logger.info(`[WebSocket] Broadcast DEVICE_STATUS (${status}) for device ${deviceId} to ${userIds.length} users`);
+  }
+
+  /**
+   * Broadcast equipment alert (e.g., service overdue, warranty expiring)
+   * @param userIds - Array of user IDs to notify (farm users)
+   * @param equipment - Equipment object
+   * @param alertType - Type of alert (service_overdue, warranty_expiring, etc.)
+   * @param message - Alert message
+   */
+  broadcastEquipmentAlert(userIds: string[], equipment: any, alertType: string, message: string) {
+    const payload = {
+      type: 'EQUIPMENT_ALERT',
+      data: { 
+        equipmentId: equipment.id,
+        equipmentName: equipment.name,
+        alertType,
+        message,
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    userIds.forEach(userId => {
+      this.sendToUser(userId, payload);
+    });
+
+    logger.info(`[WebSocket] Broadcast EQUIPMENT_ALERT (${alertType}) for ${equipment.name} to ${userIds.length} users`);
+  }
 }
 
 // Singleton instance

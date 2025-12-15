@@ -24,6 +24,32 @@ interface UseChatWebSocketOptions {
   onCallIceCandidate?: (callMessage: any) => void;
   onCallRing?: (callMessage: any) => void;
   onCallHangup?: (callMessage: any) => void;
+  // Animal health record events
+  onNewHealthRecord?: (animalId: string, record: any) => void;
+  // Generic notification events
+  onNewNotification?: (notification: any) => void;
+  // Animal record events
+  onAnimalAdded?: (animal: any) => void;
+  onAnimalUpdated?: (animal: any) => void;
+  onAnimalRemoved?: (animalId: string, status: string) => void;
+  // Task events
+  onTaskAssigned?: (task: any) => void;
+  onTaskCreated?: (task: any) => void;
+  onTaskUpdated?: (task: any) => void;
+  onTaskCompleted?: (task: any) => void;
+  // Roster events
+  onShiftScheduled?: (rosterEntry: any) => void;
+  onRosterUpdated?: (rosterEntry: any) => void;
+  // Timesheet events
+  onUserClockedIn?: (data: { staffName: string; staffProfileId: string; clockedInAt: string }) => void;
+  onUserClockedOut?: (data: { staffName: string; staffProfileId: string; totalHours: string; clockedOutAt: string }) => void;
+  // Equipment events
+  onEquipmentStatusChanged?: (data: { equipmentId: string; equipment: any; previousStatus: string; newStatus: string }) => void;
+  onNewMaintenanceLog?: (data: { equipmentId: string; maintenanceRecord: any; equipment: any }) => void;
+  onEquipmentAlert?: (data: { equipmentId: string; equipmentName: string; alertType: string; message: string }) => void;
+  // Device events
+  onDeviceReading?: (data: { deviceId: string; equipmentId?: string; reading: any; receivedAt: string }) => void;
+  onDeviceStatus?: (data: { deviceId: string; equipmentId?: string; status: string; deviceName?: string; changedAt: string }) => void;
 }
 
 export function useChatWebSocket(options: UseChatWebSocketOptions = {}) {
@@ -196,6 +222,141 @@ export function useChatWebSocket(options: UseChatWebSocketOptions = {}) {
       case 'call-hangup':
         if (message.data) {
           options.onCallHangup?.(message.data);
+        }
+        break;
+
+      // Animal health record events
+      case 'NEW_HEALTH_RECORD':
+        if (message.data) {
+          const animalId = (message as any).animalId || message.data.animalId;
+          options.onNewHealthRecord?.(animalId, message.data);
+          console.log('[WebSocket] New health record for animal:', animalId);
+        }
+        break;
+
+      // Generic notification events
+      case 'NEW_NOTIFICATION':
+        if (message.data) {
+          options.onNewNotification?.(message.data);
+          console.log('[WebSocket] New notification received:', message.data.title);
+        }
+        break;
+
+      // Animal record events
+      case 'ANIMAL_ADDED':
+        if (message.data) {
+          options.onAnimalAdded?.(message.data);
+          console.log('[WebSocket] Animal added:', message.data.name || message.data.visualId);
+        }
+        break;
+
+      case 'ANIMAL_UPDATED':
+        if (message.data) {
+          options.onAnimalUpdated?.(message.data);
+          console.log('[WebSocket] Animal updated:', message.data.id);
+        }
+        break;
+
+      case 'ANIMAL_REMOVED':
+        if (message.data) {
+          options.onAnimalRemoved?.(message.data.id, message.data.status);
+          console.log('[WebSocket] Animal removed:', message.data.id, message.data.status);
+        }
+        break;
+
+      // Task events
+      case 'TASK_ASSIGNED':
+        if (message.data) {
+          options.onTaskAssigned?.(message.data);
+          console.log('[WebSocket] Task assigned:', message.data.title);
+        }
+        break;
+
+      case 'TASK_CREATED':
+        if (message.data) {
+          options.onTaskCreated?.(message.data);
+          console.log('[WebSocket] Task created:', message.data.title);
+        }
+        break;
+
+      case 'TASK_UPDATED':
+        if (message.data) {
+          options.onTaskUpdated?.(message.data);
+          console.log('[WebSocket] Task updated:', message.data.id);
+        }
+        break;
+
+      case 'TASK_COMPLETED':
+        if (message.data) {
+          options.onTaskCompleted?.(message.data);
+          console.log('[WebSocket] Task completed:', message.data.title, 'by', message.data.completedByName);
+        }
+        break;
+
+      // Roster events
+      case 'SHIFT_SCHEDULED':
+        if (message.data) {
+          options.onShiftScheduled?.(message.data);
+          console.log('[WebSocket] Shift scheduled:', message.data.date, message.data.startTime);
+        }
+        break;
+
+      case 'ROSTER_UPDATED':
+        if (message.data) {
+          options.onRosterUpdated?.(message.data);
+          console.log('[WebSocket] Roster updated:', message.data.id);
+        }
+        break;
+
+      // Timesheet events
+      case 'USER_CLOCKED_IN':
+        if (message.data) {
+          options.onUserClockedIn?.(message.data);
+          console.log('[WebSocket] User clocked in:', message.data.staffName);
+        }
+        break;
+
+      case 'USER_CLOCKED_OUT':
+        if (message.data) {
+          options.onUserClockedOut?.(message.data);
+          console.log('[WebSocket] User clocked out:', message.data.staffName, 'Total:', message.data.totalHours, 'hrs');
+        }
+        break;
+
+      // Equipment events
+      case 'EQUIPMENT_STATUS_CHANGED':
+        if (message.data) {
+          options.onEquipmentStatusChanged?.(message.data);
+          console.log('[WebSocket] Equipment status changed:', message.data.equipment?.name, 'from', message.data.previousStatus, 'to', message.data.newStatus);
+        }
+        break;
+
+      case 'NEW_MAINTENANCE_LOG':
+        if (message.data) {
+          options.onNewMaintenanceLog?.(message.data);
+          console.log('[WebSocket] New maintenance log for equipment:', message.data.equipmentId);
+        }
+        break;
+
+      case 'EQUIPMENT_ALERT':
+        if (message.data) {
+          options.onEquipmentAlert?.(message.data);
+          console.log('[WebSocket] Equipment alert:', message.data.alertType, '-', message.data.message);
+        }
+        break;
+
+      // Device events
+      case 'DEVICE_READING':
+        if (message.data) {
+          options.onDeviceReading?.(message.data);
+          console.log('[WebSocket] Device reading:', message.data.deviceId, message.data.reading);
+        }
+        break;
+
+      case 'DEVICE_STATUS':
+        if (message.data) {
+          options.onDeviceStatus?.(message.data);
+          console.log('[WebSocket] Device status:', message.data.deviceName || message.data.deviceId, '->', message.data.status);
         }
         break;
 

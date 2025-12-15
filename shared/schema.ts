@@ -8,6 +8,7 @@ import { z } from "zod";
 
 export const animalSexEnum = pgEnum('animal_sex', ['female', 'male']);
 export const animalStatusEnum = pgEnum('animal_status', ['active', 'sold', 'deceased']);
+export const healthRecordTypeEnum = pgEnum('health_record_type', ['illness', 'treatment', 'vaccination', 'injury', 'observation', 'checkup', 'other']);
 export const pastureStatusEnum = pgEnum('pasture_status', ['available', 'grazing', 'resting', 'maintenance']);
 export const treatmentStatusEnum = pgEnum('treatment_status', ['active', 'completed']);
 export const reproEventTypeEnum = pgEnum('repro_event_type', ['heat', 'ai', 'pregnancy_check', 'calving']);
@@ -114,6 +115,22 @@ export const products = pgTable('products', {
   deletedAt: timestamp('deleted_at'),
 });
 
+// Farms (Multi-tenancy support)
+export const farms = pgTable('farms', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: varchar('name', { length: 255 }).notNull(),
+  location: varchar('location', { length: 255 }),
+  address: text('address'),
+  naitNumber: varchar('nait_number', { length: 50 }), // NAIT location number
+  contactEmail: varchar('contact_email', { length: 255 }),
+  contactPhone: varchar('contact_phone', { length: 50 }),
+  timezone: varchar('timezone', { length: 50 }).default('Pacific/Auckland'),
+  settings: jsonb('settings').$type<Record<string, any>>(),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // Product Batches (Stock/Inventory Records - formerly RecordItem)
 export const productBatches = pgTable('product_batches', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -161,6 +178,7 @@ export const conditions = pgTable('conditions', {
 // Animals (Herd)
 export const animals = pgTable('animals', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id),
   // Tag Identification
   visualId: varchar('visual_id', { length: 50 }), // VID - Visual ID (farm tag number)
   lifetimeId: varchar('lifetime_id', { length: 50 }).unique(), // LID - Lifetime ID (NAIT birth tag)
@@ -171,6 +189,9 @@ export const animals = pgTable('animals', {
   ahbId: varchar('ahb_id', { length: 50 }), // Animal Health Board ID
   name: varchar('name', { length: 100 }), // Animal name
   breed: varchar('breed', { length: 100 }),
+  breedType: varchar('breed_type', { length: 100 }), // e.g., "Holstein Friesian", "Jersey", "Crossbred"
+  origin: varchar('origin', { length: 255 }), // Source farm or purchase info
+  nationalId: varchar('national_id', { length: 50 }).unique(), // National compliance ID (alias for NAIT)
   dateOfBirth: varchar('date_of_birth', { length: 10 }),
   yearBorn: integer('year_born'),
   sex: animalSexEnum('sex'),
@@ -324,6 +345,29 @@ export const animals = pgTable('animals', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   version: integer('version').default(0).notNull(),
   deletedAt: timestamp('deleted_at'),
+});
+
+// Animal Health Records (Consolidated health event tracking)
+export const animalHealthRecords = pgTable('animal_health_records', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  animalId: uuid('animal_id').references(() => animals.id).notNull(),
+  recordedById: uuid('recorded_by_id').references(() => users.id).notNull(),
+  date: date('date').notNull(),
+  type: healthRecordTypeEnum('type').notNull(),
+  description: text('description').notNull(),
+  notes: text('notes'),
+  // Optional links to specific record types
+  treatmentId: uuid('treatment_id').references(() => animalTreatments.id),
+  vetVisitId: uuid('vet_visit_id').references(() => vetVisits.id),
+  // Severity/priority
+  severity: healthAlertSeverityEnum('severity').default('low'),
+  // Follow-up tracking
+  requiresFollowUp: boolean('requires_follow_up').default(false),
+  followUpDate: date('follow_up_date'),
+  followUpCompleted: boolean('follow_up_completed').default(false),
+  // Metadata
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
 // Tag type enum for tag history
@@ -1395,6 +1439,10 @@ export const productBatchesRelations = relations(productBatches, ({ one }) => ({
 }));
 
 export const animalsRelations = relations(animals, ({ one, many }) => ({
+  farm: one(farms, {
+    fields: [animals.farmId],
+    references: [farms.id],
+  }),
   currentPasture: one(pastures, {
     fields: [animals.currentPastureId],
     references: [pastures.id],
@@ -1405,6 +1453,7 @@ export const animalsRelations = relations(animals, ({ one, many }) => ({
   naitRecords: many(naitRecords),
   groupMembers: many(animalGroupMembers), // Phase 4: Group memberships
   weightRecords: many(weightRecords), // Health tracking
+  healthRecords: many(animalHealthRecords), // Consolidated health records
 }));
 
 // Weight Records Relations
@@ -1416,6 +1465,26 @@ export const weightRecordsRelations = relations(weightRecords, ({ one }) => ({
   recordedByUser: one(users, {
     fields: [weightRecords.recordedBy],
     references: [users.id],
+  }),
+}));
+
+// Animal Health Records Relations
+export const animalHealthRecordsRelations = relations(animalHealthRecords, ({ one }) => ({
+  animal: one(animals, {
+    fields: [animalHealthRecords.animalId],
+    references: [animals.id],
+  }),
+  recordedBy: one(users, {
+    fields: [animalHealthRecords.recordedById],
+    references: [users.id],
+  }),
+  treatment: one(animalTreatments, {
+    fields: [animalHealthRecords.treatmentId],
+    references: [animalTreatments.id],
+  }),
+  vetVisit: one(vetVisits, {
+    fields: [animalHealthRecords.vetVisitId],
+    references: [vetVisits.id],
   }),
 }));
 
@@ -3215,9 +3284,55 @@ export const contractorDocuments = pgTable('contractor_documents', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// Roster Entry Status Enum
+export const rosterStatusEnum = pgEnum('roster_status', ['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show']);
+
+// Roster Entries (Shift scheduling for staff)
+export const rosterEntries = pgTable('roster_entries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  staffProfileId: uuid('staff_profile_id').references(() => staffProfiles.id, { onDelete: 'cascade' }).notNull(),
+  
+  // Shift timing
+  date: date('date').notNull(),
+  startTime: varchar('start_time', { length: 10 }).notNull(), // HH:MM format
+  endTime: varchar('end_time', { length: 10 }).notNull(), // HH:MM format
+  breakMinutes: integer('break_minutes').default(0),
+  
+  // Role and assignment
+  role: varchar('role', { length: 100 }), // e.g., "Milker", "Tractor Operator", "General"
+  position: varchar('position', { length: 100 }), // Specific position if needed
+  
+  // Link to job/task (optional)
+  jobId: uuid('job_id').references(() => jobs.id, { onDelete: 'set null' }),
+  
+  // Status tracking
+  status: rosterStatusEnum('status').default('scheduled').notNull(),
+  confirmedAt: timestamp('confirmed_at'),
+  
+  // Location
+  location: varchar('location', { length: 255 }),
+  pastureId: uuid('pasture_id').references(() => pastures.id),
+  
+  // Metadata
+  notes: text('notes'), // e.g., "Covering for John"
+  color: varchar('color', { length: 20 }), // For calendar display
+  
+  // Created by (manager who scheduled)
+  createdById: uuid('created_by_id').references(() => users.id).notNull(),
+  
+  // Timestamps
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Timesheet Status Enum
+export const timesheetStatusEnum = pgEnum('timesheet_status', ['draft', 'pending', 'approved', 'rejected']);
+
 // Timesheets (Time tracking for staff)
 export const timesheets = pgTable('timesheets', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id),
   staffProfileId: uuid('staff_profile_id').references(() => staffProfiles.id, { onDelete: 'cascade' }).notNull(),
   date: date('date').notNull(),
   startTime: varchar('start_time', { length: 10 }).notNull(), // HH:MM format
@@ -3286,7 +3401,34 @@ export const contractorDocumentsRelations = relations(contractorDocuments, ({ on
   }),
 }));
 
+export const rosterEntriesRelations = relations(rosterEntries, ({ one }) => ({
+  farm: one(farms, {
+    fields: [rosterEntries.farmId],
+    references: [farms.id],
+  }),
+  staffProfile: one(staffProfiles, {
+    fields: [rosterEntries.staffProfileId],
+    references: [staffProfiles.id],
+  }),
+  job: one(jobs, {
+    fields: [rosterEntries.jobId],
+    references: [jobs.id],
+  }),
+  pasture: one(pastures, {
+    fields: [rosterEntries.pastureId],
+    references: [pastures.id],
+  }),
+  createdBy: one(users, {
+    fields: [rosterEntries.createdById],
+    references: [users.id],
+  }),
+}));
+
 export const timesheetsRelations = relations(timesheets, ({ one }) => ({
+  farm: one(farms, {
+    fields: [timesheets.farmId],
+    references: [farms.id],
+  }),
   staffProfile: one(staffProfiles, {
     fields: [timesheets.staffProfileId],
     references: [staffProfiles.id],
@@ -3329,11 +3471,21 @@ export const insertContractorDocumentSchema = createInsertSchema(contractorDocum
   updatedAt: true,
 });
 
+export const insertRosterEntrySchema = createInsertSchema(rosterEntries).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const updateRosterEntrySchema = insertRosterEntrySchema.partial();
+
 export const insertTimesheetSchema = createInsertSchema(timesheets).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
 });
+
+export const updateTimesheetSchema = insertTimesheetSchema.partial();
 
 export const insertContractorWorkRecordSchema = createInsertSchema(contractorWorkRecords).omit({
   id: true,
@@ -3348,6 +3500,8 @@ export type StaffCertification = typeof staffCertifications.$inferSelect;
 export type InsertStaffCertification = z.infer<typeof insertStaffCertificationSchema>;
 export type Contractor = typeof contractors.$inferSelect;
 export type InsertContractor = z.infer<typeof insertContractorSchema>;
+export type RosterEntry = typeof rosterEntries.$inferSelect;
+export type InsertRosterEntry = z.infer<typeof insertRosterEntrySchema>;
 export type ContractorDocument = typeof contractorDocuments.$inferSelect;
 export type InsertContractorDocument = z.infer<typeof insertContractorDocumentSchema>;
 export type Timesheet = typeof timesheets.$inferSelect;
@@ -3508,6 +3662,186 @@ export type InsertRecurringTaskTemplate = z.infer<typeof insertRecurringTaskTemp
 export type RecurringTaskInstance = typeof recurringTaskInstances.$inferSelect;
 export type InsertRecurringTaskInstance = z.infer<typeof insertRecurringTaskInstanceSchema>;
 
+// ============================================
+// JOBS AND TASKS SCHEMA
+// ============================================
+
+// Job status enum
+export const jobStatusEnum = pgEnum('job_status', ['open', 'in_progress', 'completed', 'cancelled']);
+
+// Task status enum
+export const taskStatusEnum = pgEnum('task_status', ['pending', 'in_progress', 'done', 'cancelled']);
+
+// Task priority enum
+export const taskPriorityEnum = pgEnum('task_priority', ['low', 'medium', 'high', 'urgent']);
+
+// Jobs - groups related tasks together
+export const jobs = pgTable('jobs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  
+  // Job details
+  title: varchar('title', { length: 255 }).notNull(),
+  description: text('description'),
+  status: jobStatusEnum('status').default('open').notNull(),
+  
+  // Assignment and ownership
+  createdById: uuid('created_by_id').references(() => users.id).notNull(),
+  assignedToId: uuid('assigned_to_id').references(() => users.id),
+  
+  // Scheduling
+  dueDate: timestamp('due_date'),
+  startDate: timestamp('start_date'),
+  completedAt: timestamp('completed_at'),
+  
+  // Categorization
+  category: varchar('category', { length: 100 }),
+  priority: taskPriorityEnum('priority').default('medium'),
+  
+  // Location (optional)
+  location: varchar('location', { length: 255 }),
+  pastureId: uuid('pasture_id').references(() => pastures.id),
+  
+  // Metadata
+  notes: text('notes'),
+  tags: jsonb('tags').$type<string[]>().default([]),
+  
+  // Timestamps
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Tasks - individual work items, can be standalone or part of a job
+export const tasks = pgTable('tasks', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  jobId: uuid('job_id').references(() => jobs.id, { onDelete: 'set null' }), // Optional: task can be standalone
+  
+  // Task details
+  title: varchar('title', { length: 255 }).notNull(),
+  description: text('description'),
+  status: taskStatusEnum('status').default('pending').notNull(),
+  priority: taskPriorityEnum('priority').default('medium'),
+  
+  // Assignment
+  createdById: uuid('created_by_id').references(() => users.id).notNull(),
+  assignedToId: uuid('assigned_to_id').references(() => users.id),
+  
+  // Scheduling
+  dueDate: timestamp('due_date'),
+  startDate: timestamp('start_date'),
+  completedAt: timestamp('completed_at'),
+  completedById: uuid('completed_by_id').references(() => users.id),
+  
+  // Time tracking
+  estimatedMinutes: integer('estimated_minutes'),
+  actualMinutes: integer('actual_minutes'),
+  
+  // Location (optional)
+  location: varchar('location', { length: 255 }),
+  latitude: numeric('latitude', { precision: 10, scale: 7 }),
+  longitude: numeric('longitude', { precision: 10, scale: 7 }),
+  pastureId: uuid('pasture_id').references(() => pastures.id),
+  
+  // Related entities (optional)
+  animalId: uuid('animal_id').references(() => animals.id),
+  equipmentId: uuid('equipment_id'),
+  
+  // Checklist items (sub-tasks)
+  checklistItems: jsonb('checklist_items').$type<{ id: string; text: string; completed: boolean }[]>(),
+  
+  // Metadata
+  notes: text('notes'),
+  tags: jsonb('tags').$type<string[]>().default([]),
+  attachments: jsonb('attachments').$type<{ name: string; url: string; type: string }[]>(),
+  
+  // Timestamps
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Relations for jobs
+export const jobsRelations = relations(jobs, ({ one, many }) => ({
+  farm: one(farms, {
+    fields: [jobs.farmId],
+    references: [farms.id],
+  }),
+  createdBy: one(users, {
+    fields: [jobs.createdById],
+    references: [users.id],
+    relationName: 'jobCreatedBy',
+  }),
+  assignedTo: one(users, {
+    fields: [jobs.assignedToId],
+    references: [users.id],
+    relationName: 'jobAssignedTo',
+  }),
+  pasture: one(pastures, {
+    fields: [jobs.pastureId],
+    references: [pastures.id],
+  }),
+  tasks: many(tasks),
+}));
+
+// Relations for tasks
+export const tasksRelations = relations(tasks, ({ one }) => ({
+  farm: one(farms, {
+    fields: [tasks.farmId],
+    references: [farms.id],
+  }),
+  job: one(jobs, {
+    fields: [tasks.jobId],
+    references: [jobs.id],
+  }),
+  createdBy: one(users, {
+    fields: [tasks.createdById],
+    references: [users.id],
+    relationName: 'taskCreatedBy',
+  }),
+  assignedTo: one(users, {
+    fields: [tasks.assignedToId],
+    references: [users.id],
+    relationName: 'taskAssignedTo',
+  }),
+  completedBy: one(users, {
+    fields: [tasks.completedById],
+    references: [users.id],
+    relationName: 'taskCompletedBy',
+  }),
+  pasture: one(pastures, {
+    fields: [tasks.pastureId],
+    references: [pastures.id],
+  }),
+  animal: one(animals, {
+    fields: [tasks.animalId],
+    references: [animals.id],
+  }),
+}));
+
+// Validation schemas for jobs
+export const insertJobSchema = createInsertSchema(jobs).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const updateJobSchema = insertJobSchema.partial();
+
+// Validation schemas for tasks
+export const insertTaskSchema = createInsertSchema(tasks).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const updateTaskSchema = insertTaskSchema.partial();
+
+// Job and Task Types
+export type Job = typeof jobs.$inferSelect;
+export type InsertJob = z.infer<typeof insertJobSchema>;
+export type Task = typeof tasks.$inferSelect;
+export type InsertTask = z.infer<typeof insertTaskSchema>;
+
 // Equipment/Device tracking for farm assets
 export const equipmentStatusEnum = pgEnum('equipment_status', ['operational', 'maintenance_due', 'in_maintenance', 'out_of_service']);
 
@@ -3547,6 +3881,148 @@ export const equipmentServiceHistory = pgTable('equipment_service_history', {
   notes: text('notes'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
+
+// IoT Device types and status
+export const deviceTypeEnum = pgEnum('device_type', [
+  'temperature_sensor',
+  'humidity_sensor',
+  'gps_tracker',
+  'water_level_sensor',
+  'milk_meter',
+  'weight_scale',
+  'camera',
+  'weather_station',
+  'soil_sensor',
+  'fence_monitor',
+  'tank_level_sensor',
+  'other'
+]);
+
+export const deviceStatusEnum = pgEnum('device_status', ['online', 'offline', 'error', 'maintenance']);
+
+// IoT Devices for farm monitoring
+export const devices = pgTable('devices', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').notNull(),
+  equipmentId: uuid('equipment_id').references(() => equipment.id, { onDelete: 'set null' }), // Optional link to equipment
+  
+  // Device identification
+  name: varchar('name', { length: 255 }).notNull(),
+  type: deviceTypeEnum('type').notNull(),
+  serialNumber: varchar('serial_number', { length: 100 }).unique(),
+  manufacturer: varchar('manufacturer', { length: 100 }),
+  model: varchar('model', { length: 100 }),
+  firmwareVersion: varchar('firmware_version', { length: 50 }),
+  
+  // Status and connectivity
+  status: deviceStatusEnum('status').default('offline').notNull(),
+  lastSeenAt: timestamp('last_seen_at'),
+  ipAddress: varchar('ip_address', { length: 45 }), // IPv4 or IPv6
+  macAddress: varchar('mac_address', { length: 17 }),
+  
+  // Location
+  location: varchar('location', { length: 255 }), // Description of where device is installed
+  latitude: numeric('latitude', { precision: 10, scale: 7 }),
+  longitude: numeric('longitude', { precision: 10, scale: 7 }),
+  
+  // Configuration and data
+  config: jsonb('config').$type<Record<string, any>>(), // Device-specific configuration
+  lastData: jsonb('last_data').$type<Record<string, any>>(), // Last reported sensor data
+  
+  // Alerts and thresholds
+  alertThresholds: jsonb('alert_thresholds').$type<{
+    min?: number;
+    max?: number;
+    unit?: string;
+    alertOnOffline?: boolean;
+  }>(),
+  
+  // Metadata
+  notes: text('notes'),
+  isActive: boolean('is_active').default(true).notNull(),
+  installedAt: timestamp('installed_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Device Data Logs - Historical sensor readings
+export const deviceDataLogs = pgTable('device_data_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  deviceId: uuid('device_id').references(() => devices.id, { onDelete: 'cascade' }).notNull(),
+  
+  // Reading data
+  timestamp: timestamp('timestamp').notNull(),
+  data: jsonb('data').$type<Record<string, any>>().notNull(), // Sensor readings
+  
+  // Optional parsed values for common metrics
+  temperature: numeric('temperature', { precision: 5, scale: 2 }),
+  humidity: numeric('humidity', { precision: 5, scale: 2 }),
+  batteryLevel: integer('battery_level'), // Percentage 0-100
+  signalStrength: integer('signal_strength'), // RSSI or percentage
+  
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// Relations for Equipment and Devices
+export const equipmentRelations = relations(equipment, ({ many }) => ({
+  serviceHistory: many(equipmentServiceHistory),
+  devices: many(devices),
+}));
+
+export const equipmentServiceHistoryRelations = relations(equipmentServiceHistory, ({ one }) => ({
+  equipment: one(equipment, {
+    fields: [equipmentServiceHistory.equipmentId],
+    references: [equipment.id],
+  }),
+}));
+
+export const devicesRelations = relations(devices, ({ one, many }) => ({
+  equipment: one(equipment, {
+    fields: [devices.equipmentId],
+    references: [equipment.id],
+  }),
+  dataLogs: many(deviceDataLogs),
+}));
+
+export const deviceDataLogsRelations = relations(deviceDataLogs, ({ one }) => ({
+  device: one(devices, {
+    fields: [deviceDataLogs.deviceId],
+    references: [devices.id],
+  }),
+}));
+
+// Validation schemas for Equipment and Devices
+export const insertEquipmentSchema = createInsertSchema(equipment).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertEquipmentServiceHistorySchema = createInsertSchema(equipmentServiceHistory).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertDeviceSchema = createInsertSchema(devices).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertDeviceDataLogSchema = createInsertSchema(deviceDataLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
+// Types for Equipment and Devices
+export type Equipment = typeof equipment.$inferSelect;
+export type InsertEquipment = z.infer<typeof insertEquipmentSchema>;
+export type EquipmentServiceHistory = typeof equipmentServiceHistory.$inferSelect;
+export type InsertEquipmentServiceHistory = z.infer<typeof insertEquipmentServiceHistorySchema>;
+export type Device = typeof devices.$inferSelect;
+export type InsertDevice = z.infer<typeof insertDeviceSchema>;
+export type DeviceDataLog = typeof deviceDataLogs.$inferSelect;
+export type InsertDeviceDataLog = z.infer<typeof insertDeviceDataLogSchema>;
 
 // ===== FINANCIAL TABLES =====
 

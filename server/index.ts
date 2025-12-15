@@ -99,5 +99,13 @@ app.use((req, res, next) => {
     if (isDemoMode()) {
       startHardwareSimulator();
     }
+
+    // Initialize scheduled jobs (compliance checks, etc.)
+    import('./scheduler').then(({ initializeScheduler }) => {
+      initializeScheduler();
+      log('Scheduled jobs initialized');
+    }).catch(err => {
+      log(`Failed to initialize scheduler: ${err}`);
+    });
   });
 })();

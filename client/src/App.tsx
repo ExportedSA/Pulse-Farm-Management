@@ -82,6 +82,16 @@ import SmartGroupsPage from "@/pages/smart-groups-page";
 import BulkOperationsPage from "@/pages/bulk-operations-page";
 import AnimalTimelinePage from "@/pages/animal-timeline-page";
 import AnimalLineagePage from "@/pages/animal-lineage-page";
+import AnimalHealthPage from "@/pages/AnimalHealthPage";
+import AnimalDetailPage from "@/pages/AnimalDetailPage";
+import TaskListPage from "@/pages/TaskListPage";
+import MyTimePage from "@/pages/MyTimePage";
+import EquipmentListPage from "@/pages/EquipmentListPage";
+import EquipmentDetailPage from "@/pages/EquipmentDetailPage";
+import ComplianceDashboard from "@/pages/ComplianceDashboard";
+import TimesheetReportPage from "@/pages/TimesheetReportPage";
+import SafetyReportPage from "@/pages/SafetyReportPage";
+import AnimalReportPage from "@/pages/AnimalReportPage";
 import HerdReportsPage from "@/pages/herd-reports-page";
 import PastureWalkPage from "@/pages/pasture-walk-page";
 import RosterSchedulingPage from "@/pages/roster-scheduling-page";
@@ -199,7 +209,17 @@ function Router() {
         <Route path="/app/bulk-operations" component={BulkOperationsPage} />
         <Route path="/app/animals/:animalId/timeline" component={AnimalTimelinePage} />
         <Route path="/app/animals/:animalId/lineage" component={AnimalLineagePage} />
+        <Route path="/app/animals/:animalId/health" component={AnimalHealthPage} />
+        <Route path="/app/animals/:id" component={AnimalDetailPage} />
         <Route path="/app/herd-reports" component={HerdReportsPage} />
+        <Route path="/app/tasks" component={TaskListPage} />
+        <Route path="/app/my-time" component={MyTimePage} />
+        <Route path="/app/equipment" component={EquipmentListPage} />
+        <Route path="/app/equipment/:id" component={EquipmentDetailPage} />
+        <Route path="/app/compliance" component={ComplianceDashboard} />
+        <Route path="/app/reports/timesheets" component={TimesheetReportPage} />
+        <Route path="/app/reports/safety" component={SafetyReportPage} />
+        <Route path="/app/reports/animals" component={AnimalReportPage} />
         <Route path="/app/analytics" component={AnalyticsDashboard} />
         <Route path="/app/financial" component={FinancialPage} />
         <Route path="/app/milk-production" component={MilkProductionPage} />

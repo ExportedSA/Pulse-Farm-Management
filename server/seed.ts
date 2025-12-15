@@ -113,44 +113,86 @@ async function seed() {
       carryingCapacity: 2,
     } as InsertPasture).returning();
 
-    // Create demo animals
+    // Create demo animals with varied breeds and lineage
     console.log("🐄 Creating demo animals...");
     const demoAnimals = [];
-    for (let i = 1; i <= 10; i++) {
+
+    // Animal breed configurations for variety
+    const animalConfigs = [
+      { name: "Daisy", breed: "Holstein Friesian", breedType: "Dairy", sex: "female" as const, origin: "Home bred", yearBorn: 2018 },
+      { name: "Buttercup", breed: "Jersey", breedType: "Dairy", sex: "female" as const, origin: "Home bred", yearBorn: 2019 },
+      { name: "Clover", breed: "Holstein Friesian", breedType: "Dairy", sex: "female" as const, origin: "Purchased - Smith Farm", yearBorn: 2020 },
+      { name: "Rosie", breed: "Crossbred", breedType: "Dairy Cross", sex: "female" as const, origin: "Home bred", yearBorn: 2020 },
+      { name: "Bella", breed: "Jersey", breedType: "Dairy", sex: "female" as const, origin: "Home bred", yearBorn: 2021 },
+      { name: "Molly", breed: "Holstein Friesian", breedType: "Dairy", sex: "female" as const, origin: "Purchased - Jones Dairy", yearBorn: 2021 },
+      { name: "Luna", breed: "Ayrshire", breedType: "Dairy", sex: "female" as const, origin: "Home bred", yearBorn: 2022 },
+      { name: "Star", breed: "Holstein Friesian", breedType: "Dairy", sex: "female" as const, origin: "Home bred", yearBorn: 2022 },
+      { name: "Thunder", breed: "Angus", breedType: "Beef", sex: "male" as const, origin: "Purchased - Highland Genetics", yearBorn: 2020 },
+      { name: "Shadow", breed: "Hereford", breedType: "Beef", sex: "male" as const, origin: "Home bred", yearBorn: 2021 },
+    ];
+
+    for (let i = 0; i < animalConfigs.length; i++) {
+      const config = animalConfigs[i];
       const [animal] = await db.insert(animals).values({
-        visualId: `VID${1000 + i}`,
-        lifetimeId: `LID${2000 + i}`,
+        visualId: `VID${1000 + i + 1}`,
+        lifetimeId: `LID${2000 + i + 1}`,
+        nationalId: `NZ${String(Date.now()).slice(-8)}${i + 1}`,
         naitTag: "123456789",
-        eid: `EID${3000 + i}`,
-        name: i === 1 ? "Daisy" : `Cow ${i}`,
-        breed: "Friesian",
-        dateOfBirth: "2020-03-15",
-        yearBorn: 2020,
-        sex: "female",
-        herd: "Main Herd",
-        currentPastureId: i <= 5 ? pasture1.id : pasture2.id,
+        eid: `EID${3000 + i + 1}`,
+        name: config.name,
+        breed: config.breed,
+        breedType: config.breedType,
+        origin: config.origin,
+        dateOfBirth: `${config.yearBorn}-${String(3 + (i % 9)).padStart(2, '0')}-${String(10 + (i % 20)).padStart(2, '0')}`,
+        yearBorn: config.yearBorn,
+        sex: config.sex,
+        herd: config.breedType === "Beef" ? "Beef Herd" : "Main Herd",
+        currentPastureId: i < 5 ? pasture1.id : pasture2.id,
         status: "active",
-        milkStatus: "In Milk",
-        a2Status: "A2/A2",
+        milkStatus: config.sex === "female" && config.breedType === "Dairy" ? "In Milk" : null,
+        a2Status: config.breedType === "Dairy" ? (i % 3 === 0 ? "A2/A2" : "A1/A2") : null,
         bvdStatus: "Negative",
-        dnaProfile: "GEv",
-        startDate: new Date("2020-06-01"),
-        bodyConditionScore: 4.5,
+        dnaProfile: i % 2 === 0 ? "GEv" : "G3",
+        startDate: new Date(`${config.yearBorn}-06-01`),
+        bodyConditionScore: 4.0 + (Math.random() * 1.0),
         bcsDate: new Date(),
-        liveWeight: 450.0 + (i * 10),
+        liveWeight: config.sex === "male" ? 650.0 + (i * 15) : 450.0 + (i * 10),
         liveWeightDate: new Date(),
-        reproductionStatus: {
-          lactationNumber: 2 + Math.floor(i / 3),
-          daysInMilk: 150 + (i * 20),
-          milkKgMS: 1.8 + (i * 0.1),
-          milkLitres: 25 + (i * 2),
-          fatKg: 0.8 + (i * 0.05),
-          fatPercent: 3.2 + (i * 0.1),
-          proteinKg: 0.7 + (i * 0.05),
-          proteinPercent: 2.8 + (i * 0.05),
-        },
+        reproductionStatus: config.sex === "female" ? {
+          lactationNumber: 2024 - config.yearBorn - 1,
+          daysInMilk: 100 + (i * 25),
+          milkKgMS: 1.5 + (Math.random() * 0.8),
+          milkLitres: 20 + (i * 2),
+          fatKg: 0.7 + (Math.random() * 0.3),
+          fatPercent: 3.0 + (Math.random() * 0.8),
+          proteinKg: 0.6 + (Math.random() * 0.2),
+          proteinPercent: 2.7 + (Math.random() * 0.4),
+        } : null,
       } as InsertAnimal).returning();
       demoAnimals.push(animal);
+    }
+
+    // Update lineage relationships (Daisy is mother of Rosie and Star)
+    if (demoAnimals.length >= 8) {
+      // Rosie (index 3) is daughter of Daisy (index 0)
+      await db.update(animals)
+        .set({ damId: demoAnimals[0].id })
+        .where(eq(animals.id, demoAnimals[3].id));
+      
+      // Star (index 7) is daughter of Daisy (index 0)
+      await db.update(animals)
+        .set({ damId: demoAnimals[0].id })
+        .where(eq(animals.id, demoAnimals[7].id));
+      
+      // Luna (index 6) is daughter of Buttercup (index 1)
+      await db.update(animals)
+        .set({ damId: demoAnimals[1].id })
+        .where(eq(animals.id, demoAnimals[6].id));
+
+      // Shadow (index 9) has Thunder (index 8) as sire
+      await db.update(animals)
+        .set({ sireId: demoAnimals[8].id })
+        .where(eq(animals.id, demoAnimals[9].id));
     }
 
     // Create demo conditions
@@ -310,25 +352,27 @@ async function seed() {
       animalId: demoAnimals[0].id,
       conditionId: condition1.id,
       productId: product1.id,
+      staffMemberId: adminUser.id,
+      staffMember: adminUser.name,
+      dateTime: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      condition: "Mastitis",
       treatmentPlan: "Penicillin injections for 3 days",
-      notes: "Animal showing signs of mastitis in left rear quarter",
+      clinicalNotes: "Animal showing signs of mastitis in left rear quarter",
       status: "active",
-      treatedBy: adminUser.id,
-      treatedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
-      expectedCompletionDate: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     } as InsertAnimalTreatment);
 
     await db.insert(animalTreatments).values({
       animalId: demoAnimals[1].id,
       conditionId: condition2.id,
       productId: product2.id,
+      staffMemberId: staffUser.id,
+      staffMember: staffUser.name,
+      dateTime: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+      condition: "Lameness",
       treatmentPlan: "Single dose of Ivermectin",
-      notes: "Preventative parasite treatment",
+      clinicalNotes: "Preventative parasite treatment",
       status: "completed",
-      treatedBy: staffUser.id,
-      treatedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
-      completedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
-      expectedCompletionDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      completedDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     } as InsertAnimalTreatment);
 
     // Create demo reproduction events
