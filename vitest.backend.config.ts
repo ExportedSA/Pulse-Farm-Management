@@ -5,8 +5,8 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
-    exclude: ['node_modules/', 'dist/', 'tests/e2e/**'],
+    include: ['tests/backend/**/*.test.ts'],
+    exclude: ['node_modules/', 'dist/', 'tests/e2e/**', 'tests/frontend/**'],
     setupFiles: ['./tests/setup/backend-setup.ts'],
     coverage: {
       provider: 'v8',
@@ -15,7 +15,6 @@ export default defineConfig({
         'node_modules/',
         'tests/',
         '**/*.test.ts',
-        '**/*.test.tsx',
         '**/*.spec.ts',
       ],
     },
@@ -24,7 +23,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': resolve(__dirname, './client/src'),
+      '@': resolve(__dirname, './server'),
       '@shared': resolve(__dirname, './shared'),
     },
   },

@@ -24,6 +24,7 @@ import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import Dashboard from "@/pages/dashboard";
 import LandingDashboard from "@/pages/landing-dashboard";
+import DashboardOverview from "@/components/dashboard/DashboardOverview";
 import ChatPage from "@/pages/chat-page";
 import CompliancePage from "@/pages/compliance-page";
 import FarmCompliancePage from "@/pages/farm-compliance-page";
@@ -132,18 +133,18 @@ function Router() {
   return (
     <RequireAuth>
       <Switch>
-        <Route path="/" component={LandingDashboard} />
-        <Route path="/app" component={LandingDashboard} />
+        <Route path="/" component={DashboardOverview} />
+        <Route path="/app" component={DashboardOverview} />
+        <Route path="/app/overview" component={DashboardOverview} />
         <Route path="/app/dashboard" component={Dashboard} />
         <Route path="/app/chat" component={ChatPage} />
         <Route path="/app/jobs" component={JobsPage} />
-        <Route path="/app/recurring-tasks" component={RecurringTasksPage} />
-        <Route path="/app/task-templates" component={TaskTemplatesPage} />
-        <Route path="/app/calendar" component={FarmCalendarPage} />
-        <Route path="/app/weather" component={WeatherPage} />
+        <Route path="/app/roster" component={RosterSchedulingPage} />
         <Route path="/app/timesheets" component={TimesheetsPage} />
-        <Route path="/app/kanban" component={KanbanPage} />
         <Route path="/app/equipment" component={EquipmentPage} />
+        <Route path="/app/compliance" component={CompliancePage} />
+        <Route path="/app/animals" component={AnimalsList} />
+        <Route path="/app/kanban" component={KanbanPage} />
         <Route path="/app/dependencies" component={TaskDependenciesPage} />
         <Route path="/app/compliance-tags" component={ComplianceTagsPage} />
         <Route path="/app/operations" component={OperationsPage} />

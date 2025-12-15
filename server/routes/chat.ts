@@ -926,10 +926,18 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    const fileUrl = `/uploads/chat/${req.file.filename}`;
+    // Use the file storage service to save the file
+    const { saveFileBuffer } = await import('../services/fileStorage');
+    const { storageKey, publicUrl } = await saveFileBuffer(
+      req.file.buffer,
+      req.file.mimetype,
+      req.file.originalname,
+      'chat' // Store in chat subfolder
+    );
     
     res.json({
-      url: fileUrl,
+      url: publicUrl,
+      storageKey,
       filename: req.file.originalname,
       size: req.file.size,
       mimetype: req.file.mimetype,

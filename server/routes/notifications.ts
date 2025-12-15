@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { deliverNotification, createAndDeliverNotification, type NotificationData } from '../services/notifications';
 
 const router = Router();
 
@@ -272,9 +273,9 @@ router.delete('/', (req, res) => {
 });
 
 // Create notification (internal use / testing)
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const userId = (req.user as any)?.id || 'demo-user';
-  const { type, title, message, icon, link, priority = 'normal', metadata } = req.body;
+  const { type, title, message, icon, link, priority = 'normal', metadata, deliver = true } = req.body;
   
   const notification: Notification = {
     id: `notif-${notificationIdCounter++}`,
@@ -292,7 +293,35 @@ router.post('/', (req, res) => {
   
   notifications.unshift(notification);
   
-  res.status(201).json(notification);
+  // Get user preferences for delivery
+  const preferences = userPreferences.get(userId) || getDefaultPreferences();
+  
+  // Deliver via external services if requested
+  let delivery = { email: false, sms: false };
+  if (deliver) {
+    try {
+      delivery = await deliverNotification(
+        {
+          userId,
+          title,
+          message,
+          type,
+          priority,
+          metadata,
+        },
+        {
+          emailEnabled: preferences.emailEnabled,
+          smsEnabled: preferences.emailEnabled, // For now, use same preference
+          quietHours: preferences.quietHours,
+        }
+      );
+    } catch (error) {
+      console.error('[NOTIFICATIONS] Delivery failed:', error);
+      // Still return success for in-app notification
+    }
+  }
+  
+  res.status(201).json({ notification, delivery });
 });
 
 // ============================================
@@ -357,8 +386,60 @@ router.post('/push/unsubscribe', (req, res) => {
   res.json({ success: true, message: 'Push subscription removed' });
 });
 
+// Test push notification (no auth for testing)
+router.post('/push/test-no-auth', async (req, res) => {
+  const userId = 'demo-user';
+  
+  // Create a test notification
+  const notification: Notification = {
+    id: `notif-${notificationIdCounter++}`,
+    type: 'system',
+    title: 'Test Notification',
+    message: 'Push notifications are working! 🎉',
+    icon: '🔔',
+    priority: 'normal',
+    read: false,
+    createdAt: new Date().toISOString(),
+    userId,
+  };
+  
+  notifications.unshift(notification);
+  
+  // Test external delivery
+  try {
+    const delivery = await deliverNotification(
+      {
+        userId,
+        title: notification.title,
+        message: notification.message,
+        type: notification.type,
+        priority: notification.priority,
+      },
+      {
+        emailEnabled: true,
+        smsEnabled: true,
+      }
+    );
+    
+    res.json({ 
+      success: true, 
+      notification,
+      delivery,
+      message: 'Test notification sent (check console for email/SMS logs)',
+    });
+  } catch (error) {
+    console.error('[NOTIFICATIONS] Test delivery failed:', error);
+    res.json({ 
+      success: true, 
+      notification,
+      delivery: { email: false, sms: false },
+      message: 'In-app notification created, external delivery failed',
+    });
+  }
+});
+
 // Test push notification
-router.post('/push/test', (req, res) => {
+router.post('/push/test', async (req, res) => {
   const userId = (req.user as any)?.id || 'demo-user';
   
   // Create a test notification
@@ -376,11 +457,37 @@ router.post('/push/test', (req, res) => {
   
   notifications.unshift(notification);
   
-  res.json({ 
-    success: true, 
-    notification,
-    message: 'Test notification sent',
-  });
+  // Test external delivery
+  try {
+    const delivery = await deliverNotification(
+      {
+        userId,
+        title: notification.title,
+        message: notification.message,
+        type: notification.type,
+        priority: notification.priority,
+      },
+      {
+        emailEnabled: true,
+        smsEnabled: true,
+      }
+    );
+    
+    res.json({ 
+      success: true, 
+      notification,
+      delivery,
+      message: 'Test notification sent (check console for email/SMS logs)',
+    });
+  } catch (error) {
+    console.error('[NOTIFICATIONS] Test delivery failed:', error);
+    res.json({ 
+      success: true, 
+      notification,
+      delivery: { email: false, sms: false },
+      message: 'In-app notification created, external delivery failed',
+    });
+  }
 });
 
 // ============================================
@@ -388,7 +495,7 @@ router.post('/push/test', (req, res) => {
 // ============================================
 
 // Trigger task due notification
-router.post('/trigger/task-due', (req, res) => {
+router.post('/trigger/task-due', async (req, res) => {
   const { userId, taskId, taskTitle, dueIn } = req.body;
   
   const notification: Notification = {
@@ -407,11 +514,34 @@ router.post('/trigger/task-due', (req, res) => {
   
   notifications.unshift(notification);
   
-  res.json({ success: true, notification });
+  // Deliver via external services
+  try {
+    const preferences = userPreferences.get(userId) || getDefaultPreferences();
+    const delivery = await deliverNotification(
+      {
+        userId: userId || 'demo-user',
+        title: notification.title,
+        message: notification.message,
+        type: notification.type,
+        priority: notification.priority,
+        metadata: notification.metadata,
+      },
+      {
+        emailEnabled: preferences.emailEnabled,
+        smsEnabled: preferences.emailEnabled,
+        quietHours: preferences.quietHours,
+      }
+    );
+    
+    res.json({ success: true, notification, delivery });
+  } catch (error) {
+    console.error('[NOTIFICATIONS] Delivery failed:', error);
+    res.json({ success: true, notification, delivery: { email: false, sms: false } });
+  }
 });
 
 // Trigger weather alert notification
-router.post('/trigger/weather-alert', (req, res) => {
+router.post('/trigger/weather-alert', async (req, res) => {
   const { userId, condition, message: alertMessage, date } = req.body;
   
   const notification: Notification = {
@@ -430,7 +560,30 @@ router.post('/trigger/weather-alert', (req, res) => {
   
   notifications.unshift(notification);
   
-  res.json({ success: true, notification });
+  // Deliver via external services
+  try {
+    const preferences = userPreferences.get(userId) || getDefaultPreferences();
+    const delivery = await deliverNotification(
+      {
+        userId: userId || 'demo-user',
+        title: notification.title,
+        message: notification.message,
+        type: notification.type,
+        priority: notification.priority,
+        metadata: notification.metadata,
+      },
+      {
+        emailEnabled: preferences.emailEnabled,
+        smsEnabled: preferences.emailEnabled,
+        quietHours: preferences.quietHours,
+      }
+    );
+    
+    res.json({ success: true, notification, delivery });
+  } catch (error) {
+    console.error('[NOTIFICATIONS] Delivery failed:', error);
+    res.json({ success: true, notification, delivery: { email: false, sms: false } });
+  }
 });
 
 export default router;
