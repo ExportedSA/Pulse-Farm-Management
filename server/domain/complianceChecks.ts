@@ -129,7 +129,7 @@ export async function checkAnimalHealthCompliance(farmId?: string): Promise<Comp
         .where(
           and(
             eq(animalHealthRecords.animalId, animal.id),
-            gte(animalHealthRecords.recordDate, thresholdDate.toISOString().split('T')[0])
+            gte(animalHealthRecords.date, thresholdDate.toISOString().split('T')[0])
           )
         )
         .limit(1);
@@ -146,13 +146,13 @@ export async function checkAnimalHealthCompliance(farmId?: string): Promise<Comp
         }
 
         // Get managers to assign task to
-        const managerIds = await getManagerUserIds(animal.farmId);
+        const managerIds = await getManagerUserIds(animal.farmId ?? undefined);
         const assigneeId = managerIds[0]; // Assign to first manager
 
         if (assigneeId) {
           try {
             await createTask({
-              farmId: animal.farmId,
+              farmId: animal.farmId ?? undefined,
               title: `${AUTO_TASK_PREFIX} ${taskTitle}`,
               description: `This animal has not had a health record in over ${ANIMAL_HEALTH_CHECK_THRESHOLD_DAYS} days. Please schedule a health check or vet visit.`,
               priority: 'medium',
@@ -248,13 +248,13 @@ export async function checkEquipmentMaintenance(farmId?: string): Promise<Compli
         }
 
         // Get managers to assign task to
-        const managerIds = await getManagerUserIds(equip.farmId);
+        const managerIds = await getManagerUserIds(equip.farmId ?? undefined);
         const assigneeId = managerIds[0];
 
         if (assigneeId) {
           try {
             await createTask({
-              farmId: equip.farmId,
+              farmId: equip.farmId ?? undefined,
               title: `${AUTO_TASK_PREFIX} ${taskTitle}`,
               description: `${equip.type} "${equip.name}" requires maintenance. ${reason}. Please schedule service.`,
               priority: equip.status === 'maintenance_due' ? 'high' : 'medium',
@@ -263,7 +263,7 @@ export async function checkEquipmentMaintenance(farmId?: string): Promise<Compli
               createdById: assigneeId,
               assignedToId: assigneeId,
               equipmentId: equip.id,
-              dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(), // Due in 14 days
+              dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // Due in 14 days
             });
             result.tasksCreated++;
             logger.info({ equipmentId: equip.id, equipmentName: equip.name }, 'Created maintenance task for equipment');
@@ -297,23 +297,20 @@ export async function checkUnresolvedHazards(farmId?: string): Promise<Complianc
     const thresholdDate = new Date();
     thresholdDate.setDate(thresholdDate.getDate() - HAZARD_UNRESOLVED_THRESHOLD_DAYS);
 
-    // Get all open hazards
+    // Get all open hazards (farmHazards uses 'active' status and createdAt)
     const conditions = [
-      inArray(farmHazards.status, ['identified', 'under_review']),
-      lt(farmHazards.identifiedAt, thresholdDate),
+      inArray(farmHazards.status, ['active', 'monitoring']),
+      lt(farmHazards.createdAt, thresholdDate),
     ];
-    if (farmId) {
-      conditions.push(eq(farmHazards.farmId, farmId));
-    }
 
     const openHazards = await db
       .select({
         id: farmHazards.id,
         title: farmHazards.title,
-        farmId: farmHazards.farmId,
         riskLevel: farmHazards.riskLevel,
-        identifiedAt: farmHazards.identifiedAt,
+        createdAt: farmHazards.createdAt,
         status: farmHazards.status,
+        severity: farmHazards.severity,
       })
       .from(farmHazards)
       .where(and(...conditions));
@@ -330,23 +327,24 @@ export async function checkUnresolvedHazards(farmId?: string): Promise<Complianc
       }
 
       // Get managers to assign task to
-      const managerIds = await getManagerUserIds(hazard.farmId);
+      const managerIds = await getManagerUserIds(farmId);
       const assigneeId = managerIds[0];
 
       if (assigneeId) {
         try {
-          const daysOpen = Math.floor((Date.now() - new Date(hazard.identifiedAt).getTime()) / (1000 * 60 * 60 * 24));
+          const daysOpen = Math.floor((Date.now() - new Date(hazard.createdAt).getTime()) / (1000 * 60 * 60 * 24));
+          const isHighRisk = hazard.severity === 'critical' || hazard.severity === 'high';
           
           await createTask({
-            farmId: hazard.farmId,
+            farmId: farmId,
             title: `${AUTO_TASK_PREFIX} ${taskTitle}`,
-            description: `This hazard has been open for ${daysOpen} days. Risk level: ${hazard.riskLevel}. Please take action to resolve or mitigate.`,
-            priority: hazard.riskLevel === 'critical' || hazard.riskLevel === 'high' ? 'urgent' : 'high',
+            description: `This hazard has been open for ${daysOpen} days. Severity: ${hazard.severity}. Please take action to resolve or mitigate.`,
+            priority: isHighRisk ? 'urgent' : 'high',
             status: 'pending',
             category: 'safety',
             createdById: assigneeId,
             assignedToId: assigneeId,
-            dueDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(), // Due in 3 days for safety
+            dueDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), // Due in 3 days for safety
           });
           result.tasksCreated++;
           logger.info({ hazardId: hazard.id, hazardTitle: hazard.title }, 'Created task for unresolved hazard');
@@ -377,17 +375,13 @@ export async function checkStaffTrainingCompliance(farmId?: string): Promise<Com
   };
 
   try {
-    // Get all active staff profiles
+    // Get all active staff profiles (staffProfiles doesn't have farmId)
     const conditions = [eq(staffProfiles.isActive, true)];
-    if (farmId) {
-      conditions.push(eq(staffProfiles.farmId, farmId));
-    }
 
     const activeStaff = await db
       .select({
         id: staffProfiles.id,
         userId: staffProfiles.userId,
-        farmId: staffProfiles.farmId,
         startDate: staffProfiles.startDate,
       })
       .from(staffProfiles)
@@ -420,13 +414,13 @@ export async function checkStaffTrainingCompliance(farmId?: string): Promise<Com
         const staffName = userDetails?.name || 'New Staff Member';
 
         // Get managers to assign task to
-        const managerIds = await getManagerUserIds(staff.farmId);
+        const managerIds = await getManagerUserIds(farmId);
         const assigneeId = managerIds[0];
 
         if (assigneeId) {
           try {
             await createTask({
-              farmId: staff.farmId,
+              farmId: farmId,
               title: `${AUTO_TASK_PREFIX} Complete induction for ${staffName}`,
               description: `New staff member ${staffName} started recently. Please ensure all required induction modules are completed including health & safety training.`,
               priority: 'high',
@@ -434,7 +428,7 @@ export async function checkStaffTrainingCompliance(farmId?: string): Promise<Com
               category: 'training',
               createdById: assigneeId,
               assignedToId: staff.userId, // Assign to the staff member
-              dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // Due in 7 days
+              dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // Due in 7 days
             });
             result.tasksCreated++;
             logger.info({ staffId: staff.id, staffName }, 'Created induction task for new staff');
@@ -541,7 +535,7 @@ export async function getComplianceSummary(farmId?: string): Promise<{
         .where(
           and(
             eq(animalHealthRecords.animalId, animal.id),
-            gte(animalHealthRecords.recordDate, thresholdDate.toISOString().split('T')[0])
+            gte(animalHealthRecords.date, thresholdDate.toISOString().split('T')[0])
           )
         )
         .limit(1);
@@ -571,10 +565,9 @@ export async function getComplianceSummary(farmId?: string): Promise<{
     hazardThreshold.setDate(hazardThreshold.getDate() - HAZARD_UNRESOLVED_THRESHOLD_DAYS);
 
     const hazardConditions = [
-      inArray(farmHazards.status, ['identified', 'under_review']),
-      lt(farmHazards.identifiedAt, hazardThreshold),
+      inArray(farmHazards.status, ['active', 'monitoring']),
+      lt(farmHazards.createdAt, hazardThreshold),
     ];
-    if (farmId) hazardConditions.push(eq(farmHazards.farmId, farmId));
 
     const openHazards = await db
       .select({ id: farmHazards.id })
@@ -591,7 +584,6 @@ export async function getComplianceSummary(farmId?: string): Promise<{
       eq(staffProfiles.isActive, true),
       gte(staffProfiles.startDate, thirtyDaysAgo.toISOString().split('T')[0]),
     ];
-    if (farmId) staffConditions.push(eq(staffProfiles.farmId, farmId));
 
     const newStaff = await db
       .select({ id: staffProfiles.id })

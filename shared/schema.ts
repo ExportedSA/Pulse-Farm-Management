@@ -4195,8 +4195,6 @@ export const insertScheduledReportSchema = createInsertSchema(scheduledReports).
 // Financial Types
 export type FinancialTransaction = typeof financialTransactions.$inferSelect;
 export type InsertFinancialTransaction = z.infer<typeof insertFinancialTransactionSchema>;
-export type Budget = typeof budgets.$inferSelect;
-export type InsertBudget = z.infer<typeof insertBudgetSchema>;
 export type MilkProduction = typeof milkProduction.$inferSelect;
 export type InsertMilkProduction = z.infer<typeof insertMilkProductionSchema>;
 export type ScheduledReport = typeof scheduledReports.$inferSelect;

@@ -864,18 +864,16 @@ router.get('/api/reports/health-records', requireAuth, async (req: Request, res:
     const toDate = req.query.to ? String(req.query.to) : now.toISOString().split('T')[0];
 
     // Get health records with animal info
+    // Schema uses 'date' and 'type' instead of 'recordDate' and 'recordType'
     const records = await db
       .select({
         id: animalHealthRecords.id,
         animalId: animalHealthRecords.animalId,
         animalTag: animals.visualTag,
         animalName: animals.name,
-        recordDate: animalHealthRecords.recordDate,
-        recordType: animalHealthRecords.recordType,
+        recordDate: animalHealthRecords.date,
+        recordType: animalHealthRecords.type,
         description: animalHealthRecords.description,
-        treatment: animalHealthRecords.treatment,
-        veterinarian: animalHealthRecords.veterinarian,
-        cost: animalHealthRecords.cost,
         notes: animalHealthRecords.notes,
         createdAt: animalHealthRecords.createdAt,
       })
@@ -884,27 +882,22 @@ router.get('/api/reports/health-records', requireAuth, async (req: Request, res:
       .where(
         and(
           eq(animals.farmId, farmId),
-          gte(animalHealthRecords.recordDate, fromDate),
-          lte(animalHealthRecords.recordDate, toDate)
+          gte(animalHealthRecords.date, fromDate),
+          lte(animalHealthRecords.date, toDate)
         )
       )
-      .orderBy(desc(animalHealthRecords.recordDate));
+      .orderBy(desc(animalHealthRecords.date));
 
     // Group by type
     const byType: Record<string, number> = {};
-    let totalCost = 0;
     for (const record of records) {
       const type = record.recordType || 'other';
       byType[type] = (byType[type] || 0) + 1;
-      if (record.cost) {
-        totalCost += parseFloat(record.cost);
-      }
     }
 
     res.json({
       total: records.length,
       byType,
-      totalCost: totalCost.toFixed(2),
       dateRange: { from: fromDate, to: toDate },
       records,
       generatedAt: new Date().toISOString(),
@@ -948,9 +941,10 @@ router.get('/api/reports/timesheet-summary', requireAuth, async (req: Request, r
         id: timesheets.id,
         staffProfileId: timesheets.staffProfileId,
         staffName: users.name,
-        clockIn: timesheets.clockIn,
-        clockOut: timesheets.clockOut,
-        hoursWorked: timesheets.hoursWorked,
+        date: timesheets.date,
+        startTime: timesheets.startTime,
+        endTime: timesheets.endTime,
+        totalHours: timesheets.totalHours,
         status: timesheets.status,
         notes: timesheets.notes,
       })
@@ -960,11 +954,11 @@ router.get('/api/reports/timesheet-summary', requireAuth, async (req: Request, r
       .where(
         and(
           eq(timesheets.farmId, farmId),
-          gte(timesheets.clockIn, new Date(fromDate)),
-          lte(timesheets.clockIn, new Date(toDate + 'T23:59:59'))
+          gte(timesheets.date, fromDate),
+          lte(timesheets.date, toDate)
         )
       )
-      .orderBy(desc(timesheets.clockIn));
+      .orderBy(desc(timesheets.date));
 
     // Aggregate by staff
     const staffMap = new Map<string, {
@@ -974,10 +968,10 @@ router.get('/api/reports/timesheet-summary', requireAuth, async (req: Request, r
       entries: number;
     }>();
 
-    let totalHours = 0;
+    let totalHoursSum = 0;
     for (const entry of entries) {
-      const hours = entry.hoursWorked ? parseFloat(entry.hoursWorked) : 0;
-      totalHours += hours;
+      const hours = entry.totalHours ? parseFloat(entry.totalHours) : 0;
+      totalHoursSum += hours;
 
       const existing = staffMap.get(entry.staffProfileId);
       if (existing) {
@@ -999,7 +993,7 @@ router.get('/api/reports/timesheet-summary', requireAuth, async (req: Request, r
       .sort((a, b) => b.totalHours - a.totalHours);
 
     res.json({
-      totalHours: parseFloat(totalHours.toFixed(2)),
+      totalHours: parseFloat(totalHoursSum.toFixed(2)),
       totalEntries: entries.length,
       dateRange: { from: fromDate, to: toDate },
       byStaff,
@@ -1031,25 +1025,25 @@ router.get('/api/reports/safety', requireAuth, async (req: Request, res: Respons
       return res.status(403).json({ error: 'You do not have permission to access reports' });
     }
 
-    // Get hazard counts
+    // Get hazard counts (farmHazards uses createdAt, not identifiedAt, and no farmId)
     const allHazards = await db
       .select({
         id: farmHazards.id,
         title: farmHazards.title,
         status: farmHazards.status,
         riskLevel: farmHazards.riskLevel,
-        identifiedAt: farmHazards.identifiedAt,
+        severity: farmHazards.severity,
+        createdAt: farmHazards.createdAt,
         location: farmHazards.location,
       })
       .from(farmHazards)
-      .where(eq(farmHazards.farmId, farmId))
-      .orderBy(desc(farmHazards.identifiedAt));
+      .orderBy(desc(farmHazards.createdAt));
 
     const openHazards = allHazards.filter(h => 
-      h.status === 'identified' || h.status === 'under_review'
+      h.status === 'active' || h.status === 'monitoring'
     );
     const resolvedHazards = allHazards.filter(h => 
-      h.status === 'resolved' || h.status === 'mitigated'
+      h.status === 'resolved'
     );
 
     // Group hazards by risk level
@@ -1059,20 +1053,25 @@ router.get('/api/reports/safety', requireAuth, async (req: Request, res: Respons
       byRiskLevel[level] = (byRiskLevel[level] || 0) + 1;
     }
 
-    // Get task counts (safety-related)
+    // Get task counts (tasks table doesn't have category column)
     const allTasks = await db
       .select({
         id: tasks.id,
         status: tasks.status,
         dueDate: tasks.dueDate,
-        category: tasks.category,
+        title: tasks.title,
       })
       .from(tasks)
       .where(eq(tasks.farmId, farmId));
 
-    const safetyTasks = allTasks.filter(t => t.category === 'safety' || t.category === 'maintenance');
+    // Filter by title containing safety-related keywords
+    const safetyTasks = allTasks.filter(t => 
+      t.title?.toLowerCase().includes('safety') || 
+      t.title?.toLowerCase().includes('maintenance') ||
+      t.title?.toLowerCase().includes('hazard')
+    );
     const pendingTasks = safetyTasks.filter(t => t.status === 'pending' || t.status === 'in_progress');
-    const completedTasks = safetyTasks.filter(t => t.status === 'completed');
+    const completedTasks = safetyTasks.filter(t => t.status === 'done');
     const overdueTasks = pendingTasks.filter(t => 
       t.dueDate && new Date(t.dueDate) < new Date()
     );
