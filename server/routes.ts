@@ -251,10 +251,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/map", requireAuth, mapRouter);
   
   // Financial routes
-  app.use("/api/financial", requireAuth, financialRouter);
+  app.use("/api/financial", requireAuth, financialAnalyticsRouter);
   
-  // Milk Production routes
-  app.use("/api/milk", requireAuth, milkRouter);
+  // Milk Production routes (using reports router for milk data)
+  // app.use("/api/milk", requireAuth, milkRouter);
   
   // Budgeting & Forecasting routes
   app.use("/api/budgeting", requireAuth, budgetingRouter);

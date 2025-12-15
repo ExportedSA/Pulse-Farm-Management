@@ -378,10 +378,10 @@
   bottom: 0;
   background: linear-gradient(
     to right,
-    hsl(var(--background) / 0.75) 0%,
-    hsl(var(--background)) 18%,
-    hsl(var(--background)) 82%,
-    hsl(var(--background) / 0.75) 100%
+    hsl(var(--background) / 0.4) 0%,
+    hsl(var(--background) / 0.92) 15%,
+    hsl(var(--background) / 0.92) 85%,
+    hsl(var(--background) / 0.4) 100%
   );
   pointer-events: none;
   z-index: 0;

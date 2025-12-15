@@ -11,18 +11,9 @@ export const apiLimiter = rateLimit({
   },
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-  // Skip successful requests (optional)
   skipSuccessfulRequests: false,
-  // Skip failed requests
   skipFailedRequests: false,
-  // Custom key generator to handle forwarded IPs
-  keyGenerator: (req: Request) => {
-    // Use X-Forwarded-For header if available (for reverse proxies)
-    return req.headers['x-forwarded-for'] as string || 
-           req.headers['x-real-ip'] as string || 
-           req.connection.remoteAddress || 
-           req.ip;
-  },
+  validate: { xForwardedForHeader: false },
 });
 
 // Strict rate limiter for sensitive routes like auth - 5 requests per minute
@@ -35,13 +26,7 @@ export const authLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req: Request) => {
-    // Use X-Forwarded-For header if available
-    return req.headers['x-forwarded-for'] as string || 
-           req.headers['x-real-ip'] as string || 
-           req.connection.remoteAddress || 
-           req.ip;
-  },
+  validate: { xForwardedForHeader: false },
 });
 
 // File upload rate limiter - 10 uploads per minute
@@ -54,12 +39,7 @@ export const uploadLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req: Request) => {
-    return req.headers['x-forwarded-for'] as string || 
-           req.headers['x-real-ip'] as string || 
-           req.connection.remoteAddress || 
-           req.ip;
-  },
+  validate: { xForwardedForHeader: false },
 });
 
 // Create a rate limiter for WebSocket connections
@@ -67,13 +47,7 @@ export const wsLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 30, // Limit each IP to 30 WebSocket connections per minute
   message: 'Too many WebSocket connections',
-  keyGenerator: (req: Request) => {
-    return req.headers['x-forwarded-for'] as string || 
-           req.headers['x-real-ip'] as string || 
-           req.connection.remoteAddress || 
-           req.ip;
-  },
-  // Skip if not a WebSocket upgrade request
+  validate: { xForwardedForHeader: false },
   skip: (req: Request) => {
     return !req.headers.upgrade || req.headers.upgrade !== 'websocket';
   },
@@ -88,4 +62,5 @@ export const devLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false },
 });
