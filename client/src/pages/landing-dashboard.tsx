@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-context";
 import { format } from "date-fns";
 import type { Animal, AnimalTreatment, Pasture } from "@shared/schema";
+import { HealthStatusWidget } from "@/components/HealthStatusWidget";
 import { 
   Search,
   Users,
@@ -286,6 +287,10 @@ export default function LandingDashboard() {
 
       {/* Main Content */}
       <div className="max-w-6xl mx-auto px-6 py-8">
+        <div className="mb-8">
+          <HealthStatusWidget />
+        </div>
+
         {/* Quick Actions */}
         <div className="mb-8">
           <h2 className="text-sm font-medium text-muted-foreground mb-4">Quick Actions</h2>

@@ -49,6 +49,7 @@ import rosterRouter from "./routes/roster";
 import healthSafetyRouter from "./routes/health-safety";
 import financialAnalyticsRouter from "./routes/financial-analytics";
 import benchmarkingRouter from "./routes/benchmarking";
+import healthRouter from "./routes/health";
 import reportsRouter from "./routes/reports";
 import externalApisRouter from "./routes/external-apis";
 import iotRouter from "./routes/iot";
@@ -82,24 +83,7 @@ import {
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ===== CORE HEALTH CHECKS =====
-  app.get("/api/health", (_req, res) => {
-    res.json({
-      ok: true,
-      version: process.env.npm_package_version ?? "unknown",
-      env: process.env.NODE_ENV ?? "development",
-      time: new Date().toISOString(),
-    });
-  });
-
-  app.get("/api/health/db", async (_req, res) => {
-    try {
-      const result = await pool.query("select 1");
-      res.json({ ok: true, result: result.rows?.[0] ?? null });
-    } catch (error: any) {
-      console.error("DB health check failed:", error);
-      res.status(500).json({ ok: false, error: String(error?.message ?? error) });
-    }
-  });
+  app.use("/api", healthRouter);
 
   // ===== PHASE 4: ANIMAL GROUPS =====
   app.use("/api/groups", groupsRouter);

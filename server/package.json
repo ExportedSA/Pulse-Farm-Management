@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "cross-env NODE_ENV=development PORT=4000 BACKEND_ONLY=1 tsx index.ts",
+    "test": "node ..\\node_modules\\vitest\\vitest.mjs --config ..\\vitest.config.ts --run",
     "check:env": "node -e \"require('dotenv').config(); console.log('dotenv_error=', 'none'); console.log('DATABASE_URL=', process.env.DATABASE_URL ? 'SET' : 'MISSING'); console.log('PORT=', process.env.PORT || '(unset)'); console.log('BACKEND_ONLY=', process.env.BACKEND_ONLY || '(unset)'); console.log('NODE_ENV=', process.env.NODE_ENV || '(unset)');\"",
     "check:health": "node -e \"fetch('http://localhost:4000/api/health').then(r=>r.json()).then(j=>console.log('/api/health', j)).catch(e=>console.error('health_fail', e.message));\"",
     "build": "cd .. && npm run build",
