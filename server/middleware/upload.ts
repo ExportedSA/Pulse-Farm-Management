@@ -1,25 +1,9 @@
 import multer from 'multer';
 import path from 'path';
-import fs from 'fs';
 
-// Ensure uploads directory exists
-const uploadsDir = path.join(process.cwd(), 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadsDir);
-  },
-  filename: (req, file, cb) => {
-    // Create unique filename with timestamp and original name
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    cb(null, `job-${uniqueSuffix}${ext}`);
-  }
-});
+// Configure multer for file uploads using memory storage
+// Files will be stored in memory and passed to the fileStorage service
+const storage = multer.memoryStorage();
 
 // File filter to only accept images
 const fileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
@@ -46,3 +30,23 @@ export const uploadSinglePhoto = upload.single('photo');
 
 // Multiple photos upload middleware
 export const uploadMultiplePhotos = upload.array('photos', 5);
+
+// Audio file upload middleware (for voice notes)
+export const uploadAudio = multer({
+  storage,
+  fileFilter: (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+    const allowedTypes = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/m4a', 'audio/ogg'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only MP3, WAV, M4A, and OGG audio files are allowed.'));
+    }
+  },
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit for audio files
+    files: 1
+  }
+});
+
+// Single audio file upload middleware
+export const uploadSingleAudio = uploadAudio.single('audio');

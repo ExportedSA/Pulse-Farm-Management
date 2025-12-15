@@ -4,16 +4,8 @@ import { storage } from "../storage";
 import { insertPhotoAttachmentSchema } from "@shared/schema";
 import { uploadSinglePhoto, uploadMultiplePhotos } from "../middleware/upload";
 import { z } from "zod";
-import path from "path";
-import fs from "fs";
 
 const router = Router();
-
-// Ensure uploads directory exists
-const uploadsDir = path.join(process.cwd(), 'uploads', 'photos');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
 
 // POST /api/photos/upload - Upload a single photo
 router.post("/upload", uploadSinglePhoto, async (req: Request, res: Response) => {
@@ -22,12 +14,19 @@ router.post("/upload", uploadSinglePhoto, async (req: Request, res: Response) =>
       return res.status(400).json({ error: "No file uploaded" });
     }
 
-    const photoUrl = `/uploads/${req.file.filename}`;
+    // Use the file storage service to save the file
+    const { saveFileBuffer } = await import('../services/fileStorage');
+    const { storageKey, publicUrl } = await saveFileBuffer(
+      req.file.buffer,
+      req.file.mimetype,
+      req.file.originalname,
+      'photos' // Store in photos subfolder
+    );
     
     res.json({
-      url: photoUrl,
-      filename: req.file.filename,
-      originalName: req.file.originalname,
+      url: publicUrl,
+      storageKey,
+      filename: req.file.originalname,
       size: req.file.size,
       mimetype: req.file.mimetype,
     });
@@ -44,13 +43,27 @@ router.post("/upload-multiple", uploadMultiplePhotos, async (req: Request, res: 
       return res.status(400).json({ error: "No files uploaded" });
     }
 
-    const photos = req.files.map((file: Express.Multer.File) => ({
-      url: `/uploads/${file.filename}`,
-      filename: file.filename,
-      originalName: file.originalname,
-      size: file.size,
-      mimetype: file.mimetype,
-    }));
+    // Use the file storage service to save the files
+    const { saveFileBuffer } = await import('./services/fileStorage');
+    
+    const uploadPromises = req.files.map(async (file: Express.Multer.File) => {
+      const { storageKey, publicUrl } = await saveFileBuffer(
+        file.buffer,
+        file.mimetype,
+        file.originalname,
+        'photos' // Store in photos subfolder
+      );
+      
+      return {
+        url: publicUrl,
+        storageKey,
+        filename: file.originalname,
+        size: file.size,
+        mimetype: file.mimetype,
+      };
+    });
+    
+    const photos = await Promise.all(uploadPromises);
     
     res.json({ photos });
   } catch (error) {

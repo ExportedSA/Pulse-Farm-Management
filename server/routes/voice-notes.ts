@@ -3,55 +3,30 @@ import { Router, type Request, type Response } from "express";
 import { storage } from "../storage";
 import { insertVoiceNoteSchema } from "@shared/schema";
 import { z } from "zod";
-import multer from "multer";
-import path from "path";
-import fs from "fs";
+import { uploadSingleAudio } from "../middleware/upload";
 
 const router = Router();
 
-// Ensure uploads directory exists
-const uploadsDir = path.join(process.cwd(), 'uploads', 'voice-notes');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-// Configure multer for audio uploads
-const audioStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    cb(null, uploadsDir);
-  },
-  filename: (_req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'voice-' + uniqueSuffix + path.extname(file.originalname || '.webm'));
-  }
-});
-
-const upload = multer({
-  storage: audioStorage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit for audio
-  fileFilter: (_req, file, cb) => {
-    const allowedTypes = ['audio/webm', 'audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4', 'audio/x-m4a'];
-    if (allowedTypes.includes(file.mimetype) || file.mimetype.startsWith('audio/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only audio files are allowed'));
-    }
-  }
-});
-
 // POST /api/voice-notes/upload - Upload audio file
-router.post("/upload", upload.single('audio'), async (req: Request, res: Response) => {
+router.post("/upload", uploadSingleAudio, async (req: Request, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: "No audio file uploaded" });
     }
 
-    const audioUrl = `/uploads/voice-notes/${req.file.filename}`;
+    // Use the file storage service to save the file
+    const { saveFileBuffer } = await import('../services/fileStorage');
+    const { storageKey, publicUrl } = await saveFileBuffer(
+      req.file.buffer,
+      req.file.mimetype,
+      req.file.originalname,
+      'voice-notes' // Store in voice-notes subfolder
+    );
     
     res.json({
-      url: audioUrl,
-      filename: req.file.filename,
-      originalName: req.file.originalname,
+      url: publicUrl,
+      storageKey,
+      filename: req.file.originalname,
       size: req.file.size,
       mimetype: req.file.mimetype,
     });

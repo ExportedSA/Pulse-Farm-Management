@@ -399,7 +399,7 @@ export default function FreshwaterFarmPlanPage() {
                   </thead>
                   <tbody className="divide-y">
                     {mockRisks.map(risk => (
-                      <tr key={risk.id} className="hover:bg-gray-50">
+                      <tr key={risk.id} className="hover:bg-accent">
                         <td className="p-4"><div><p className="font-medium text-sm">{risk.subcategory}</p><p className="text-xs text-gray-500">{riskCategories.find(c => c.id === risk.category)?.name}</p></div></td>
                         <td className="p-4 text-sm max-w-xs"><p className="truncate">{risk.description}</p></td>
                         <td className="p-4 text-sm text-gray-600">{risk.location}</td>
@@ -449,7 +449,7 @@ export default function FreshwaterFarmPlanPage() {
                   </thead>
                   <tbody className="divide-y">
                     {mockActions.map(action => (
-                      <tr key={action.id} className="hover:bg-gray-50">
+                      <tr key={action.id} className="hover:bg-accent">
                         <td className="p-4"><p className="font-medium text-sm">{action.title}</p><p className="text-xs text-gray-500">{action.description.substring(0, 50)}...</p></td>
                         <td className="p-4"><Badge variant="outline">{action.actionType}</Badge></td>
                         <td className="p-4 text-sm">{action.responsible}</td>
@@ -616,7 +616,7 @@ export default function FreshwaterFarmPlanPage() {
                   </thead>
                   <tbody className="divide-y">
                     {mockAudits.map(audit => (
-                      <tr key={audit.id} className="hover:bg-gray-50">
+                      <tr key={audit.id} className="hover:bg-accent">
                         <td className="p-4 font-medium">{format(new Date(audit.date), 'MMM d, yyyy')}</td>
                         <td className="p-4"><Badge variant="outline">{audit.type}</Badge></td>
                         <td className="p-4">{audit.auditor}</td>

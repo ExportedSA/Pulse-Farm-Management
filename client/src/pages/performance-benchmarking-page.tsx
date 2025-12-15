@@ -442,7 +442,7 @@ export default function PerformanceBenchmarkingPage() {
                       const progress = calculateTargetProgress(kpi.current, kpi.target, lowerBetter);
                       const onTrack = progress >= 90;
                       return (
-                        <tr key={kpi.id} className="hover:bg-gray-50">
+                        <tr key={kpi.id} className="hover:bg-accent">
                           <td className="p-4">
                             <div className="flex items-center gap-2">
                               <div className="p-1.5 bg-gray-100 rounded">{getKPIIcon(kpi.icon)}</div>
@@ -491,7 +491,7 @@ export default function PerformanceBenchmarkingPage() {
                       const lowerBetter = isLowerBetter(kpi.id);
                       const vsRegional = lowerBetter ? kpi.regionalAvg - kpi.current : kpi.current - kpi.regionalAvg;
                       return (
-                        <tr key={kpi.id} className="hover:bg-gray-50">
+                        <tr key={kpi.id} className="hover:bg-accent">
                           <td className="p-4"><div className="flex items-center gap-2">{getKPIIcon(kpi.icon)}<span className="font-medium text-sm">{kpi.name}</span></div></td>
                           <td className={`p-4 text-right font-bold ${vsRegional >= 0 ? 'text-green-600' : 'text-red-600'}`}>{kpi.current}</td>
                           <td className="p-4 text-right text-gray-600">{kpi.regionalAvg}</td>
@@ -556,7 +556,7 @@ export default function PerformanceBenchmarkingPage() {
                     {mockSeasonData.map((season, idx) => {
                       const prev = mockSeasonData[idx + 1];
                       return (
-                        <tr key={season.season} className={idx === 0 ? 'bg-blue-50' : 'hover:bg-gray-50'}>
+                        <tr key={season.season} className={idx === 0 ? 'bg-blue-50' : 'hover:bg-accent'}>
                           <td className="p-4 font-medium">{season.season} {idx === 0 && <Badge className="ml-2 bg-blue-100 text-blue-800">Current</Badge>}</td>
                           <td className="p-4 text-right">{season.milkProduction} {prev && <span className={season.milkProduction > prev.milkProduction ? 'text-green-600 text-xs' : 'text-red-600 text-xs'}>({season.milkProduction > prev.milkProduction ? '+' : ''}{((season.milkProduction - prev.milkProduction) / prev.milkProduction * 100).toFixed(1)}%)</span>}</td>
                           <td className="p-4 text-right">{season.reproRate}% {prev && <span className={season.reproRate > prev.reproRate ? 'text-green-600 text-xs' : 'text-red-600 text-xs'}>({season.reproRate > prev.reproRate ? '+' : ''}{(season.reproRate - prev.reproRate).toFixed(0)}pp)</span>}</td>

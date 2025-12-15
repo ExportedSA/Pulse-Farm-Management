@@ -521,6 +521,16 @@ export default function ChatPage() {
     }
   }, [channels]);
 
+  const handleMessageRead = useCallback((channelId: string, messageId: string, readBy: string) => {
+    if (channelId === activeChannelId) {
+      setMessages(prev => prev.map(msg => 
+        msg.id === messageId 
+          ? { ...msg, readBy: [...((msg as any).readBy || []), readBy] }
+          : msg
+      ));
+    }
+  }, [activeChannelId]);
+
   const handleUnreadCount = useCallback((channelId: string, count: number) => {
     setUnreadCounts(prev => ({ ...prev, [channelId]: count }));
   }, []);
@@ -1964,13 +1974,13 @@ export default function ChatPage() {
 
                     {/* Search Results */}
                     {searchingNewChatUsers ? (
-                      <div className="text-center py-4 text-gray-500">Searching...</div>
+                      <div className="text-center py-4 text-muted-foreground">Searching...</div>
                     ) : newChatSearchResults.length > 0 ? (
                       <div className="max-h-60 overflow-y-auto space-y-2">
                         {newChatSearchResults.map(user => (
                           <div
                             key={user.id}
-                            className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 cursor-pointer"
+                            className="flex items-center justify-between p-3 rounded-lg hover:bg-accent cursor-pointer"
                             onClick={() => addParticipant(user)}
                           >
                             <div className="flex items-center gap-3">
@@ -1981,7 +1991,7 @@ export default function ChatPage() {
                               </Avatar>
                               <div>
                                 <p className="font-medium text-sm">{user.name}</p>
-                                <p className="text-xs text-gray-500">{user.email}</p>
+                                <p className="text-xs text-muted-foreground">{user.email}</p>
                               </div>
                             </div>
                             <Button size="sm" variant="ghost" className="text-pulse-gold">
@@ -1991,9 +2001,9 @@ export default function ChatPage() {
                         ))}
                       </div>
                     ) : newChatSearchQuery ? (
-                      <div className="text-center py-4 text-gray-500">No users found</div>
+                      <div className="text-center py-4 text-muted-foreground">No users found</div>
                     ) : (
-                      <div className="text-center py-4 text-gray-500">
+                      <div className="text-center py-4 text-muted-foreground">
                         Search for users to start a chat
                       </div>
                     )}
@@ -2133,7 +2143,7 @@ export default function ChatPage() {
                       </TooltipContent>
                     </Tooltip>
                   </div>
-                  <p className="text-gray-500 text-xs flex items-center gap-2">
+                  <p className="text-muted-foreground text-xs flex items-center gap-2">
                     <span>{activeChannel.members.length} {activeChannel.members.length === 1 ? 'member' : 'members'}</span>
                     {activeChannel.type === 'direct' && (
                       <>
@@ -2154,7 +2164,7 @@ export default function ChatPage() {
               <div className="flex items-center gap-2">
                 <Dialog open={isAddUserOpen} onOpenChange={setIsAddUserOpen}>
                   <DialogTrigger asChild>
-                    <Button variant="ghost" size="sm" className="text-gray-600 hover:bg-gray-100">
+                    <Button variant="ghost" size="sm" className="text-muted-foreground hover:bg-accent">
                       <UserPlus className="h-5 w-5" />
                     </Button>
                   </DialogTrigger>
@@ -2174,7 +2184,7 @@ export default function ChatPage() {
                       </div>
                       
                       {searchingUsers ? (
-                        <div className="text-center py-4 text-gray-500">
+                        <div className="text-center py-4 text-muted-foreground">
                           Searching...
                         </div>
                       ) : searchResults.length > 0 ? (
@@ -2182,7 +2192,7 @@ export default function ChatPage() {
                           {searchResults.map(user => (
                             <div
                               key={user.id}
-                              className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 cursor-pointer"
+                              className="flex items-center justify-between p-3 rounded-lg hover:bg-accent cursor-pointer"
                               onClick={() => addUserToChannel(user.id)}
                             >
                               <div className="flex items-center gap-3">
@@ -2193,7 +2203,7 @@ export default function ChatPage() {
                                 </Avatar>
                                 <div>
                                   <p className="font-medium text-sm">{user.name}</p>
-                                  <p className="text-xs text-gray-500">{user.email}</p>
+                                  <p className="text-xs text-muted-foreground">{user.email}</p>
                                 </div>
                               </div>
                               <Button size="sm" className="bg-pulse-forest hover:bg-pulse-forest-dark text-white">
@@ -2203,11 +2213,11 @@ export default function ChatPage() {
                           ))}
                         </div>
                       ) : userSearchQuery ? (
-                        <div className="text-center py-4 text-gray-500">
+                        <div className="text-center py-4 text-muted-foreground">
                           No users found
                         </div>
                       ) : (
-                        <div className="text-center py-4 text-gray-500">
+                        <div className="text-center py-4 text-muted-foreground">
                           Type to search for users
                         </div>
                       )}
@@ -2218,7 +2228,7 @@ export default function ChatPage() {
                 <Button 
                   variant="ghost" 
                   size="sm" 
-                  className="text-gray-600 hover:bg-gray-100" 
+                  className="text-muted-foreground hover:bg-accent" 
                   title="Video Call"
                   onClick={() => {
                     // For demo, start video call with first other member
@@ -2236,7 +2246,7 @@ export default function ChatPage() {
                 <Button 
                   variant="ghost" 
                   size="sm" 
-                  className="text-gray-600 hover:bg-gray-100" 
+                  className="text-muted-foreground hover:bg-accent" 
                   title="Voice Call"
                   onClick={() => {
                     // For demo, start voice call with first other member
@@ -2251,14 +2261,14 @@ export default function ChatPage() {
                 >
                   <Phone className="h-5 w-5" />
                 </Button>
-                <Button variant="ghost" size="sm" className="text-gray-600 hover:bg-gray-100" title="Channel Settings" onClick={openChannelSettings}>
+                <Button variant="ghost" size="sm" className="text-muted-foreground hover:bg-accent" title="Channel Settings" onClick={openChannelSettings}>
                   <FolderOpen className="h-5 w-5" />
                 </Button>
                 
                 {/* Message Search */}
                 <Popover open={showMessageSearch} onOpenChange={setShowMessageSearch}>
                   <PopoverTrigger asChild>
-                    <Button variant="ghost" size="sm" className="text-gray-600 hover:bg-gray-100" title="Search Messages">
+                    <Button variant="ghost" size="sm" className="text-muted-foreground hover:bg-accent" title="Search Messages">
                       <Search className="h-5 w-5" />
                     </Button>
                   </PopoverTrigger>
@@ -2276,20 +2286,20 @@ export default function ChatPage() {
                       </div>
                       <ScrollArea className="h-60">
                         {searchingMessages ? (
-                          <div className="text-center py-4 text-gray-500">Searching...</div>
+                          <div className="text-center py-4 text-muted-foreground">Searching...</div>
                         ) : messageSearchResults.length > 0 ? (
                           <div className="space-y-2">
                             {messageSearchResults.map(msg => (
                               <div
                                 key={msg.id}
-                                className="p-2 rounded hover:bg-gray-100 cursor-pointer"
+                                className="p-2 rounded hover:bg-accent cursor-pointer"
                                 onClick={() => {
                                   // Scroll to message (in production)
                                   setShowMessageSearch(false);
                                   toast.info('Scrolling to message...');
                                 }}
                               >
-                                <div className="flex items-center gap-2 text-xs text-gray-500">
+                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                   <span>{msg.userName}</span>
                                   <span>•</span>
                                   <span>{new Date(msg.createdAt).toLocaleDateString()}</span>
@@ -2299,16 +2309,16 @@ export default function ChatPage() {
                             ))}
                           </div>
                         ) : messageSearchQuery ? (
-                          <div className="text-center py-4 text-gray-500">No messages found</div>
+                          <div className="text-center py-4 text-muted-foreground">No messages found</div>
                         ) : (
-                          <div className="text-center py-4 text-gray-500">Type to search</div>
+                          <div className="text-center py-4 text-muted-foreground">Type to search</div>
                         )}
                       </ScrollArea>
                     </div>
                   </PopoverContent>
                 </Popover>
                 
-                <Button variant="ghost" size="sm" className="text-gray-600 hover:bg-gray-100">
+                <Button variant="ghost" size="sm" className="text-muted-foreground hover:bg-accent">
                   <MoreVertical className="h-5 w-5" />
                 </Button>
               </div>
@@ -2330,7 +2340,7 @@ export default function ChatPage() {
                     <div className="text-center">
                       <Paperclip className="h-12 w-12 text-pulse-forest mx-auto mb-2" />
                       <p className="text-lg font-semibold text-pulse-forest">Drop files here</p>
-                      <p className="text-sm text-gray-600">Images, videos, audio, documents up to 50MB</p>
+                      <p className="text-sm text-muted-foreground">Images, videos, audio, documents up to 50MB</p>
                     </div>
                   </div>
                 )}
@@ -2340,7 +2350,7 @@ export default function ChatPage() {
                   <div key={group.date}>
                     {/* Date header */}
                     <div className="text-center py-3 mb-4">
-                      <span className="text-gray-500 text-xs font-medium px-3 py-1">
+                      <span className="text-muted-foreground text-xs font-medium px-3 py-1">
                         {group.label}
                       </span>
                     </div>
@@ -2392,7 +2402,7 @@ export default function ChatPage() {
                               <button
                                 key={emoji}
                                 onClick={() => handleAddReaction(msg.id, emoji)}
-                                className="hover:bg-gray-100 rounded p-1 text-sm"
+                                className="hover:bg-accent rounded p-1 text-sm"
                                 title={`React with ${emoji}`}
                               >
                                 {emoji}
@@ -2402,8 +2412,8 @@ export default function ChatPage() {
                             {/* More reactions */}
                             <Popover open={emojiPickerForMessage === msg.id} onOpenChange={(open) => setEmojiPickerForMessage(open ? msg.id : null)}>
                               <PopoverTrigger asChild>
-                                <button className="hover:bg-gray-100 rounded p-1">
-                                  <Smile className="h-4 w-4 text-gray-500" />
+                                <button className="hover:bg-accent rounded p-1">
+                                  <Smile className="h-4 w-4 text-muted-foreground" />
                                 </button>
                               </PopoverTrigger>
                               <PopoverContent className="w-64 p-2" align="start">
@@ -2412,7 +2422,7 @@ export default function ChatPage() {
                                     <button
                                       key={emoji}
                                       onClick={() => handleAddReaction(msg.id, emoji)}
-                                      className="hover:bg-gray-100 rounded p-1 text-lg"
+                                      className="hover:bg-accent rounded p-1 text-lg"
                                     >
                                       {emoji}
                                     </button>
@@ -2424,35 +2434,35 @@ export default function ChatPage() {
                             {/* Reply */}
                             <button
                               onClick={() => startReply(msg)}
-                              className="hover:bg-gray-100 rounded p-1"
+                              className="hover:bg-accent rounded p-1"
                               title="Reply"
                             >
-                              <Reply className="h-4 w-4 text-gray-500" />
+                              <Reply className="h-4 w-4 text-muted-foreground" />
                             </button>
                             
                             {/* Thread */}
                             <button
                               onClick={() => openThread(msg)}
-                              className="hover:bg-gray-100 rounded p-1"
+                              className="hover:bg-accent rounded p-1"
                               title="Start thread"
                             >
-                              <MessageSquare className="h-4 w-4 text-gray-500" />
+                              <MessageSquare className="h-4 w-4 text-muted-foreground" />
                             </button>
                             
                             {/* Forward */}
                             <button
                               onClick={() => openForwardDialog(msg)}
-                              className="hover:bg-gray-100 rounded p-1"
+                              className="hover:bg-accent rounded p-1"
                               title="Forward message"
                             >
-                              <Forward className="h-4 w-4 text-gray-500" />
+                              <Forward className="h-4 w-4 text-muted-foreground" />
                             </button>
                             
                             {/* More options */}
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
-                                <button className="hover:bg-gray-100 rounded p-1">
-                                  <MoreVertical className="h-4 w-4 text-gray-500" />
+                                <button className="hover:bg-accent rounded p-1">
+                                  <MoreVertical className="h-4 w-4 text-muted-foreground" />
                                 </button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="start">
@@ -2618,7 +2628,7 @@ export default function ChatPage() {
                                   if (att.mimetype.startsWith('audio/')) {
                                     return (
                                       <div key={i} className={`flex items-center gap-2 p-2 rounded-lg ${msg.isOwn ? 'bg-green-700' : 'bg-gray-100'}`}>
-                                        <Mic className={`h-5 w-5 ${msg.isOwn ? 'text-green-200' : 'text-gray-500'}`} />
+                                        <Mic className={`h-5 w-5 ${msg.isOwn ? 'text-green-200' : 'text-muted-foreground'}`} />
                                         <audio src={att.url} controls className="h-8 flex-1" />
                                       </div>
                                     );
@@ -2632,16 +2642,16 @@ export default function ChatPage() {
                                       download={att.filename}
                                       className={`flex items-center gap-2 p-2 rounded-lg ${msg.isOwn ? 'bg-green-700 hover:bg-green-600' : 'bg-gray-100 hover:bg-gray-200'}`}
                                     >
-                                      <FileText className={`h-5 w-5 ${msg.isOwn ? 'text-green-200' : 'text-gray-500'}`} />
+                                      <FileText className={`h-5 w-5 ${msg.isOwn ? 'text-green-200' : 'text-muted-foreground'}`} />
                                       <div className="flex-1 min-w-0">
                                         <p className={`text-sm truncate ${msg.isOwn ? 'text-white' : 'text-gray-900'}`}>
                                           {att.filename}
                                         </p>
-                                        <p className={`text-xs ${msg.isOwn ? 'text-green-200' : 'text-gray-500'}`}>
+                                        <p className={`text-xs ${msg.isOwn ? 'text-green-200' : 'text-muted-foreground'}`}>
                                           {(att.size / 1024).toFixed(1)} KB
                                         </p>
                                       </div>
-                                      <Download className={`h-4 w-4 ${msg.isOwn ? 'text-green-200' : 'text-gray-500'}`} />
+                                      <Download className={`h-4 w-4 ${msg.isOwn ? 'text-green-200' : 'text-muted-foreground'}`} />
                                     </a>
                                   );
                                 })}
@@ -2650,7 +2660,7 @@ export default function ChatPage() {
                             
                             <div className="flex items-center justify-between mt-2">
                               <div className="flex items-center gap-2">
-                                <span className={`text-xs ${msg.isOwn ? 'text-green-100' : 'text-gray-500'}`}>
+                                <span className={`text-xs ${msg.isOwn ? 'text-green-100' : 'text-muted-foreground'}`}>
                                   {new Date(msg.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                                 </span>
                                 {msg.isEdited && (
@@ -2690,10 +2700,10 @@ export default function ChatPage() {
                                         reaction.users.some(u => u.id === 'demo-user')
                                           ? 'bg-blue-50 border-blue-200'
                                           : 'bg-gray-50 border-gray-200'
-                                      } hover:bg-gray-100`}
+                                      } hover:bg-accent`}
                                     >
                                       <span>{reaction.emoji}</span>
-                                      <span className="text-gray-600">{reaction.count}</span>
+                                      <span className="text-muted-foreground">{reaction.count}</span>
                                     </button>
                                   </TooltipTrigger>
                                   <TooltipContent>
@@ -2724,7 +2734,7 @@ export default function ChatPage() {
                 
                 {/* Typing indicator */}
                 {activeChannelId && typingUsers[activeChannelId]?.length > 0 && (
-                  <div className="flex items-center gap-3 text-gray-600 text-sm ml-2 py-2 px-3 bg-white rounded-lg shadow-sm border border-gray-100 max-w-fit">
+                  <div className="flex items-center gap-3 text-muted-foreground text-sm ml-2 py-2 px-3 bg-white rounded-lg shadow-sm border border-gray-100 max-w-fit">
                     <div className="flex gap-1">
                       <span className="w-2 h-2 bg-pulse-forest rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                       <span className="w-2 h-2 bg-pulse-forest rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -2754,12 +2764,12 @@ export default function ChatPage() {
               {/* Reply indicator */}
               {replyingTo && (
                 <div className="max-w-4xl mx-auto mb-3 flex items-center gap-2 p-2 bg-gray-100 rounded-lg">
-                  <Reply className="h-4 w-4 text-gray-500" />
+                  <Reply className="h-4 w-4 text-muted-foreground" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs text-gray-500">Replying to {replyingTo.userName}</p>
+                    <p className="text-xs text-muted-foreground">Replying to {replyingTo.userName}</p>
                     <p className="text-sm truncate">{replyingTo.body}</p>
                   </div>
-                  <button onClick={cancelReply} className="text-gray-400 hover:text-gray-600">
+                  <button onClick={cancelReply} className="text-gray-400 hover:text-muted-foreground">
                     <X className="h-4 w-4" />
                   </button>
                 </div>
@@ -2802,7 +2812,7 @@ export default function ChatPage() {
                         </div>
                       ) : att.mimetype.startsWith('audio/') ? (
                         <div className="flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-2 text-sm">
-                          <Mic className="h-4 w-4 text-gray-500" />
+                          <Mic className="h-4 w-4 text-muted-foreground" />
                           <span className="truncate max-w-[100px]">{att.filename}</span>
                           <button
                             onClick={() => removePendingAttachment(index)}
@@ -2813,7 +2823,7 @@ export default function ChatPage() {
                         </div>
                       ) : (
                         <div className="flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-2 text-sm">
-                          <FileText className="h-4 w-4 text-gray-500" />
+                          <FileText className="h-4 w-4 text-muted-foreground" />
                           <span className="truncate max-w-[100px]">{att.filename}</span>
                           <button
                             onClick={() => removePendingAttachment(index)}
@@ -2841,7 +2851,7 @@ export default function ChatPage() {
                 <Button 
                   variant="ghost" 
                   size="icon" 
-                  className="text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                  className="text-gray-400 hover:text-muted-foreground hover:bg-accent"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploading}
                 >
@@ -2860,7 +2870,7 @@ export default function ChatPage() {
                         <button
                           key={user.id}
                           onClick={() => insertMention(user)}
-                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left"
+                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-accent text-left"
                         >
                           <Avatar className="h-6 w-6">
                             <AvatarFallback className="bg-pulse-forest text-white text-xs">
@@ -2888,7 +2898,7 @@ export default function ChatPage() {
                     <Button 
                       variant="ghost" 
                       size="icon" 
-                      className="text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                      className="text-gray-400 hover:text-muted-foreground hover:bg-accent"
                     >
                       <Smile className="h-5 w-5" />
                     </Button>
@@ -2915,7 +2925,7 @@ export default function ChatPage() {
                                 <button
                                   key={idx}
                                   onClick={() => insertEmoji(emoji)}
-                                  className="hover:bg-gray-100 rounded p-1 text-xl"
+                                  className="hover:bg-accent rounded p-1 text-xl"
                                 >
                                   {emoji}
                                 </button>
@@ -2934,7 +2944,7 @@ export default function ChatPage() {
                     <Button 
                       variant="ghost" 
                       size="icon" 
-                      className="text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                      className="text-gray-400 hover:text-muted-foreground hover:bg-accent"
                       title="Send GIF"
                     >
                       <span className="text-xs font-bold">GIF</span>
@@ -2985,7 +2995,7 @@ export default function ChatPage() {
                 <Button 
                   variant="ghost" 
                   size="icon" 
-                  className="text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                  className="text-gray-400 hover:text-muted-foreground hover:bg-accent"
                   onClick={() => {
                     setNewMessage(prev => prev + '@');
                     setShowMentionPopup(true);
@@ -3011,7 +3021,7 @@ export default function ChatPage() {
                     <Button 
                       variant="ghost" 
                       size="icon" 
-                      className="h-8 w-8 text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+                      className="h-8 w-8 text-muted-foreground hover:text-gray-700 hover:bg-accent"
                       onClick={cancelRecording}
                       title="Cancel"
                     >
@@ -3033,7 +3043,7 @@ export default function ChatPage() {
                     <Button 
                       variant="ghost" 
                       size="icon" 
-                      className="h-8 w-8 text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+                      className="h-8 w-8 text-muted-foreground hover:text-gray-700 hover:bg-accent"
                       onClick={cancelRecording}
                       title="Cancel"
                     >
@@ -3044,7 +3054,7 @@ export default function ChatPage() {
                   <Button 
                     variant="ghost" 
                     size="icon" 
-                    className="text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                    className="text-gray-400 hover:text-muted-foreground hover:bg-accent"
                     onClick={startRecording}
                     title="Record voice message"
                   >
@@ -3058,7 +3068,7 @@ export default function ChatPage() {
                     <Button 
                       variant="ghost" 
                       size="icon" 
-                      className="text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                      className="text-gray-400 hover:text-muted-foreground hover:bg-accent"
                       title="Schedule message"
                     >
                       <Clock className="h-5 w-5" />
@@ -3109,7 +3119,7 @@ export default function ChatPage() {
                                 <div key={s.id} className="flex items-center justify-between p-2 bg-gray-50 rounded text-sm">
                                   <div>
                                     <p className="truncate max-w-[200px]">{s.body}</p>
-                                    <p className="text-xs text-gray-500">
+                                    <p className="text-xs text-muted-foreground">
                                       {new Date(s.scheduledFor).toLocaleString()}
                                     </p>
                                   </div>
@@ -3154,8 +3164,8 @@ export default function ChatPage() {
                 <MessageSquare className="h-10 w-10 text-white" />
               </div>
               <h3 className="text-2xl font-semibold text-gray-900 mb-2">Team Chat</h3>
-              <p className="text-gray-600 mb-4">Select a conversation to start messaging your team</p>
-              <p className="text-gray-500 text-sm">Collaborate with your team in real-time to manage farm operations efficiently.</p>
+              <p className="text-muted-foreground mb-4">Select a conversation to start messaging your team</p>
+              <p className="text-muted-foreground text-sm">Collaborate with your team in real-time to manage farm operations efficiently.</p>
             </div>
           </div>
         )}
@@ -3168,7 +3178,7 @@ export default function ChatPage() {
           <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
             <div>
               <h3 className="font-semibold">Thread</h3>
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-muted-foreground">
                 {threadParentMessage.userName} • {new Date(threadParentMessage.createdAt).toLocaleDateString()}
               </p>
             </div>
@@ -3177,7 +3187,7 @@ export default function ChatPage() {
                 setShowThread(false);
                 setThreadParentMessage(null);
               }}
-              className="text-gray-400 hover:text-gray-600"
+              className="text-gray-400 hover:text-muted-foreground"
             >
               <X className="h-5 w-5" />
             </button>
@@ -3194,7 +3204,7 @@ export default function ChatPage() {
               <div className="flex-1">
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-sm">{threadParentMessage.userName}</span>
-                  <span className="text-xs text-gray-500">
+                  <span className="text-xs text-muted-foreground">
                     {new Date(threadParentMessage.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                   </span>
                 </div>
@@ -3206,7 +3216,7 @@ export default function ChatPage() {
           {/* Thread Messages */}
           <ScrollArea className="flex-1 p-4">
             {threadMessages.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
+              <div className="text-center py-8 text-muted-foreground">
                 <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
                 <p className="text-sm">No replies yet</p>
                 <p className="text-xs">Be the first to reply!</p>
@@ -3223,7 +3233,7 @@ export default function ChatPage() {
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-sm">{msg.userName}</span>
-                        <span className="text-xs text-gray-500">
+                        <span className="text-xs text-muted-foreground">
                           {new Date(msg.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                         </span>
                       </div>
@@ -3276,7 +3286,7 @@ export default function ChatPage() {
             {onlineUsers.map(user => (
               <div
                 key={user.id}
-                className="flex items-center gap-2 p-2 rounded hover:bg-gray-100 cursor-pointer"
+                className="flex items-center gap-2 p-2 rounded hover:bg-accent cursor-pointer"
               >
                 <div className="relative">
                   <Avatar className="h-8 w-8">
@@ -3288,7 +3298,7 @@ export default function ChatPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{user.name}</p>
-                  <p className="text-xs text-gray-500 capitalize">
+                  <p className="text-xs text-muted-foreground capitalize">
                     {user.status === 'offline' && user.lastSeen
                       ? `Last seen ${new Date(user.lastSeen).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`
                       : user.status}
@@ -3353,7 +3363,7 @@ export default function ChatPage() {
             {/* Message preview */}
             {messageToForward && (
               <div className="p-3 bg-gray-50 rounded-lg border">
-                <p className="text-xs text-gray-500 mb-1">Message from {messageToForward.userName}</p>
+                <p className="text-xs text-muted-foreground mb-1">Message from {messageToForward.userName}</p>
                 <p className="text-sm line-clamp-3">{messageToForward.body}</p>
               </div>
             )}
@@ -3371,7 +3381,7 @@ export default function ChatPage() {
                         <button
                           key={channel.id}
                           onClick={() => forwardMessage(channel.id)}
-                          className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-gray-100 text-left"
+                          className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-accent text-left"
                         >
                           <Avatar className="h-8 w-8">
                             <AvatarFallback className="bg-pulse-forest text-white text-xs">
@@ -3380,7 +3390,7 @@ export default function ChatPage() {
                           </Avatar>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium truncate">{displayName}</p>
-                            <p className="text-xs text-gray-500">
+                            <p className="text-xs text-muted-foreground">
                               {channel.type === 'direct' ? 'Direct message' : `${channel.members.length} members`}
                             </p>
                           </div>
@@ -3434,7 +3444,7 @@ export default function ChatPage() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="text-sm font-medium">Members</label>
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-muted-foreground">
                   {activeChannel?.members.length} members
                 </span>
               </div>
@@ -3449,7 +3459,7 @@ export default function ChatPage() {
                     return (
                       <div
                         key={member.userId}
-                        className="flex items-center justify-between p-2 rounded hover:bg-gray-50"
+                        className="flex items-center justify-between p-2 rounded hover:bg-accent"
                       >
                         <div className="flex items-center gap-2">
                           <Avatar className="h-6 w-6">
@@ -3546,7 +3556,7 @@ export default function ChatPage() {
                 <h3 className="font-semibold text-lg">
                   {incomingCall.type === 'video' ? 'Video' : 'Voice'} Call
                 </h3>
-                <p className="text-gray-600">{incomingCall.remoteUserName} is calling you</p>
+                <p className="text-muted-foreground">{incomingCall.remoteUserName} is calling you</p>
               </div>
 
               <div className="flex gap-3 justify-center">

@@ -495,7 +495,7 @@ export default function WeatherIntegrationPage() {
                   </thead>
                   <tbody className="divide-y">
                     {frostHistory.map((frost, idx) => (
-                      <tr key={idx} className="hover:bg-gray-50">
+                      <tr key={idx} className="hover:bg-accent">
                         <td className="p-3">{format(new Date(frost.date), 'MMM d, yyyy')}</td>
                         <td className="p-3 text-center font-bold text-blue-600">{frost.minTemp}°C</td>
                         <td className="p-3 text-center">{frost.duration}h</td>

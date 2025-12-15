@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, Package, AlertTriangle, Edit, Trash2, Search, FileText, AlertCircle, Droplet, TrendingDown, Minus, PackagePlus, XCircle } from "lucide-react";
+import { Plus, Package, AlertTriangle, Edit, Trash2, Search, FileText, AlertCircle, Droplet, TrendingDown, Minus, PackagePlus, XCircle, Smartphone } from "lucide-react";
+import MobileScannerQR from "@/components/MobileScannerQR";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,6 +50,8 @@ export default function MedicinesInventory() {
   const [stockAdjustProduct, setStockAdjustProduct] = useState<Product | null>(null);
   const [stockAdjustMode, setStockAdjustMode] = useState<'add' | 'remove'>('add');
   const [stockAdjustQuantity, setStockAdjustQuantity] = useState<number>(1);
+  const [isMobileScannerOpen, setIsMobileScannerOpen] = useState(false);
+  const [lastScannedBarcode, setLastScannedBarcode] = useState<string | null>(null);
 
   // Fetch data
   const { data: products = [], isLoading: isLoadingProducts } = useQuery<Product[]>({
@@ -225,7 +228,49 @@ export default function MedicinesInventory() {
           </h1>
           <p className="text-muted-foreground">Track products, stock levels, and expiry dates</p>
         </div>
+        <Button 
+          variant="outline" 
+          onClick={() => setIsMobileScannerOpen(true)}
+          className="flex items-center gap-2"
+        >
+          <Smartphone className="h-4 w-4" />
+          Use Phone Scanner
+        </Button>
       </div>
+      
+      {/* Show last scanned barcode */}
+      {lastScannedBarcode && (
+        <Card className="mb-6 border-blue-200 bg-blue-50">
+          <CardContent className="py-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-blue-600 font-medium">Last Scanned Barcode:</p>
+                <p className="text-lg font-mono">{lastScannedBarcode}</p>
+              </div>
+              <div className="flex gap-2">
+                <Button 
+                  size="sm" 
+                  onClick={() => {
+                    // Find product by barcode or open add dialog with barcode pre-filled
+                    const existingProduct = products.find(p => p.barcode === lastScannedBarcode);
+                    if (existingProduct) {
+                      setStockAdjustProduct(existingProduct);
+                      setStockAdjustMode('add');
+                    } else {
+                      setIsProductDialogOpen(true);
+                    }
+                  }}
+                >
+                  {products.find(p => p.barcode === lastScannedBarcode) ? 'Add Stock' : 'Add as New Product'}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setLastScannedBarcode(null)}>
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {expiringSoon.length > 0 && (
         <Card className="mb-6 border-amber-500 bg-amber-50 dark:bg-amber-950" data-testid="card-expiring-alert">
@@ -871,6 +916,15 @@ export default function MedicinesInventory() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Mobile Scanner QR Dialog */}
+      <MobileScannerQR
+        isOpen={isMobileScannerOpen}
+        onClose={() => setIsMobileScannerOpen(false)}
+        onBarcodeReceived={(barcode) => {
+          setLastScannedBarcode(barcode);
+        }}
+      />
     </div>
   );
 }

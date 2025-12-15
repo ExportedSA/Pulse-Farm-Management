@@ -1,4 +1,4 @@
-import { Home, Syringe, Pill, Users, Sprout, Heart, Settings, BarChart3, ChevronDown, MessageSquare, Shield, FileText, Briefcase, Wrench, Scale, ChevronRight, GitFork, Rocket, Stethoscope, Baby, ClipboardList } from "lucide-react";
+import { Home, Syringe, Pill, Users, Sprout, Heart, Settings, BarChart3, ChevronDown, MessageSquare, Shield, FileText, Briefcase, Wrench, Scale, ChevronRight, GitFork, Rocket, Stethoscope, Baby, ClipboardList, Clock, Calendar } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useState, ComponentProps } from "react";
 import { useChatContext } from "@/contexts/ChatContext";
@@ -30,7 +30,8 @@ import {
 // Key principle: Most used items at top, minimal nesting, logical grouping
 const menuItems = [
   // Primary navigation - always visible
-  { title: "Dashboard", url: "/app", icon: Home },
+  { title: "Overview", url: "/app", icon: Home },
+  { title: "Dashboard", url: "/app/dashboard", icon: BarChart3 },
   
   // Animals - core functionality
   {
@@ -102,8 +103,21 @@ const menuItems = [
     subItems: [
       { title: "Hub", url: "/app/operations" },
       { title: "Jobs", url: "/app/jobs" },
+      { title: "Roster", url: "/app/roster" },
+      { title: "Timesheets", url: "/app/timesheets" },
       { title: "Calendar", url: "/app/calendar" },
       { title: "Staff", url: "/app/operations/staff" },
+    ],
+  },
+  
+  // Equipment - new top-level module
+  {
+    title: "Equipment",
+    icon: Wrench,
+    subItems: [
+      { title: "All Equipment", url: "/app/equipment" },
+      { title: "Maintenance", url: "/app/equipment/maintenance" },
+      { title: "Service History", url: "/app/equipment/history" },
     ],
   },
   
@@ -142,6 +156,10 @@ const menuItems = [
   
   // Communication
   { title: "Chat", url: "/app/chat", icon: MessageSquare },
+  
+  // Safety & People
+  { title: "Safety", url: "/app/safety", icon: Shield },
+  { title: "People", url: "/app/people", icon: Users },
 ];
 
 export function AppSidebar({ ...props }: AppSidebarProps) {

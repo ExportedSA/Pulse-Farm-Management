@@ -203,9 +203,20 @@ router.post("/", uploadMultiplePhotos, async (req, res) => {
     // Handle uploaded photos
     let photoUrls: string[] = [];
     if (req.files && Array.isArray(req.files)) {
-      photoUrls = req.files.map((file: Express.Multer.File) => {
-        return `/uploads/${file.filename}`;
+      // Use the file storage service to save the files
+      const { saveFileBuffer } = await import('../services/fileStorage');
+      
+      const uploadPromises = req.files.map(async (file: Express.Multer.File) => {
+        const { publicUrl } = await saveFileBuffer(
+          file.buffer,
+          file.mimetype,
+          file.originalname,
+          'jobs' // Store in jobs subfolder
+        );
+        return publicUrl;
       });
+      
+      photoUrls = await Promise.all(uploadPromises);
     }
 
     if (!title || !description || !location || !startDate || !startTime || !assignedTo || assignedTo.length === 0) {
@@ -292,9 +303,20 @@ router.patch("/:id", uploadMultiplePhotos, async (req, res) => {
     // Handle uploaded photos
     let newPhotoUrls: string[] = [];
     if (req.files && Array.isArray(req.files)) {
-      newPhotoUrls = req.files.map((file: Express.Multer.File) => {
-        return `/uploads/${file.filename}`;
+      // Use the file storage service to save the files
+      const { saveFileBuffer } = await import('../services/fileStorage');
+      
+      const uploadPromises = req.files.map(async (file: Express.Multer.File) => {
+        const { publicUrl } = await saveFileBuffer(
+          file.buffer,
+          file.mimetype,
+          file.originalname,
+          'jobs' // Store in jobs subfolder
+        );
+        return publicUrl;
       });
+      
+      newPhotoUrls = await Promise.all(uploadPromises);
     }
 
     // Combine existing photos with new ones

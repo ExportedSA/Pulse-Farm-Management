@@ -348,7 +348,7 @@ export default function MilkAnalyticsPage() {
                   </thead>
                   <tbody className="divide-y">
                     {mockHerdTests.map((test, idx) => (
-                      <tr key={test.id} className={idx === 0 ? 'bg-blue-50' : 'hover:bg-gray-50'}>
+                      <tr key={test.id} className={idx === 0 ? 'bg-blue-50' : 'hover:bg-accent'}>
                         <td className="p-4 font-medium">{format(new Date(test.date), 'MMM d, yyyy')}{idx === 0 && <Badge className="ml-2 bg-blue-100 text-blue-800">Latest</Badge>}</td>
                         <td className="p-4 text-center">{test.cowsTested}</td>
                         <td className="p-4 text-center font-medium">{test.avgMilkYield}</td>
@@ -396,7 +396,7 @@ export default function MilkAnalyticsPage() {
                   </thead>
                   <tbody className="divide-y">
                     {filteredCows.map(cow => (
-                      <tr key={cow.id} className="hover:bg-gray-50">
+                      <tr key={cow.id} className="hover:bg-accent">
                         <td className="p-4"><p className="font-medium">{cow.tagNumber}</p>{cow.name && <p className="text-xs text-gray-500">{cow.name}</p>}</td>
                         <td className="p-4 text-center font-medium">{cow.milkYield}</td>
                         <td className="p-4 text-center text-yellow-600">{cow.fatPercent}%</td>

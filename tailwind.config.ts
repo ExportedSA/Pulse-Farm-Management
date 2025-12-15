@@ -85,26 +85,30 @@ export default {
   				offline: 'rgb(156 163 175)'
   			},
   			pulse: {
-				// Lendit-inspired Color Scheme - Deep Forest Green & Gold
-				// Light tints for backgrounds
-				50: '#f8f9f8',
-				100: '#f0f2f0',
-				200: '#e5e8e5',
+				// Cream/Dark Green Theme
+				// Cream backgrounds
+				50: '#faf8f5',   // Main cream background
+				100: '#f5f2ed',  // Slightly darker cream
+				150: '#f0ebe4',  // Light beige hover
+				200: '#e8e4de',  // Warm gray borders
 				// Mid tones
-				300: '#c5cdc7',
-				400: '#8a9a8e',
-				500: '#4a5f4e',
-				// Deep greens (primary brand color - matches Lendit)
+				300: '#d4cfc6',
+				400: '#a8a196',
+				500: '#6b6459',
+				// Dark greens (primary brand color)
 				600: '#2d4a35',
 				700: '#243d2c',
-				800: '#1e3932',
-				900: '#182e28',
+				800: '#1a3a2f',  // Main dark green text/active
+				900: '#162b24',
 				950: '#0f1f1a',
 				// Named colors for semantic use
-				forest: '#1e3932',
+				cream: '#faf8f5',
+				'cream-hover': '#f0ebe4',
+				forest: '#1a3a2f',
 				'forest-light': '#2d4a35',
 				'forest-dark': '#162620',
-				// Gold/tan accent colors (matches Lendit tagline)
+				border: '#e8e4de',
+				// Gold/tan accent colors
 				gold: '#b8963e',
 				'gold-light': '#c9a854',
 				'gold-dark': '#9a7d33',
@@ -114,9 +118,10 @@ export default {
 				accent: '#b8963e',
 				'accent-hover': '#c9a854',
 				// Text colors
-				'text-primary': '#ffffff',
-				'text-secondary': '#e5e7eb',
-				'text-muted': '#6b7280'
+				'text-primary': '#1a3a2f',
+				'text-secondary': '#2d4a35',
+				'text-muted': '#6b6459',
+				'text-light': '#ffffff'
 			}
   		},
   		fontFamily: {

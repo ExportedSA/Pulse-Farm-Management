@@ -1,6 +1,9 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'http';
 import type { IncomingMessage } from 'http';
+import { verifyToken } from './middleware/auth';
+import { initRedis, getInstanceId, publishToRedis, subscribeToRedis, REDIS_CHANNELS, isRedisAvailable } from './config/redis';
+import logger from './config/logger';
 
 interface ChatClient {
   ws: WebSocket;
@@ -16,12 +19,38 @@ interface ChatMessage {
   timestamp?: string;
 }
 
+interface RedisMessagePayload {
+  type: string;
+  channelId?: string;
+  data: any;
+  userId?: string;
+  timestamp?: string;
+}
+
 class ChatWebSocketServer {
   private wss: WebSocketServer | null = null;
   private clients: Map<string, ChatClient> = new Map();
   private userConnections: Map<string, Set<string>> = new Map(); // userId -> Set of connection IDs
 
   initialize(server: Server) {
+    // Initialize Redis for WebSocket scaling
+    const redisAvailable = initRedis();
+    
+    if (redisAvailable) {
+      logger.info('Redis initialized for WebSocket scaling');
+      
+      // Subscribe to Redis channels for message broadcasting
+      subscribeToRedis(REDIS_CHANNELS.CHAT_MESSAGES, (data: RedisMessagePayload, originInstanceId: string) => {
+        this.handleRedisMessage(data, originInstanceId);
+      });
+      
+      subscribeToRedis(REDIS_CHANNELS.CHAT_TYPING, (data: RedisMessagePayload, originInstanceId: string) => {
+        this.handleRedisTyping(data, originInstanceId);
+      });
+    } else {
+      logger.warn('Redis not available, WebSocket server running in single-instance mode');
+    }
+    
     this.wss = new WebSocketServer({ 
       server,
       path: '/ws/chat'
@@ -29,48 +58,56 @@ class ChatWebSocketServer {
 
     this.wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
       const connectionId = this.generateConnectionId();
-      const userId = this.extractUserId(req);
       
-      console.log(`[WebSocket] New connection: ${connectionId} for user: ${userId}`);
+      try {
+        const userId = this.extractUserId(req);
+        
+        console.log(`[WebSocket] New connection: ${connectionId} for user: ${userId}`);
 
-      const client: ChatClient = {
-        ws,
-        userId,
-        channels: new Set()
-      };
+        const client: ChatClient = {
+          ws,
+          userId,
+          channels: new Set()
+        };
 
-      this.clients.set(connectionId, client);
-      
-      // Track user connections
-      if (!this.userConnections.has(userId)) {
-        this.userConnections.set(userId, new Set());
-      }
-      this.userConnections.get(userId)!.add(connectionId);
-
-      ws.on('message', (data: Buffer) => {
-        try {
-          const message = JSON.parse(data.toString());
-          this.handleMessage(connectionId, message);
-        } catch (error) {
-          console.error('[WebSocket] Error parsing message:', error);
+        this.clients.set(connectionId, client);
+        
+        // Track user connections
+        if (!this.userConnections.has(userId)) {
+          this.userConnections.set(userId, new Set());
         }
-      });
+        this.userConnections.get(userId)!.add(connectionId);
 
-      ws.on('close', () => {
-        console.log(`[WebSocket] Connection closed: ${connectionId}`);
-        this.handleDisconnect(connectionId);
-      });
+        ws.on('message', (data: Buffer) => {
+          try {
+            const message = JSON.parse(data.toString());
+            this.handleMessage(connectionId, message);
+          } catch (error) {
+            console.error('[WebSocket] Error parsing message:', error);
+          }
+        });
 
-      ws.on('error', (error) => {
-        console.error(`[WebSocket] Error on connection ${connectionId}:`, error);
-      });
+        ws.on('close', () => {
+          console.log(`[WebSocket] Connection closed: ${connectionId}`);
+          this.handleDisconnect(connectionId);
+        });
 
-      // Send connection acknowledgment
-      this.sendToClient(connectionId, {
-        type: 'connected',
-        connectionId,
-        userId
-      });
+        ws.on('error', (error) => {
+          console.error(`[WebSocket] Error on connection ${connectionId}:`, error);
+        });
+
+        // Send connection acknowledgment
+        this.sendToClient(connectionId, {
+          type: 'connected',
+          connectionId,
+          userId
+        });
+      } catch (error) {
+        console.error(`[WebSocket] Authentication failed for connection ${connectionId}:`, error);
+        // Send AUTH_FAILED message and close connection
+        ws.send(JSON.stringify({ type: 'AUTH_FAILED', message: 'Authentication failed' }));
+        ws.close(1008, 'Authentication failed');
+      }
     });
 
     console.log('[WebSocket] Chat WebSocket server initialized on /ws/chat');
@@ -81,10 +118,27 @@ class ChatWebSocketServer {
   }
 
   private extractUserId(req: IncomingMessage): string {
-    // Extract userId from query string or cookie
-    const url = new URL(req.url || '', `http://${req.headers.host}`);
-    const userId = url.searchParams.get('userId');
-    return userId || 'demo-user'; // Fallback for demo
+    try {
+      // Extract token from query string
+      const url = new URL(req.url || '', `http://${req.headers.host}`);
+      const token = url.searchParams.get('token');
+      
+      if (!token) {
+        throw new Error('No token provided');
+      }
+      
+      // Verify JWT token
+      const payload = verifyToken(token);
+      
+      if (!payload.userId) {
+        throw new Error('Invalid token payload');
+      }
+      
+      return payload.userId;
+    } catch (error) {
+      console.error('[WebSocket] Authentication failed:', error);
+      throw new Error('Authentication failed');
+    }
   }
 
   private handleMessage(connectionId: string, message: any) {
@@ -96,7 +150,7 @@ class ChatWebSocketServer {
         // Subscribe to a channel
         if (message.channelId) {
           client.channels.add(message.channelId);
-          console.log(`[WebSocket] ${connectionId} subscribed to channel: ${message.channelId}`);
+          logger.debug(`[WebSocket] ${connectionId} subscribed to channel: ${message.channelId}`);
         }
         break;
 
@@ -104,18 +158,29 @@ class ChatWebSocketServer {
         // Unsubscribe from a channel
         if (message.channelId) {
           client.channels.delete(message.channelId);
-          console.log(`[WebSocket] ${connectionId} unsubscribed from channel: ${message.channelId}`);
+          logger.debug(`[WebSocket] ${connectionId} unsubscribed from channel: ${message.channelId}`);
         }
         break;
 
       case 'typing':
         // Broadcast typing indicator to channel
-        this.broadcastToChannel(message.channelId, {
-          type: 'typing',
-          channelId: message.channelId,
-          userId: client.userId,
-          isTyping: message.isTyping
-        }, connectionId);
+        if (isRedisAvailable()) {
+          // Publish to Redis for cross-instance broadcasting
+          publishToRedis(REDIS_CHANNELS.CHAT_TYPING, {
+            type: 'typing',
+            channelId: message.channelId,
+            userId: client.userId,
+            isTyping: message.isTyping
+          });
+        } else {
+          // Local broadcasting only
+          this.broadcastToChannel(message.channelId, {
+            type: 'typing',
+            channelId: message.channelId,
+            userId: client.userId,
+            isTyping: message.isTyping
+          }, connectionId);
+        }
         break;
 
       case 'ping':
@@ -124,7 +189,24 @@ class ChatWebSocketServer {
         break;
 
       default:
-        console.log(`[WebSocket] Unknown message type: ${message.type}`);
+        logger.debug(`[WebSocket] Unknown message type: ${message.type}`);
+    }
+  }
+
+  // Handle messages received from Redis
+  private handleRedisMessage(data: RedisMessagePayload, originInstanceId: string) {
+    // Skip if this message came from the same instance (handled by subscribeToRedis)
+    // This check is already done in subscribeToRedis, so we just broadcast
+    
+    if (data.channelId) {
+      this.broadcastToChannel(data.channelId, data);
+    }
+  }
+
+  // Handle typing indicators received from Redis
+  private handleRedisTyping(data: RedisMessagePayload, originInstanceId: string) {
+    if (data.channelId) {
+      this.broadcastToChannel(data.channelId, data);
     }
   }
 
@@ -166,12 +248,23 @@ class ChatWebSocketServer {
    * Broadcast a new message to all subscribers of a channel
    */
   broadcastNewMessage(channelId: string, message: any) {
-    this.broadcastToChannel(channelId, {
-      type: 'new_message',
-      channelId,
-      data: message,
-      timestamp: new Date().toISOString()
-    });
+    if (isRedisAvailable()) {
+      // Publish to Redis for cross-instance broadcasting
+      publishToRedis(REDIS_CHANNELS.CHAT_MESSAGES, {
+        type: 'new_message',
+        channelId,
+        data: message,
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      // Local broadcasting only
+      this.broadcastToChannel(channelId, {
+        type: 'new_message',
+        channelId,
+        data: message,
+        timestamp: new Date().toISOString()
+      });
+    }
   }
 
   /**
@@ -184,46 +277,6 @@ class ChatWebSocketServer {
       data: { messageId, newBody, editedAt },
       timestamp: new Date().toISOString()
     });
-  }
-
-  /**
-   * Broadcast message deletion to all subscribers of a channel
-   */
-  broadcastMessageDelete(channelId: string, messageId: string) {
-    this.broadcastToChannel(channelId, {
-      type: 'message_deleted',
-      channelId,
-      data: { messageId },
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  /**
-   * Broadcast read receipt to all subscribers of a channel
-   */
-  broadcastReadReceipt(channelId: string, messageId: string, userId: string) {
-    this.broadcastToChannel(channelId, {
-      type: 'message_read',
-      channelId,
-      data: { messageId, userId, readAt: new Date().toISOString() },
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  /**
-   * Send notification to specific user (for @mentions)
-   */
-  notifyUser(userId: string, notification: any) {
-    const userConns = this.userConnections.get(userId);
-    if (userConns) {
-      userConns.forEach(connectionId => {
-        this.sendToClient(connectionId, {
-          type: 'notification',
-          data: notification,
-          timestamp: new Date().toISOString()
-        });
-      });
-    }
   }
 
   /**
@@ -243,14 +296,41 @@ class ChatWebSocketServer {
     }
   }
 
-  private broadcastToChannel(channelId: string, data: any, excludeConnectionId?: string) {
+  /**
+   * Send a message to all connections for a specific user
+   */
+  sendToUser(userId: string, message: any) {
+    const connections = this.userConnections.get(userId);
+    if (!connections) return;
+    
+    connections.forEach(connectionId => {
+      this.sendToClient(connectionId, message);
+    });
+  }
+
+  private broadcastToChannel(channelId: string, message: any, excludeConnectionId?: string) {
+    let sentCount = 0;
+    
     this.clients.forEach((client, connectionId) => {
-      if (client.channels.has(channelId) && connectionId !== excludeConnectionId) {
-        if (client.ws.readyState === WebSocket.OPEN) {
-          client.ws.send(JSON.stringify(data));
+      // Skip excluded connection if specified
+      if (excludeConnectionId && connectionId === excludeConnectionId) {
+        return;
+      }
+      
+      // Send to clients subscribed to this channel
+      if (client.channels.has(channelId) && client.ws.readyState === WebSocket.OPEN) {
+        try {
+          client.ws.send(JSON.stringify(message));
+          sentCount++;
+        } catch (error) {
+          logger.error(`[WebSocket] Failed to send message to ${connectionId}:`, error);
         }
       }
     });
+    
+    if (sentCount > 0) {
+      logger.debug(`[WebSocket] Broadcast message to ${sentCount} clients in channel ${channelId}`);
+    }
   }
 
   /**

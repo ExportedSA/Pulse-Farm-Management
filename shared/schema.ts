@@ -164,7 +164,7 @@ export const animals = pgTable('animals', {
   // Tag Identification
   visualId: varchar('visual_id', { length: 50 }), // VID - Visual ID (farm tag number)
   lifetimeId: varchar('lifetime_id', { length: 50 }).unique(), // LID - Lifetime ID (NAIT birth tag)
-  naitTag: varchar('nait_tag', { length: 50 }).unique(), // NAIT EID tag number
+  naitTag: varchar('nait_tag', { length: 50 }), // NAIT location number (NOT unique - shared by all animals at location)
   eid: varchar('eid', { length: 50 }).unique(), // Electronic ID for RFID tags
   cowId: varchar('cow_id', { length: 50 }).unique(), // Legacy Visual ID field
   birthId: jsonb('birth_id').$type<{ participantCode: string; year: string; number: string }>(),
@@ -2887,11 +2887,16 @@ export type InsertComplianceDocument = z.infer<typeof insertComplianceDocumentSc
 
 // ===== CHAT SYSTEM (Phase 7) =====
 
+// Channel context type enum
+export const channelContextTypeEnum = pgEnum('channel_context_type', ['job', 'animal', 'equipment']);
+
 // Chat Channels (Direct messages and group chats)
 export const chatChannels = pgTable('chat_channels', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: varchar('name', { length: 255 }), // null for direct messages, name for group chats
-  type: varchar('type', { length: 20 }).notNull().default('direct'), // 'direct', 'group'
+  type: varchar('type', { length: 20 }).notNull().default('direct'), // 'direct', 'group', 'context'
+  contextType: channelContextTypeEnum('context_type'), // 'job', 'animal', 'equipment' for context channels
+  contextId: uuid('context_id'), // Reference to job, animal, or equipment ID
   description: text('description'),
   avatarUrl: varchar('avatar_url', { length: 500 }),
   createdBy: uuid('created_by').references(() => users.id).notNull(),
@@ -3502,6 +3507,46 @@ export type RecurringTaskTemplate = typeof recurringTaskTemplates.$inferSelect;
 export type InsertRecurringTaskTemplate = z.infer<typeof insertRecurringTaskTemplateSchema>;
 export type RecurringTaskInstance = typeof recurringTaskInstances.$inferSelect;
 export type InsertRecurringTaskInstance = z.infer<typeof insertRecurringTaskInstanceSchema>;
+
+// Equipment/Device tracking for farm assets
+export const equipmentStatusEnum = pgEnum('equipment_status', ['operational', 'maintenance_due', 'in_maintenance', 'out_of_service']);
+
+export const equipment = pgTable('equipment', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  type: varchar('type', { length: 100 }).notNull(), // e.g., "Tractor", "Milk Pump", "Drone", "Irrigation System"
+  model: varchar('model', { length: 100 }), // Model number or identifier
+  serialNumber: varchar('serial_number', { length: 100 }).unique(),
+  manufacturer: varchar('manufacturer', { length: 100 }),
+  yearManufactured: integer('year_manufactured'),
+  purchaseDate: date('purchase_date'),
+  purchasePrice: numeric('purchase_price', { precision: 10, scale: 2 }),
+  location: varchar('location', { length: 255 }), // Current location of equipment
+  status: equipmentStatusEnum('status').default('operational').notNull(),
+  lastServiceDate: date('last_service_date'),
+  nextServiceDue: date('next_service_due'),
+  serviceIntervalDays: integer('service_interval_days'), // Days between services
+  warrantyExpiry: date('warranty_expiry'),
+  notes: text('notes'),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Equipment Service History
+export const equipmentServiceHistory = pgTable('equipment_service_history', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  equipmentId: uuid('equipment_id').references(() => equipment.id, { onDelete: 'cascade' }).notNull(),
+  serviceDate: date('service_date').notNull(),
+  serviceType: varchar('service_type', { length: 100 }).notNull(), // e.g., "Routine Maintenance", "Repair", "Inspection"
+  description: text('description'),
+  cost: numeric('cost', { precision: 10, scale: 2 }),
+  performedBy: varchar('performed_by', { length: 255 }), // Who performed the service
+  nextServiceDue: date('next_service_due'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
 
 // ===== FINANCIAL TABLES =====
 

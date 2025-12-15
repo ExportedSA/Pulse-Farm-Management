@@ -2,47 +2,59 @@
 @tailwind components;
 @tailwind utilities;
 
-/* LIGHT MODE */
+/* LIGHT MODE - Cream/Dark Green Theme */
 :root {
   --button-outline: rgba(0,0,0, .10);
   --badge-outline: rgba(0,0,0, .05);
   --opaque-button-border-intensity: -8;
   --elevate-1: rgba(0,0,0, .03);
   --elevate-2: rgba(0,0,0, .08);
-  --background: 40 20% 97%;
-  --foreground: 30 10% 15%;
-  --border: 40 15% 88%;
-  --card: 0 0% 100%;
-  --card-foreground: 30 10% 15%;
-  --card-border: 40 15% 90%;
-  --sidebar: 40 15% 95%;
-  --sidebar-foreground: 30 10% 15%;
-  --sidebar-border: 40 15% 85%;
-  --sidebar-primary: 158 28% 16%;
+  /* Background: Cream #faf8f5 */
+  --background: 36 33% 97%;
+  /* Text: Dark green #1a3a2f */
+  --foreground: 159 38% 16%;
+  /* Borders: Warm gray #e8e4de */
+  --border: 36 17% 89%;
+  /* Cards: White with warm tint */
+  --card: 36 25% 99%;
+  --card-foreground: 159 38% 16%;
+  --card-border: 36 17% 89%;
+  /* Sidebar: Slightly darker cream */
+  --sidebar: 36 25% 95%;
+  --sidebar-foreground: 159 38% 16%;
+  --sidebar-border: 36 17% 85%;
+  /* Sidebar primary: Dark green with white text */
+  --sidebar-primary: 159 38% 16%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 210 8% 88%;
-  --sidebar-accent-foreground: 210 6% 12%;
-  --sidebar-ring: 158 28% 16%;
-  --popover: 210 5% 92%;
-  --popover-foreground: 210 6% 12%;
-  --popover-border: 210 5% 86%;
-  --primary: 158 28% 16%;
+  /* Sidebar accent: Light beige hover #f0ebe4 */
+  --sidebar-accent: 35 30% 92%;
+  --sidebar-accent-foreground: 159 38% 16%;
+  --sidebar-ring: 159 38% 16%;
+  /* Popovers: Cream-tinted */
+  --popover: 36 25% 97%;
+  --popover-foreground: 159 38% 16%;
+  --popover-border: 36 17% 86%;
+  /* Primary: Dark green #1a3a2f */
+  --primary: 159 38% 16%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 40 15% 90%;
-  --secondary-foreground: 30 10% 15%;
-  --muted: 40 12% 92%;
-  --muted-foreground: 30 8% 45%;
-  --accent: 40 15% 94%;
-  --accent-foreground: 30 10% 15%;
+  /* Secondary: Light cream */
+  --secondary: 36 20% 92%;
+  --secondary-foreground: 159 38% 16%;
+  /* Muted: Warm gray tones */
+  --muted: 36 15% 92%;
+  --muted-foreground: 159 20% 40%;
+  /* Accent: Light beige hover #f0ebe4 */
+  --accent: 35 30% 92%;
+  --accent-foreground: 159 38% 16%;
   --destructive: 0 72% 42%;
   --destructive-foreground: 0 20% 98%;
-  --input: 210 5% 72%;
-  --ring: 158 28% 16%;
-  --chart-1: 158 28% 16%;
+  --input: 36 17% 82%;
+  --ring: 159 38% 16%;
+  --chart-1: 159 38% 16%;
   --chart-2: 43 75% 31%;
-  --chart-3: 160 25% 35%;
+  --chart-3: 159 25% 35%;
   --chart-4: 43 60% 40%;
-  --chart-5: 160 20% 50%;
+  --chart-5: 159 20% 50%;
   --font-sans: Inter, system-ui, sans-serif;
   --font-serif: Georgia, serif;
   --font-mono: JetBrains Mono, monospace;
@@ -175,14 +187,16 @@
     min-height: 100vh;
   }
   :root {
-    --sidebar-background: 40 15% 97%;
-    --sidebar-foreground: 30 10% 15%;
-    --sidebar-primary: 158 28% 16%;
+    /* Sidebar colors matching cream/dark green theme */
+    --sidebar-background: 36 33% 97%;
+    --sidebar-foreground: 159 38% 16%;
+    --sidebar-primary: 159 38% 16%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 40 15% 94%;
-    --sidebar-accent-foreground: 30 10% 15%;
-    --sidebar-border: 40 15% 88%;
-    --sidebar-ring: 158 28% 16%;
+    /* Hover: Light beige #f0ebe4 */
+    --sidebar-accent: 35 30% 92%;
+    --sidebar-accent-foreground: 159 38% 16%;
+    --sidebar-border: 36 17% 89%;
+    --sidebar-ring: 159 38% 16%;
   }
   .dark {
     --sidebar-background: 240 5.9% 10%;
@@ -315,4 +329,91 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* Global Theme Utility Classes - Cream/Dark Green Theme */
+@layer utilities {
+  /* Interactive card/item hover styles */
+  .pulse-interactive {
+    @apply border-pulse-200 hover:bg-pulse-150 hover:border-primary transition-colors;
+  }
+  
+  /* Active state for selected items */
+  .pulse-active {
+    @apply bg-primary text-primary-foreground;
+  }
+  
+  /* Subtle card backgrounds */
+  .pulse-card {
+    @apply bg-pulse-100 border border-pulse-200;
+  }
+  
+  /* Icon container styles */
+  .pulse-icon {
+    @apply bg-primary/10 text-primary;
+  }
+}
+
+/* Subtle background image for app pages - shows on margins */
+.app-background {
+  background-image: url('/background.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+/* Overlay to fade out the center and show only margins */
+.app-background > *:first-child {
+  position: relative;
+}
+
+/* Create the faded effect using a gradient overlay on the main content area */
+.app-background::after {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    to right,
+    hsl(var(--background) / 0.75) 0%,
+    hsl(var(--background)) 18%,
+    hsl(var(--background)) 82%,
+    hsl(var(--background) / 0.75) 100%
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
+.app-background > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Bolder background for login page */
+.login-background {
+  background-image: url('/background.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  position: relative;
+}
+
+.login-background::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: hsl(var(--background) / 0.85);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.login-background > * {
+  position: relative;
+  z-index: 1;
 }

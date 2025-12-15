@@ -571,7 +571,7 @@ export default function RosterSchedulingPage() {
                         }, 0);
                         
                         return (
-                          <tr key={staff.id} className="border-b hover:bg-gray-50">
+                          <tr key={staff.id} className="border-b hover:bg-accent">
                             <td className="p-3 sticky left-0 bg-white z-10">
                               <div className="flex items-center gap-3">
                                 <Avatar className="h-8 w-8">

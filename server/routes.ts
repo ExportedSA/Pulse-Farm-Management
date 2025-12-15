@@ -1,9 +1,18 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { pool } from "./db";
 import passport from "passport";
 import { sanitizeUser, sanitizeUsers } from "./auth-utils";
+import { requireAuth, optionalAuth } from "./middleware/auth";
+import { uploadsMiddleware } from "./middleware/serveUploads";
+import { httpLogger, addRequestContext, logError } from "./middleware/logging";
+import logger from "./config/logger";
+import { initSentry, captureException } from "./config/sentry";
+import { apiLimiter, authLimiter, uploadLimiter } from "./middleware/rateLimit";
+import corsConfig from "./config/cors";
+import helmetConfig from "./config/helmet";
+import authRouter from "./routes/auth";
 import groupsRouter from "./routes/groups";
 import { hardwareRouter } from "./routes/hardware";
 import chatRouter from "./routes/chat";
@@ -13,8 +22,10 @@ import visitorRouter from "./visitor-routes";
 import vehicleRouter from "./vehicle-routes";
 import stockRouter from "./stock-routes";
 import mapRouter from "./map-routes";
-import financialRouter from "./financial-routes";
-import milkRouter from "./milk-routes";
+import rosterRouter from "./routes/roster";
+import animalsRouter from "./routes/animals";
+import farmEquipmentRouter from "./routes/farmEquipment";
+import summaryRouter from "./routes/summary";
 import budgetingRouter from "./budgeting-routes";
 import nzfapRouter from "./nzfap-routes";
 import weatherRouter from "./weather-routes";
@@ -49,6 +60,7 @@ import rosterRouter from "./routes/roster";
 import healthSafetyRouter from "./routes/health-safety";
 import financialAnalyticsRouter from "./routes/financial-analytics";
 import benchmarkingRouter from "./routes/benchmarking";
+import healthRouter from "./routes/health";
 import reportsRouter from "./routes/reports";
 import externalApisRouter from "./routes/external-apis";
 import iotRouter from "./routes/iot";
@@ -81,55 +93,67 @@ import {
 } from "@shared/schema";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // ===== CORE HEALTH CHECKS =====
-  app.get("/api/health", (_req, res) => {
-    res.json({
-      ok: true,
-      version: process.env.npm_package_version ?? "unknown",
-      env: process.env.NODE_ENV ?? "development",
-      time: new Date().toISOString(),
-    });
-  });
+  // Initialize Sentry for error tracking
+  initSentry();
+  
+  // Trust proxy for rate limiting to work correctly behind reverse proxies
+  if (process.env.TRUST_PROXY) {
+    app.set('trust proxy', true);
+    logger.info('Trust proxy enabled for reverse proxy deployments');
+  }
+  
+  // Security middleware (must be early)
+  app.use(helmetConfig);
+  app.use(corsConfig);
+  
+  // Rate limiting
+  app.use(apiLimiter);
+  
+  // Add request logging middleware
+  app.use(httpLogger);
+  app.use(addRequestContext);
+  
+  // Log server startup
+  logger.info('Registering application routes');
+  
+  // ===== AUTHENTICATION ROUTES (Stricter rate limiting) =====
+  app.use("/api/auth", authLimiter, authRouter);
+  
+  // ===== CORE HEALTH CHECKS (No auth middleware) =====
+  app.use("/api", healthRouter);
 
-  app.get("/api/health/db", async (_req, res) => {
-    try {
-      const result = await pool.query("select 1");
-      res.json({ ok: true, result: result.rows?.[0] ?? null });
-    } catch (error: any) {
-      console.error("DB health check failed:", error);
-      res.status(500).json({ ok: false, error: String(error?.message ?? error) });
-    }
-  });
+  // ===== STATIC FILE SERVING (Local only, disabled when S3 is configured) =====
+  app.use("/uploads", uploadsMiddleware);
 
   // ===== PHASE 4: ANIMAL GROUPS =====
-  app.use("/api/groups", groupsRouter);
+  app.use("/api/groups", requireAuth, groupsRouter);
 
   // ===== HEALTH TRACKING: WEIGHT MANAGEMENT =====
-  app.use("/api/weight", weightRouter);
+  app.use("/api/weight", requireAuth, weightRouter);
 
   // ===== VACCINATION & PREVENTIVE HEALTH =====
-  app.use("/api/vaccination", vaccinationRouter);
+  app.use("/api/vaccination", requireAuth, vaccinationRouter);
 
   // ===== HEALTH MONITORING =====
-  app.use("/api/health", healthMonitoringRouter);
+  app.use("/api/health", requireAuth, healthMonitoringRouter);
 
   // ===== REPRODUCTION MANAGEMENT =====
-  app.use("/api/reproduction", reproductionRouter);
+  app.use("/api/reproduction", requireAuth, reproductionRouter);
 
   // ===== VETERINARY INTEGRATION =====
-  app.use("/api/veterinary", veterinaryRouter);
+  app.use("/api/veterinary", requireAuth, veterinaryRouter);
 
   // ===== HEALTH ANALYTICS =====
-  app.use("/api/analytics/health", healthAnalyticsRouter);
+  app.use("/api/analytics/health", requireAuth, healthAnalyticsRouter);
 
   // ===== FINANCIAL ANALYTICS =====
-  app.use(financialAnalyticsRouter);
+  app.use(requireAuth, financialAnalyticsRouter);
 
   // ===== BENCHMARKING =====
-  app.use(benchmarkingRouter);
+  app.use(requireAuth, benchmarkingRouter);
 
   // ===== REPORTS & PDF GENERATION =====
-  app.use(reportsRouter);
+  app.use(requireAuth, reportsRouter);
 
   // ===== EXTERNAL API INTEGRATIONS (NAIT, Weather, LIC, Fonterra) =====
   app.use(externalApisRouter);
@@ -141,155 +165,173 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(multiFarmRouter);
 
   // ===== ANIMAL TAG MANAGEMENT =====
-  app.use(animalTagsRouter);
+  app.use(requireAuth, animalTagsRouter);
 
   // ===== PHASE OVERLAY: MEDICINE & WITHHOLD =====
-  app.use("/api/med", medCoreRouter);
-  app.use("/api/med/withhold", medWithholdRouter);
-  app.use("/api/med/withhold-ids", medWithholdIdsRouter);
+  app.use("/api/med", requireAuth, medCoreRouter);
+  app.use("/api/med/withhold", requireAuth, medWithholdRouter);
+  app.use("/api/med/withhold-ids", requireAuth, medWithholdIdsRouter);
 
   // ===== PHASE OVERLAY: REPRODUCTION EXTRAS =====
-  app.use("/api/repro", reproExtrasRouter);
-  app.use("/api/repro/plan", reproPlanRouter);
+  app.use("/api/repro", requireAuth, reproExtrasRouter);
+  app.use("/api/repro/plan", requireAuth, reproPlanRouter);
 
   // ===== PHASE OVERLAY: OFFLINE SYNC =====
-  app.use("/api/sync", syncCoreRouter);
+  app.use("/api/sync", requireAuth, syncCoreRouter);
 
   // ===== PHASE OVERLAY: NAIT CORE =====
-  app.use("/api/nait/core", naitCoreRouter);
+  app.use("/api/nait/core", requireAuth, naitCoreRouter);
 
   // ===== MOBILE & FIELD FEATURES =====
-  app.use("/api/mobile", mobileFeaturesRouter);
+  app.use("/api/mobile", requireAuth, mobileFeaturesRouter);
 
   // ===== SMART ALERTS =====
-  app.use("/api/alerts", smartAlertsRouter);
+  app.use("/api/alerts", requireAuth, smartAlertsRouter);
 
   // ===== PHOTO ATTACHMENTS =====
-  app.use("/api/photos", photosRouter);
+  app.use("/api/photos", uploadLimiter, requireAuth, photosRouter);
 
   // ===== VOICE NOTES =====
-  app.use("/api/voice-notes", voiceNotesRouter);
+  app.use("/api/voice-notes", uploadLimiter, requireAuth, voiceNotesRouter);
 
   // ===== NAIT INTEGRATION =====
-  app.use("/api/nait", naitRouter);
+  app.use("/api/nait", requireAuth, naitRouter);
 
   // ===== STOCK TRANSACTIONS =====
-  app.use("/api/stock", stockTransactionsRouter);
+  app.use("/api/stock", requireAuth, stockTransactionsRouter);
 
   // ===== BULK OPERATIONS =====
-  app.use("/api/bulk", bulkOperationsRouter);
+  app.use("/api/bulk", requireAuth, bulkOperationsRouter);
 
-  // ===== ANIMAL TIMELINE =====
-  app.use("/api/animals", animalTimelineRouter);
+  // ===== ANIMAL MANAGEMENT =====
+  app.use("/api/animals", requireAuth, animalsRouter);
+
+  // ===== EQUIPMENT TRACKING =====
+  app.use("/api/farm-equipment", requireAuth, farmEquipmentRouter);
+
+  // ===== DASHBOARD SUMMARY =====
+  app.use("/api/summary", requireAuth, summaryRouter);
 
   // ===== LINEAGE/OFFSPRING =====
-  app.use("/api/lineage", lineageRouter);
+  app.use("/api/lineage", requireAuth, lineageRouter);
 
   // ===== HERD REPORTS =====
-  app.use("/api/reports", herdReportsRouter);
+  app.use("/api/reports", requireAuth, herdReportsRouter);
 
   // ===== PASTURE WALKS =====
-  app.use("/api/pasture-walks", pastureWalksRouter);
+  app.use("/api/pasture-walks", requireAuth, pastureWalksRouter);
 
   // ===== HARDWARE MODULE =====
-  app.use("/api/hardware", hardwareRouter);
+  app.use("/api/hardware", requireAuth, hardwareRouter);
 
   // ===== CHAT & COMPLIANCE =====
-  app.use("/api/chat", chatRouter);
-  app.use("/api/compliance", complianceRouter);
+  app.use("/api/chat", requireAuth, chatRouter);
+  app.use("/api/compliance", requireAuth, complianceRouter);
   
   // ===== JOBS =====
-  app.use("/api/jobs", jobsRouter);
+  app.use("/api/jobs", requireAuth, jobsRouter);
 
   // ===== VISITOR MANAGEMENT (PHASE 1) =====
   // Public visitor routes (no authentication required)
   app.use("/api/visitor", visitorRouter);
   
   // Vehicle Registry routes
-  app.use("/api/vehicles", vehicleRouter);
+  app.use("/api/vehicles", requireAuth, vehicleRouter);
   
   // Stock Reconciliation routes
-  app.use("/api/stock", stockRouter);
+  app.use("/api/stock", requireAuth, stockRouter);
   
   // Map & Task Pin routes
-  app.use("/api/map", mapRouter);
+  app.use("/api/map", requireAuth, mapRouter);
   
   // Financial routes
-  app.use("/api/financial", financialRouter);
+  app.use("/api/financial", requireAuth, financialRouter);
   
   // Milk Production routes
-  app.use("/api/milk", milkRouter);
+  app.use("/api/milk", requireAuth, milkRouter);
   
   // Budgeting & Forecasting routes
-  app.use("/api/budgeting", budgetingRouter);
+  app.use("/api/budgeting", requireAuth, budgetingRouter);
   
   // NZFAP Compliance routes
-  app.use("/api/nzfap", nzfapRouter);
+  app.use("/api/nzfap", requireAuth, nzfapRouter);
   
   // Weather Integration routes
-  app.use("/api/weather", weatherRouter);
+  app.use("/api/weather", requireAuth, weatherRouter);
   
   // Gallagher Weigh Scale Integration routes
-  app.use("/api/gallagher", gallagherRouter);
+  app.use("/api/gallagher", requireAuth, gallagherRouter);
   
   // Staff & Contractor Management routes
-  app.use("/api/staff", staffRouter);
-  app.use("/api/contractors", contractorsRouter);
-  app.use("/api/roster", rosterRouter);
+  app.use("/api/staff", requireAuth, staffRouter);
+  app.use("/api/contractors", requireAuth, contractorsRouter);
+  app.use("/api/roster", requireAuth, rosterRouter);
   
   // Health & Safety routes
-  app.use("/api/health-safety", healthSafetyRouter);
+  app.use("/api/health-safety", requireAuth, healthSafetyRouter);
   
   // Recurring Tasks routes
-  app.use("/api/recurring-tasks", recurringTasksRouter);
+  app.use("/api/recurring-tasks", requireAuth, recurringTasksRouter);
   
   // Task Templates routes
-  app.use("/api/task-templates", taskTemplatesRouter);
+  app.use("/api/task-templates", requireAuth, taskTemplatesRouter);
   
   // Notifications routes
-  app.use("/api/notifications", notificationsRouter);
+  app.use("/api/notifications", requireAuth, notificationsRouter);
   
-  // Time Tracking routes
-  app.use("/api/time-tracking", timeTrackingRouter);
-  
-  // Equipment routes
-  app.use("/api/equipment", equipmentRouter);
-  
-  // Task Dependencies routes
-  app.use("/api/task-dependencies", taskDependenciesRouter);
-  
-  // Compliance Tags routes
-  app.use("/api/compliance-tags", complianceTagsRouter);
-  
-  // Admin visitor routes (authentication required)
-  app.use("/api/visitor/admin", passport.authenticate("session", { session: false }), visitorRouter);
-
-  // ===== AUTH =====
-  
-  app.post("/api/auth/login", passport.authenticate("local"), (req, res) => {
-    res.json({ user: sanitizeUser(req.user as any) });
-  });
-
-  app.post("/api/auth/logout", (req, res) => {
-    req.logout((err) => {
-      if (err) {
-        return res.status(500).json({ error: "Logout failed" });
-      }
-      res.json({ success: true });
-    });
-  });
-
-  app.get("/api/auth/user", (req, res) => {
-    if (req.isAuthenticated()) {
-      res.json({ user: sanitizeUser(req.user as any) });
-    } else {
-      res.status(401).json({ error: "Not authenticated" });
+  // Public test endpoint for notifications (no auth required)
+  app.post("/api/notifications/test", async (req, res) => {
+    try {
+      const { deliverNotification } = await import('./services/notifications');
+      
+      // Test notification delivery
+      const delivery = await deliverNotification(
+        {
+          userId: 'demo-user',
+          title: 'Test Notification',
+          message: 'This is a test notification from the notification system! 🎉',
+          type: 'system',
+          priority: 'normal',
+        },
+        {
+          emailEnabled: true,
+          smsEnabled: true,
+        }
+      );
+      
+      res.json({ 
+        success: true, 
+        delivery,
+        message: 'Test notification sent (check console for email/SMS logs)',
+      });
+    } catch (error) {
+      logger.error({ error }, '[NOTIFICATIONS] Test delivery failed');
+      res.status(500).json({ 
+        success: false, 
+        error: 'Test delivery failed',
+        message: 'Check server logs for details',
+      });
     }
   });
-
-  // ===== USERS =====
   
-  app.get("/api/users", async (req, res) => {
+  // Time Tracking routes
+  app.use("/api/time-tracking", requireAuth, timeTrackingRouter);
+  
+  // Equipment routes
+  app.use("/api/equipment", requireAuth, equipmentRouter);
+  
+  // Task Dependencies routes
+  app.use("/api/task-dependencies", requireAuth, taskDependenciesRouter);
+  
+  // Compliance Tags routes
+  app.use("/api/compliance-tags", requireAuth, complianceTagsRouter);
+  
+  // Admin visitor routes (authentication required)
+  app.use("/api/visitor/admin", requireAuth, visitorRouter);
+
+  // ===== USERS (Protected) =====
+  
+  app.get("/api/users", requireAuth, async (req, res) => {
     try {
       const users = await storage.getUsers();
       res.json(sanitizeUsers(users));
@@ -299,7 +341,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/users/:id", async (req, res) => {
+  app.get("/api/users/:id", requireAuth, async (req, res) => {
     try {
       const user = await storage.getUser(req.params.id);
       if (!user) {
@@ -312,7 +354,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/users", async (req, res) => {
+  app.post("/api/users", requireAuth, async (req, res) => {
     try {
       const data = insertUserSchema.parse(req.body);
       const user = await storage.createUser(data);
@@ -1486,6 +1528,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Failed to update setting:", error);
       res.status(500).json({ error: "Failed to update setting" });
     }
+  });
+
+  // ===== GLOBAL ERROR HANDLING =====
+  
+  // Log errors using our logging middleware
+  app.use(logError);
+  
+  // Sentry error handler (must be before the final error handler)
+  if (process.env.SENTRY_DSN) {
+    const { Sentry } = await import('./config/sentry');
+    app.use(Sentry.Handlers.errorHandler());
+  }
+  
+  // Final error handler
+  app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+    // Log the error
+    if (req.log) {
+      req.log.error({ err }, 'Unhandled error');
+    } else {
+      logger.error({ err, url: req.url, method: req.method }, 'Unhandled error');
+    }
+    
+    // Send to Sentry if configured
+    captureException(err, {
+      url: req.url,
+      method: req.method,
+      body: req.body,
+      params: req.params,
+      query: req.query,
+      userId: (req as any).user?.id,
+    });
+    
+    // Don't expose error details in production
+    const isDevelopment = process.env.NODE_ENV !== 'production';
+    
+    res.status(500).json({
+      error: isDevelopment ? err.message : 'Internal Server Error',
+      ...(isDevelopment && { stack: err.stack }),
+    });
+  });
+  
+  // Handle unhandled promise rejections
+  process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
+    logger.error({ reason, promise }, 'Unhandled promise rejection');
+    captureException(new Error(`Unhandled promise rejection: ${reason}`), {
+      type: 'unhandledRejection',
+      reason: String(reason),
+    });
+  });
+  
+  // Handle uncaught exceptions
+  process.on('uncaughtException', (error: Error) => {
+    logger.error({ error }, 'Uncaught exception');
+    captureException(error, { type: 'uncaughtException' });
+    
+    // Graceful shutdown
+    logger.info('Shutting down due to uncaught exception');
+    process.exit(1);
   });
 
   const httpServer = createServer(app);
