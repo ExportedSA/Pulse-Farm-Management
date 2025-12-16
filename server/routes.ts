@@ -58,7 +58,7 @@ import animalTimelineRouter from "./routes/animal-timeline";
 import lineageRouter from "./routes/lineage";
 import herdReportsRouter from "./routes/herd-reports";
 import pastureWalksRouter from "./routes/pasture-walks";
-import rosterRouter from "./routes/roster";
+// import rosterRouter from "./routes/roster"; // Duplicate - already imported on line 25
 import healthSafetyRouter from "./routes/health-safety";
 import financialAnalyticsRouter from "./routes/financial-analytics";
 import benchmarkingRouter from "./routes/benchmarking";

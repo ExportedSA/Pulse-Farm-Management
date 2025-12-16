@@ -356,6 +356,7 @@
 
 /* Subtle background image for app pages - shows on margins */
 .app-background {
+  position: relative;
   background-image: url('/background.png');
   background-size: cover;
   background-position: center;
@@ -363,13 +364,8 @@
   background-attachment: fixed;
 }
 
-/* Overlay to fade out the center and show only margins */
-.app-background > *:first-child {
-  position: relative;
-}
-
 /* Create the faded effect using a gradient overlay on the main content area */
-.app-background::after {
+.app-background::before {
   content: "";
   position: fixed;
   top: 0;
@@ -378,10 +374,10 @@
   bottom: 0;
   background: linear-gradient(
     to right,
-    hsl(var(--background) / 0.4) 0%,
-    hsl(var(--background) / 0.92) 15%,
-    hsl(var(--background) / 0.92) 85%,
-    hsl(var(--background) / 0.4) 100%
+    transparent 0%,
+    hsl(var(--background) / 0.85) 12%,
+    hsl(var(--background) / 0.85) 88%,
+    transparent 100%
   );
   pointer-events: none;
   z-index: 0;
