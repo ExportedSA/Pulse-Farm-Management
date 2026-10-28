@@ -111,156 +111,21 @@ interface LeaveRequest {
   approvedBy?: string;
 }
 
-// Mock data
-const mockStaff: StaffMember[] = [
-  {
-    id: 'staff-1',
-    userId: 'user-1',
-    employeeId: 'EMP001',
-    position: 'Farm Manager',
-    department: 'Management',
-    phone: '021 123 4567',
-    employmentType: 'full_time',
-    hourlyRate: '35.00',
-    isActive: true,
-    maxHoursPerWeek: 45,
-    preferredShifts: ['morning'],
-    user: { id: 'user-1', name: 'John Smith', email: 'john@pulse.farm', role: 'manager' },
-  },
-  {
-    id: 'staff-2',
-    userId: 'user-2',
-    employeeId: 'EMP002',
-    position: 'Stock Handler',
-    department: 'Operations',
-    phone: '021 234 5678',
-    employmentType: 'full_time',
-    hourlyRate: '28.00',
-    isActive: true,
-    maxHoursPerWeek: 40,
-    preferredShifts: ['morning', 'afternoon'],
-    user: { id: 'user-2', name: 'Sarah Johnson', email: 'sarah@pulse.farm', role: 'staff' },
-  },
-  {
-    id: 'staff-3',
-    userId: 'user-3',
-    employeeId: 'EMP003',
-    position: 'Seasonal Worker',
-    department: 'Operations',
-    phone: '021 345 6789',
-    employmentType: 'seasonal',
-    hourlyRate: '24.00',
-    isActive: true,
-    maxHoursPerWeek: 50,
-    preferredShifts: ['morning', 'afternoon', 'night'],
-    user: { id: 'user-3', name: 'Mike Wilson', email: 'mike@pulse.farm', role: 'worker' },
-  },
-  {
-    id: 'staff-4',
-    userId: 'user-4',
-    employeeId: 'EMP004',
-    position: 'Relief Milker',
-    department: 'Operations',
-    phone: '021 456 7890',
-    employmentType: 'casual',
-    hourlyRate: '26.00',
-    isActive: true,
-    maxHoursPerWeek: 30,
-    preferredShifts: ['morning'],
-    user: { id: 'user-4', name: 'Emily Brown', email: 'emily@pulse.farm', role: 'casual' },
-  },
-];
+async function rosterApi<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || body.message || 'Request failed');
+  return body as T;
+}
 
 const shiftTemplates: ShiftTemplate[] = [
   { id: 'morning', name: 'Morning Shift', shiftType: 'morning', startTime: '05:00', endTime: '13:00', breakMinutes: 30, tasks: ['Morning milking', 'Calf feeding'], color: 'bg-yellow-100 border-yellow-400' },
   { id: 'afternoon', name: 'Afternoon Shift', shiftType: 'afternoon', startTime: '13:00', endTime: '21:00', breakMinutes: 30, tasks: ['Afternoon milking', 'Paddock checks'], color: 'bg-orange-100 border-orange-400' },
   { id: 'night', name: 'Night Shift', shiftType: 'night', startTime: '21:00', endTime: '05:00', breakMinutes: 30, tasks: ['Night watch', 'Calving assistance'], color: 'bg-blue-100 border-blue-400' },
   { id: 'split', name: 'Split Shift', shiftType: 'split', startTime: '05:00', endTime: '09:00', breakMinutes: 0, tasks: ['Morning milking'], color: 'bg-purple-100 border-purple-400' },
-];
-
-// Generate mock shifts for current week
-const generateMockShifts = (weekStart: Date): Shift[] => {
-  const shifts: Shift[] = [];
-  const days = eachDayOfInterval({ start: weekStart, end: addDays(weekStart, 6) });
-  
-  days.forEach((day, dayIndex) => {
-    // Morning shift - John
-    if (dayIndex < 5) {
-      shifts.push({
-        id: `shift-${format(day, 'yyyy-MM-dd')}-1`,
-        staffId: 'staff-1',
-        staffName: 'John Smith',
-        date: format(day, 'yyyy-MM-dd'),
-        startTime: '05:00',
-        endTime: '13:00',
-        shiftType: 'morning',
-        location: 'Main Dairy',
-        tasks: ['Morning milking', 'Calf feeding', 'Paddock rotation'],
-        status: isToday(day) ? 'in_progress' : dayIndex < new Date().getDay() ? 'completed' : 'confirmed',
-        breakMinutes: 30,
-      });
-    }
-    
-    // Afternoon shift - Sarah
-    if (dayIndex < 6) {
-      shifts.push({
-        id: `shift-${format(day, 'yyyy-MM-dd')}-2`,
-        staffId: 'staff-2',
-        staffName: 'Sarah Johnson',
-        date: format(day, 'yyyy-MM-dd'),
-        startTime: '13:00',
-        endTime: '21:00',
-        shiftType: 'afternoon',
-        location: 'Main Dairy',
-        tasks: ['Afternoon milking', 'Stock checks'],
-        status: dayIndex < new Date().getDay() ? 'completed' : 'scheduled',
-        breakMinutes: 30,
-      });
-    }
-    
-    // Mike - varies
-    if (dayIndex % 2 === 0) {
-      shifts.push({
-        id: `shift-${format(day, 'yyyy-MM-dd')}-3`,
-        staffId: 'staff-3',
-        staffName: 'Mike Wilson',
-        date: format(day, 'yyyy-MM-dd'),
-        startTime: '06:00',
-        endTime: '14:00',
-        shiftType: 'morning',
-        location: 'Paddock Block B',
-        tasks: ['Fencing repairs', 'Water system checks'],
-        status: dayIndex < new Date().getDay() ? 'completed' : 'scheduled',
-        breakMinutes: 30,
-      });
-    }
-  });
-  
-  return shifts;
-};
-
-const mockLeaveRequests: LeaveRequest[] = [
-  {
-    id: 'leave-1',
-    staffId: 'staff-2',
-    staffName: 'Sarah Johnson',
-    startDate: format(addDays(new Date(), 14), 'yyyy-MM-dd'),
-    endDate: format(addDays(new Date(), 18), 'yyyy-MM-dd'),
-    type: 'annual',
-    status: 'approved',
-    reason: 'Family holiday',
-    approvedBy: 'John Smith',
-  },
-  {
-    id: 'leave-2',
-    staffId: 'staff-3',
-    staffName: 'Mike Wilson',
-    startDate: format(addDays(new Date(), 7), 'yyyy-MM-dd'),
-    endDate: format(addDays(new Date(), 7), 'yyyy-MM-dd'),
-    type: 'personal',
-    status: 'pending',
-    reason: 'Medical appointment',
-  },
 ];
 
 export default function RosterSchedulingPage() {
@@ -284,12 +149,98 @@ export default function RosterSchedulingPage() {
     location: '',
     tasks: '',
     notes: '',
-    isRecurring: false,
-    recurringPattern: 'weekly',
   });
 
-  // Get shifts for current week
-  const shifts = useMemo(() => generateMockShifts(currentWeekStart), [currentWeekStart]);
+  const weekKey = format(currentWeekStart, 'yyyy-MM-dd');
+  const { data: staffList = [] } = useQuery<StaffMember[]>({
+    queryKey: ['/api/roster/staff'],
+    queryFn: () => rosterApi('/api/roster/staff'),
+  });
+  const { data: shifts = [] } = useQuery<Shift[]>({
+    queryKey: ['/api/roster/shifts', weekKey],
+    queryFn: () => rosterApi(`/api/roster/shifts?weekStart=${weekKey}`),
+  });
+  const { data: leaveRequests = [] } = useQuery<LeaveRequest[]>({
+    queryKey: ['/api/roster/leave'],
+    queryFn: () => rosterApi('/api/roster/leave'),
+  });
+
+  const refreshShifts = () => queryClient.invalidateQueries({ queryKey: ['/api/roster/shifts'] });
+  const refreshLeave = () => queryClient.invalidateQueries({ queryKey: ['/api/roster/leave'] });
+
+  const addShiftMutation = useMutation({
+    mutationFn: (shift: typeof newShift) => rosterApi<Shift>('/api/roster/shifts', {
+      method: 'POST',
+      body: JSON.stringify({
+        staffId: shift.staffId,
+        date: shift.date,
+        startTime: shift.startTime,
+        endTime: shift.endTime,
+        location: shift.location || undefined,
+        tasks: shift.tasks || undefined,
+        notes: shift.notes || undefined,
+      }),
+    }),
+    onSuccess: () => {
+      refreshShifts();
+      toast.success('Shift added');
+      setIsAddShiftOpen(false);
+      resetNewShift();
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  const copyWeekMutation = useMutation({
+    mutationFn: () => rosterApi<{ copied: number }>('/api/roster/shifts/copy-week', {
+      method: 'POST',
+      body: JSON.stringify({ weekStart: weekKey }),
+    }),
+    onSuccess: ({ copied }) => {
+      refreshShifts();
+      toast.success(copied ? `Copied ${copied} shift${copied === 1 ? '' : 's'} from last week` : 'Last week had no shifts to copy');
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  const deleteShiftMutation = useMutation({
+    mutationFn: (id: string) => rosterApi(`/api/roster/shifts/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      refreshShifts();
+      setSelectedShift(null);
+      toast.success('Shift deleted');
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  const reviewLeaveMutation = useMutation({
+    mutationFn: ({ id, decision }: { id: string; decision: 'approve' | 'reject' }) =>
+      rosterApi<LeaveRequest>(`/api/roster/leave/${id}/${decision}`, { method: 'PUT' }),
+    onSuccess: (leave) => {
+      refreshLeave();
+      toast.success(`Leave ${leave.status}`);
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  const [newLeave, setNewLeave] = useState({
+    startDate: format(new Date(), 'yyyy-MM-dd'),
+    endDate: format(new Date(), 'yyyy-MM-dd'),
+    type: 'annual' as LeaveRequest['type'],
+    reason: '',
+  });
+  const requestLeaveMutation = useMutation({
+    mutationFn: (leave: typeof newLeave) => rosterApi<LeaveRequest>('/api/roster/leave', {
+      method: 'POST',
+      body: JSON.stringify(leave),
+    }),
+    onSuccess: () => {
+      refreshLeave();
+      toast.success('Leave requested');
+      setIsLeaveRequestOpen(false);
+      setNewLeave(prev => ({ ...prev, reason: '' }));
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
   const weekDays = useMemo(() => eachDayOfInterval({ 
     start: currentWeekStart, 
     end: addDays(currentWeekStart, 6) 
@@ -305,11 +256,11 @@ export default function RosterSchedulingPage() {
       const end = parseISO(`2000-01-01T${s.endTime}`);
       return sum + differenceInHours(end, start);
     }, 0);
-    const staffOnLeave = mockLeaveRequests.filter(l => l.status === 'approved').length;
-    const pendingLeave = mockLeaveRequests.filter(l => l.status === 'pending').length;
+    const staffOnLeave = leaveRequests.filter(l => l.status === 'approved').length;
+    const pendingLeave = leaveRequests.filter(l => l.status === 'pending').length;
     
     return { totalShifts, confirmedShifts, pendingShifts, totalHours, staffOnLeave, pendingLeave };
-  }, [shifts]);
+  }, [shifts, leaveRequests]);
 
   // Get shifts for a specific staff member on a specific day
   const getShiftsForStaffDay = (staffId: string, date: Date) => {
@@ -349,10 +300,7 @@ export default function RosterSchedulingPage() {
     return <Badge className={styles[status] || 'bg-gray-100'}>{status.replace('_', ' ')}</Badge>;
   };
 
-  // Handle add shift
-  const handleAddShift = () => {
-    toast.success('Shift added successfully');
-    setIsAddShiftOpen(false);
+  const resetNewShift = () => {
     setNewShift({
       staffId: '',
       date: format(new Date(), 'yyyy-MM-dd'),
@@ -362,20 +310,19 @@ export default function RosterSchedulingPage() {
       location: '',
       tasks: '',
       notes: '',
-      isRecurring: false,
-      recurringPattern: 'weekly',
     });
   };
 
-  // Copy previous week's roster
-  const copyPreviousWeek = () => {
-    toast.success('Previous week\'s roster copied to current week');
+  const handleAddShift = () => {
+    if (!newShift.staffId) {
+      toast.error('Choose a staff member');
+      return;
+    }
+    addShiftMutation.mutate(newShift);
   };
 
-  // Publish roster
-  const publishRoster = () => {
-    toast.success('Roster published and notifications sent to staff');
-  };
+  // Copy previous week's roster
+  const copyPreviousWeek = () => copyWeekMutation.mutate();
 
   return (
     <div className="p-6 space-y-6">
@@ -510,10 +457,6 @@ export default function RosterSchedulingPage() {
                   <SelectItem value="Operations">Operations</SelectItem>
                 </SelectContent>
               </Select>
-              <Button variant="outline" onClick={publishRoster}>
-                <Bell className="h-4 w-4 mr-2" />
-                Publish Roster
-              </Button>
             </div>
           </div>
         </CardContent>
@@ -560,7 +503,7 @@ export default function RosterSchedulingPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {mockStaff
+                    {staffList
                       .filter(s => departmentFilter === 'all' || s.department === departmentFilter)
                       .map(staff => {
                         const staffShifts = shifts.filter(s => s.staffId === staff.id);
@@ -772,7 +715,7 @@ export default function RosterSchedulingPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {mockLeaveRequests.map(leave => (
+                {leaveRequests.map(leave => (
                   <div key={leave.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
                     <div className="flex items-center gap-4">
                       <Avatar>
@@ -805,10 +748,24 @@ export default function RosterSchedulingPage() {
                       </Badge>
                       {leave.status === 'pending' && (
                         <div className="flex gap-2">
-                          <Button size="sm" variant="outline" className="text-green-600">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-green-600"
+                            aria-label="Approve leave"
+                            disabled={reviewLeaveMutation.isPending}
+                            onClick={() => reviewLeaveMutation.mutate({ id: leave.id, decision: 'approve' })}
+                          >
                             <CheckCircle className="h-4 w-4" />
                           </Button>
-                          <Button size="sm" variant="outline" className="text-red-600">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-red-600"
+                            aria-label="Reject leave"
+                            disabled={reviewLeaveMutation.isPending}
+                            onClick={() => reviewLeaveMutation.mutate({ id: leave.id, decision: 'reject' })}
+                          >
                             <UserX className="h-4 w-4" />
                           </Button>
                         </div>
@@ -837,7 +794,7 @@ export default function RosterSchedulingPage() {
                   <SelectValue placeholder="Select staff member" />
                 </SelectTrigger>
                 <SelectContent>
-                  {mockStaff.map(staff => (
+                  {staffList.map(staff => (
                     <SelectItem key={staff.id} value={staff.id}>
                       {staff.user?.name} - {staff.position}
                     </SelectItem>
@@ -923,28 +880,6 @@ export default function RosterSchedulingPage() {
                 onChange={e => setNewShift(prev => ({ ...prev, notes: e.target.value }))}
               />
             </div>
-            <div className="flex items-center gap-2">
-              <Switch 
-                checked={newShift.isRecurring}
-                onCheckedChange={v => setNewShift(prev => ({ ...prev, isRecurring: v }))}
-              />
-              <Label>Recurring shift</Label>
-              {newShift.isRecurring && (
-                <Select 
-                  value={newShift.recurringPattern}
-                  onValueChange={v => setNewShift(prev => ({ ...prev, recurringPattern: v }))}
-                >
-                  <SelectTrigger className="w-32 ml-4">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="daily">Daily</SelectItem>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="fortnightly">Fortnightly</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsAddShiftOpen(false)}>Cancel</Button>
@@ -1018,17 +953,89 @@ export default function RosterSchedulingPage() {
               )}
               
               <div className="flex justify-end gap-2 pt-4">
-                <Button variant="outline" size="sm">
-                  <Edit className="h-4 w-4 mr-2" />
-                  Edit
-                </Button>
-                <Button variant="outline" size="sm" className="text-red-600">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-red-600"
+                  disabled={deleteShiftMutation.isPending}
+                  onClick={() => deleteShiftMutation.mutate(selectedShift.id)}
+                >
                   <Trash2 className="h-4 w-4 mr-2" />
                   Delete
                 </Button>
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Request Leave Dialog */}
+      <Dialog open={isLeaveRequestOpen} onOpenChange={setIsLeaveRequestOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Request Leave</DialogTitle>
+            <DialogDescription>Your farm owner or manager will approve or decline it.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="leave-start">From</Label>
+                <Input
+                  id="leave-start"
+                  type="date"
+                  value={newLeave.startDate}
+                  onChange={e => setNewLeave(prev => ({ ...prev, startDate: e.target.value }))}
+                />
+              </div>
+              <div>
+                <Label htmlFor="leave-end">To</Label>
+                <Input
+                  id="leave-end"
+                  type="date"
+                  value={newLeave.endDate}
+                  min={newLeave.startDate}
+                  onChange={e => setNewLeave(prev => ({ ...prev, endDate: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div>
+              <Label>Type</Label>
+              <Select
+                value={newLeave.type}
+                onValueChange={v => setNewLeave(prev => ({ ...prev, type: v as LeaveRequest['type'] }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="annual">Annual</SelectItem>
+                  <SelectItem value="sick">Sick</SelectItem>
+                  <SelectItem value="personal">Personal</SelectItem>
+                  <SelectItem value="unpaid">Unpaid</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="leave-reason">Reason</Label>
+              <Textarea
+                id="leave-reason"
+                placeholder="Optional"
+                value={newLeave.reason}
+                onChange={e => setNewLeave(prev => ({ ...prev, reason: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsLeaveRequestOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => requestLeaveMutation.mutate(newLeave)}
+              disabled={requestLeaveMutation.isPending}
+              className="bg-pulse-forest hover:bg-pulse-forest-dark"
+            >
+              Submit Request
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

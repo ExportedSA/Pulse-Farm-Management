@@ -8,6 +8,7 @@ import {
   type InsertRosterEntry 
 } from '@shared/schema';
 import { eq, and, desc, gte, lte, between } from 'drizzle-orm';
+import { isFarmMember } from './farms';
 
 // ===== CUSTOM ERROR CLASSES =====
 
@@ -91,20 +92,10 @@ async function verifyStaffInFarm(staffProfileId: string, farmId: string): Promis
     .where(eq(staffProfiles.id, staffProfileId))
     .limit(1);
   
-  if (!staff) return false;
-  
-  // Check if the associated user is active
-  if (staff.userId) {
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(and(eq(users.id, staff.userId), eq(users.isActive, true)))
-      .limit(1);
-    
-    return !!user;
-  }
-  
-  return true;
+  if (!staff || !staff.isActive || !staff.userId) return false;
+
+  // The staff member's user must be an active member of this farm
+  return isFarmMember(staff.userId, farmId);
 }
 
 /**

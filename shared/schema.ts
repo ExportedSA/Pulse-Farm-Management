@@ -3343,6 +3343,24 @@ export const rosterEntries = pgTable('roster_entries', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// Staff leave requests (annual, sick, ...), approved or rejected by farm owners/managers
+export const leaveRequests = pgTable('leave_requests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  staffProfileId: uuid('staff_profile_id').references(() => staffProfiles.id).notNull(),
+  startDate: date('start_date').notNull(),
+  endDate: date('end_date').notNull(),
+  type: varchar('type', { length: 20 }).notNull(), // annual | sick | personal | unpaid | other
+  status: varchar('status', { length: 20 }).default('pending').notNull(), // pending | approved | rejected
+  reason: text('reason'),
+  reviewedById: uuid('reviewed_by_id').references(() => users.id),
+  reviewedAt: timestamp('reviewed_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export type LeaveRequest = typeof leaveRequests.$inferSelect;
+
 // Timesheet Status Enum
 export const timesheetStatusEnum = pgEnum('timesheet_status', ['draft', 'pending', 'approved', 'rejected']);
 
