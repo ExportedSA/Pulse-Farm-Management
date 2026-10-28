@@ -28,7 +28,6 @@ import DashboardOverview from "@/components/dashboard/DashboardOverview";
 import ChatPage from "@/pages/chat-page";
 import CompliancePage from "@/pages/compliance-page";
 import FarmCompliancePage from "@/pages/farm-compliance-page";
-import NaitRecordsPage from "@/pages/nait-records";
 import Home from "@/pages/home";
 import AnimalsList from "@/pages/animals-list";
 import GroupsManagement from "@/pages/groups-management";
@@ -61,7 +60,6 @@ import WeatherPage from "@/pages/weather-page";
 import { NotificationCenter } from "@/components/NotificationCenter";
 import TimesheetsPage from "@/pages/timesheets-page";
 import KanbanPage from "@/pages/kanban-page";
-import EquipmentPage from "@/pages/equipment-page";
 import TaskDependenciesPage from "@/pages/task-dependencies-page";
 import ComplianceTagsPage from "@/pages/compliance-tags-page";
 import VaccinationDashboard from "@/pages/vaccination-dashboard";
@@ -71,7 +69,6 @@ import VeterinaryDashboard from "@/pages/veterinary-dashboard";
 import HealthAnalyticsDashboard from "@/pages/health-analytics-dashboard";
 import FieldModeDashboard from "@/pages/field-mode-dashboard";
 import AlertsNotificationsDashboard from "@/pages/alerts-notifications-dashboard";
-import WeightTrackingDashboard from "@/pages/weight-tracking-dashboard";
 import BatchTreatmentPage from "@/pages/batch-treatment-page";
 import LabResultsImportPage from "@/pages/lab-results-import";
 import BenchmarkingPage from "@/pages/benchmarking-page";
@@ -96,8 +93,6 @@ import HerdReportsPage from "@/pages/herd-reports-page";
 import PastureWalkPage from "@/pages/pasture-walk-page";
 import RosterSchedulingPage from "@/pages/roster-scheduling-page";
 import HealthSafetyPage from "@/pages/health-safety-page";
-import SafetyPage from "@/pages/safety-page";
-import PeoplePage from "@/pages/people-page";
 import AssetRegistryPage from "@/pages/asset-registry-page";
 import FarmFinancePage from "@/pages/farm-finance-page";
 import QRCodeManagementPage from "@/pages/qr-code-management-page";
@@ -117,11 +112,6 @@ import MultiFarmPage from "@/pages/multi-farm-page";
 import CSVImportPage from "@/pages/csv-import-page";
 import MobileScanner from "@/pages/mobile-scanner";
 // Phase overlay imports
-import RunSheet from "@/pages/RunSheet";
-import PregQuick from "@/pages/PregQuick";
-import Treat from "@/pages/Treat";
-import Medicines from "@/pages/Medicines";
-import Inventory from "@/pages/Inventory";
 import HealthReports from "@/pages/Reports";
 import OnboardingWizard from "@/pages/OnboardingWizard";
 
@@ -151,7 +141,6 @@ function Router() {
         <Route path="/app/jobs" component={JobsPage} />
         <Route path="/app/roster" component={RosterSchedulingPage} />
         <Route path="/app/timesheets" component={TimesheetsPage} />
-        <Route path="/app/equipment" component={EquipmentPage} />
         <Route path="/app/compliance" component={CompliancePage} />
         <Route path="/app/animals" component={AnimalsList} />
         <Route path="/app/kanban" component={KanbanPage} />
@@ -166,8 +155,8 @@ function Router() {
         <Route path="/app/operations/contractors" component={ContractorManagementPage} />
         <Route path="/app/operations/roster" component={RosterSchedulingPage} />
         <Route path="/app/health-safety" component={HealthSafetyPage} />
-        <Route path="/app/safety" component={SafetyPage} />
-        <Route path="/app/people" component={PeoplePage} />
+        <Route path="/app/safety" component={CompliancePage} />
+        <Route path="/app/people" component={StaffManagementPage} />
         <Route path="/app/asset-registry" component={AssetRegistryPage} />
         <Route path="/app/farm-finance" component={FarmFinancePage} />
         <Route path="/app/financial-analytics" component={FinancialAnalyticsPage} />
@@ -179,7 +168,7 @@ function Router() {
         <Route path="/app/weather" component={WeatherIntegrationPage} />
         <Route path="/app/milk-analytics" component={MilkAnalyticsPage} />
         <Route path="/app/farm-compliance" component={FarmCompliancePage} />
-        <Route path="/app/nait" component={NaitRecordsPage} />
+        <Route path="/app/nait" component={NaitCompliancePage} />
         <Route path="/app/treatments/:section?" component={Home} />
         <Route path="/app/batch-treatment" component={BatchTreatmentPage} />
         <Route path="/app/import" component={CSVImportPage} />
@@ -201,7 +190,6 @@ function Router() {
         <Route path="/app/health-predictions" component={HealthPredictionsPage} />
         <Route path="/app/field-mode" component={FieldModeDashboard} />
         <Route path="/app/smart-alerts" component={AlertsNotificationsDashboard} />
-        <Route path="/app/weight-tracking" component={WeightTrackingDashboard} />
         <Route path="/app/weight-growth" component={WeightGrowthTrackingPage} />
         <Route path="/app/smart-groups" component={SmartGroupsPage} />
         <Route path="/app/bulk-operations" component={BulkOperationsPage} />
@@ -214,7 +202,7 @@ function Router() {
         <Route path="/app/my-time" component={MyTimePage} />
         <Route path="/app/equipment" component={EquipmentListPage} />
         <Route path="/app/equipment/:id" component={EquipmentDetailPage} />
-        <Route path="/app/compliance" component={ComplianceDashboard} />
+        <Route path="/app/compliance-overview" component={ComplianceDashboard} />
         <Route path="/app/reports/timesheets" component={TimesheetReportPage} />
         <Route path="/app/reports/safety" component={SafetyReportPage} />
         <Route path="/app/reports/animals" component={AnimalReportPage} />
@@ -232,11 +220,8 @@ function Router() {
         <Route path="/app/iot" component={IoTDashboardPage} />
         <Route path="/app/multi-farm" component={MultiFarmPage} />
         {/* Phase overlay routes */}
-        <Route path="/app/repro/runsheet" component={RunSheet} />
-        <Route path="/app/repro/preg" component={PregQuick} />
-        <Route path="/app/health/treat" component={Treat} />
-        <Route path="/app/health/medicines" component={Medicines} />
-        <Route path="/app/health/inventory" component={Inventory} />
+        <Route path="/app/health/medicines" component={MedicinesInventory} />
+        <Route path="/app/health/inventory" component={MedicinesInventory} />
         <Route path="/app/health/reports" component={HealthReports} />
         <Route path="/app/setup" component={OnboardingWizard} />
         <Route component={NotFound} />

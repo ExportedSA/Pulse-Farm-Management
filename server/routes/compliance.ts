@@ -86,7 +86,6 @@ router.get("/hazards", requireAuth, async (req, res) => {
   try {
     const hazards = await db.select()
       .from(farmHazards)
-      .where(isNull(farmHazards.deletedAt))
       .orderBy(desc(farmHazards.createdAt));
     
     res.json(hazards);

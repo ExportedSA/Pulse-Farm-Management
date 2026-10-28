@@ -72,8 +72,8 @@ import animalTagsRouter from "./routes/animal-tags";
 import medCoreRouter from "./routes/med.core";
 import medWithholdRouter from "./routes/med.withhold";
 import medWithholdIdsRouter from "./routes/med.withhold.ids";
-import reproExtrasRouter from "./routes/repro.extras";
-import reproPlanRouter from "./routes/repro.plan";
+import milkRouter from "./milk-routes";
+import financialRouter from "./financial-routes";
 import syncCoreRouter from "./routes/sync.core";
 import naitCoreRouter from "./routes/nait.core";
 import { z } from "zod";
@@ -179,9 +179,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/med/withhold", requireAuth, medWithholdRouter);
   app.use("/api/med/withhold-ids", requireAuth, medWithholdIdsRouter);
 
-  // ===== PHASE OVERLAY: REPRODUCTION EXTRAS =====
-  app.use("/api/repro", requireAuth, reproExtrasRouter);
-  app.use("/api/repro/plan", requireAuth, reproPlanRouter);
 
   // ===== PHASE OVERLAY: OFFLINE SYNC =====
   app.use("/api/sync", requireAuth, syncCoreRouter);
@@ -256,10 +253,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/map", requireAuth, mapRouter);
   
   // Financial routes
-  app.use("/api/financial", requireAuth, financialAnalyticsRouter);
+  app.use("/api/financial", requireAuth, financialRouter);
   
-  // Milk Production routes (using reports router for milk data)
-  // app.use("/api/milk", requireAuth, milkRouter);
+  // Milk Production routes
+  app.use("/api/milk", requireAuth, milkRouter);
   
   // Budgeting & Forecasting routes
   app.use("/api/budgeting", requireAuth, budgetingRouter);

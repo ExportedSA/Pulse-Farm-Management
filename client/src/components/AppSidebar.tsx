@@ -40,6 +40,7 @@ const menuItems = [
     subItems: [
       { title: "All Animals", url: "/app/animals" },
       { title: "Groups", url: "/app/groups" },
+      { title: "Stock Reconciliation", url: "/app/stock-reconciliation" },
       { title: "Import CSV", url: "/app/import" },
     ],
   },
@@ -50,10 +51,11 @@ const menuItems = [
     icon: Syringe,
     subItems: [
       { title: "Treatments", url: "/app/treatments/current" },
-      { title: "Treat Animal", url: "/app/health/treat" },
+      { title: "Batch Treatment", url: "/app/batch-treatment" },
       { title: "Vaccination", url: "/app/vaccination" },
-      { title: "Medicines", url: "/app/health/medicines" },
-      { title: "Inventory", url: "/app/health/inventory" },
+      { title: "Medicines & Stock", url: "/app/medicines" },
+      { title: "Veterinary", url: "/app/veterinary" },
+      { title: "Health Analytics", url: "/app/health-analytics" },
       { title: "Health Reports", url: "/app/health/reports" },
     ],
   },
@@ -76,8 +78,6 @@ const menuItems = [
     subItems: [
       { title: "Dashboard", url: "/app/reproduction-management" },
       { title: "Events", url: "/app/reproduction" },
-      { title: "Run Sheet", url: "/app/repro/runsheet" },
-      { title: "Preg Testing", url: "/app/repro/preg" },
       { title: "Milk Production", url: "/app/milk-production" },
     ],
   },
@@ -102,6 +102,7 @@ const menuItems = [
     icon: Wrench,
     subItems: [
       { title: "Hub", url: "/app/operations" },
+      { title: "Tasks", url: "/app/tasks" },
       { title: "Jobs", url: "/app/jobs" },
       { title: "Roster", url: "/app/roster" },
       { title: "Timesheets", url: "/app/timesheets" },
@@ -126,8 +127,10 @@ const menuItems = [
     title: "Compliance",
     icon: Shield,
     subItems: [
+      { title: "Overview", url: "/app/compliance-overview" },
       { title: "NAIT", url: "/app/nait" },
       { title: "NZFAP", url: "/app/nzfap-compliance" },
+      { title: "Health & Safety", url: "/app/compliance" },
       { title: "Farm Compliance", url: "/app/farm-compliance" },
     ],
   },
@@ -139,6 +142,7 @@ const menuItems = [
     subItems: [
       { title: "Analytics", url: "/app/analytics" },
       { title: "Herd Reports", url: "/app/herd-reports" },
+      { title: "Financial", url: "/app/financial" },
       { title: "Export", url: "/app/reports" },
     ],
   },
@@ -156,10 +160,6 @@ const menuItems = [
   
   // Communication
   { title: "Chat", url: "/app/chat", icon: MessageSquare },
-  
-  // Safety & People
-  { title: "Safety", url: "/app/safety", icon: Shield },
-  { title: "People", url: "/app/people", icon: Users },
 ];
 
 export function AppSidebar({ ...props }: AppSidebarProps) {

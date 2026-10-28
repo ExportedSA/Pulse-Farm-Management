@@ -783,17 +783,16 @@ router.get('/api/reports/animal-inventory', requireAuth, async (req: Request, re
     const allAnimals = await db
       .select({
         id: animals.id,
-        visualTag: animals.visualTag,
+        visualTag: animals.visualId,
         name: animals.name,
         breed: animals.breed,
         dateOfBirth: animals.dateOfBirth,
         status: animals.status,
         sex: animals.sex,
-        species: animals.species,
       })
       .from(animals)
       .where(eq(animals.farmId, farmId))
-      .orderBy(animals.visualTag);
+      .orderBy(animals.visualId);
 
     // Group by breed
     const byBreed: Record<string, number> = {};
@@ -869,7 +868,7 @@ router.get('/api/reports/health-records', requireAuth, async (req: Request, res:
       .select({
         id: animalHealthRecords.id,
         animalId: animalHealthRecords.animalId,
-        animalTag: animals.visualTag,
+        animalTag: animals.visualId,
         animalName: animals.name,
         recordDate: animalHealthRecords.date,
         recordType: animalHealthRecords.type,

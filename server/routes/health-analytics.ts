@@ -5,7 +5,7 @@ import {
   animalTreatments, animals, healthScores, mortalityRecords, 
   vetVisits, prescriptions, labResults, products
 } from "@shared/schema";
-import { eq, and, gte, lte, sql, desc, count } from "drizzle-orm";
+import { eq, and, gte, lte, sql, desc, count, inArray } from "drizzle-orm";
 
 const router = Router();
 
@@ -26,7 +26,7 @@ router.get("/summary", async (req: Request, res: Response) => {
     const [treatmentCount] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(animalTreatments)
-      .where(gte(animalTreatments.treatmentDate, startDate.toISOString().split('T')[0]));
+      .where(gte(animalTreatments.dateTime, startDate.toISOString().split('T')[0]));
 
     // Get mortality count
     const [mortalityCount] = await db
@@ -52,12 +52,12 @@ router.get("/summary", async (req: Request, res: Response) => {
     // Calculate health score averages
     const healthScoreAvgs = await db
       .select({
-        avgLameness: sql<number>`avg(${healthScores.lamenessScore})::numeric(3,1)`,
-        avgBcs: sql<number>`avg(${healthScores.bcsScore})::numeric(3,1)`,
+        avgLameness: sql<number>`avg(${healthScores.lamenessScore}::text::numeric)::numeric(3,1)`,
+        avgBcs: sql<number>`avg(${healthScores.bodyConditionScore})::numeric(3,1)`,
         avgTemperature: sql<number>`avg(${healthScores.temperature})::numeric(4,1)`,
       })
       .from(healthScores)
-      .where(gte(healthScores.recordedAt, startDate));
+      .where(gte(healthScores.recordDate, startDate.toISOString().split('T')[0]));
 
     res.json({
       totalAnimals: animalCount?.count || 0,
@@ -91,13 +91,13 @@ router.get("/treatment-costs", async (req: Request, res: Response) => {
         id: animalTreatments.id,
         animalId: animalTreatments.animalId,
         treatmentType: animalTreatments.treatmentType,
-        treatmentDate: animalTreatments.treatmentDate,
+        treatmentDate: animalTreatments.dateTime,
         productId: animalTreatments.productId,
-        dosage: animalTreatments.dosage,
+        dosage: animalTreatments.doseAmount,
         category: animalTreatments.category,
       })
       .from(animalTreatments)
-      .where(gte(animalTreatments.treatmentDate, startDate.toISOString().split('T')[0]));
+      .where(gte(animalTreatments.dateTime, startDate.toISOString().split('T')[0]));
 
     // Get product costs
     const productsList = await db.select().from(products);
@@ -139,7 +139,8 @@ router.get("/treatment-costs", async (req: Request, res: Response) => {
       .map(([animalId, data]) => ({ animalId, ...data }));
 
     // Get animal details for top animals
-    const animalDetails = await db
+    // `IN ()` is invalid SQL, so skip the lookup when there were no treatments
+    const animalDetails = topAnimalsByCost.length === 0 ? [] : await db
       .select({ id: animals.id, cowId: animals.cowId, naitTag: animals.naitTag })
       .from(animals)
       .where(sql`${animals.id} IN (${sql.join(topAnimalsByCost.map(a => sql`${a.animalId}`), sql`, `)})`);
@@ -180,7 +181,7 @@ router.get("/disease-incidence", async (req: Request, res: Response) => {
         count: sql<number>`count(*)::int`,
       })
       .from(animalTreatments)
-      .where(gte(animalTreatments.treatmentDate, startDate.toISOString().split('T')[0]))
+      .where(gte(animalTreatments.dateTime, startDate.toISOString().split('T')[0]))
       .groupBy(animalTreatments.treatmentType)
       .orderBy(desc(sql`count(*)`));
 
@@ -193,12 +194,12 @@ router.get("/disease-incidence", async (req: Request, res: Response) => {
     const allTreatments = await db
       .select({
         treatmentType: animalTreatments.treatmentType,
-        treatmentDate: animalTreatments.treatmentDate,
+        treatmentDate: animalTreatments.dateTime,
       })
       .from(animalTreatments)
       .where(and(
-        gte(animalTreatments.treatmentDate, startDate.toISOString().split('T')[0]),
-        sql`${animalTreatments.treatmentType} IN (${sql.join(topConditions.map(c => sql`${c}`), sql`, `)})`
+        gte(animalTreatments.dateTime, startDate.toISOString().split('T')[0]),
+        inArray(animalTreatments.treatmentType, topConditions)
       ));
 
     allTreatments.forEach(t => {
@@ -248,14 +249,14 @@ router.get("/antibiotic-usage", async (req: Request, res: Response) => {
         id: animalTreatments.id,
         animalId: animalTreatments.animalId,
         treatmentType: animalTreatments.treatmentType,
-        treatmentDate: animalTreatments.treatmentDate,
+        treatmentDate: animalTreatments.dateTime,
         productId: animalTreatments.productId,
-        dosage: animalTreatments.dosage,
-        route: animalTreatments.route,
+        dosage: animalTreatments.doseAmount,
+        route: sql<string | null>`null`,
       })
       .from(animalTreatments)
       .where(and(
-        gte(animalTreatments.treatmentDate, startDate.toISOString().split('T')[0]),
+        gte(animalTreatments.dateTime, startDate.toISOString().split('T')[0]),
         eq(animalTreatments.category, 'treatment') // Focus on treatments, not vaccinations
       ));
 
@@ -337,10 +338,10 @@ router.get("/seasonal-trends", async (req: Request, res: Response) => {
     const treatments = await db
       .select({
         treatmentType: animalTreatments.treatmentType,
-        treatmentDate: animalTreatments.treatmentDate,
+        treatmentDate: animalTreatments.dateTime,
       })
       .from(animalTreatments)
-      .where(gte(animalTreatments.treatmentDate, startDate.toISOString().split('T')[0]));
+      .where(gte(animalTreatments.dateTime, startDate.toISOString().split('T')[0]));
 
     // Group by month and year
     const monthlyData: Record<string, Record<string, number>> = {};
@@ -409,7 +410,7 @@ router.get("/benchmarks", async (req: Request, res: Response) => {
     const [treatmentCount] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(animalTreatments)
-      .where(gte(animalTreatments.treatmentDate, startDate.toISOString().split('T')[0]));
+      .where(gte(animalTreatments.dateTime, startDate.toISOString().split('T')[0]));
 
     const [mortalityCount] = await db
       .select({ count: sql<number>`count(*)::int` })
@@ -433,7 +434,7 @@ router.get("/benchmarks", async (req: Request, res: Response) => {
     const lamenessScores = await db
       .select({ score: healthScores.lamenessScore })
       .from(healthScores)
-      .where(gte(healthScores.recordedAt, startDate));
+      .where(gte(healthScores.recordDate, startDate.toISOString().split('T')[0]));
 
     const lameAnimals = lamenessScores.filter(s => s.score && parseInt(s.score) >= 2).length;
     const lamenessPrevalence = lamenessScores.length > 0 ? (lameAnimals / lamenessScores.length) * 100 : 0;
@@ -443,7 +444,7 @@ router.get("/benchmarks", async (req: Request, res: Response) => {
       .select({ count: sql<number>`count(distinct ${animalTreatments.animalId})::int` })
       .from(animalTreatments)
       .where(and(
-        gte(animalTreatments.treatmentDate, startDate.toISOString().split('T')[0]),
+        gte(animalTreatments.dateTime, startDate.toISOString().split('T')[0]),
         sql`lower(${animalTreatments.treatmentType}) LIKE '%mastitis%'`
       ));
 

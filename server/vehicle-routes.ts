@@ -2,6 +2,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { storage } from './storage';
 import { VehicleAlertService } from './vehicle-alerts';
+import { db } from './db';
+import { vehicles, vehicleInspections } from '@shared/schema';
+import { eq, desc, sql } from 'drizzle-orm';
 import { insertVehicleTypeSchema, insertVehicleSchema, insertVehicleInspectionTemplateSchema, 
          insertVehicleInspectionSchema, insertVehicleInspectionResultSchema, 
          insertVehicleMaintenanceRecordSchema } from '@shared/schema';
@@ -267,6 +270,46 @@ router.post('/:id/inspections', async (req, res) => {
   }
 });
 
+// Get upcoming inspections
+router.get('/inspections/upcoming', async (req, res) => {
+  try {
+    const { days } = req.query;
+    const upcomingDays = days ? parseInt(days as string) : 7;
+    
+    const inspections = await storage.getUpcomingInspections(upcomingDays);
+    res.json(inspections);
+  } catch (error) {
+    console.error('Error fetching upcoming inspections:', error);
+    res.status(500).json({ error: 'Failed to fetch upcoming inspections' });
+  }
+});
+
+// Get most recent inspections across all vehicles (activity feeds)
+router.get('/inspections/recent', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt((req.query.limit as string) || '10') || 10, 50);
+    const inspections = await db
+      .select({
+        id: vehicleInspections.id,
+        vehicleId: vehicleInspections.vehicleId,
+        vehicleName: sql<string>`${vehicles.make} || ' ' || ${vehicles.model} || ' (' || ${vehicles.registration} || ')'`,
+        inspectionDate: vehicleInspections.inspectionDate,
+        overallStatus: vehicleInspections.overallStatus,
+        defectsFound: vehicleInspections.defectsFound,
+        criticalDefects: vehicleInspections.criticalDefects,
+        createdAt: vehicleInspections.createdAt,
+      })
+      .from(vehicleInspections)
+      .innerJoin(vehicles, eq(vehicleInspections.vehicleId, vehicles.id))
+      .orderBy(desc(vehicleInspections.inspectionDate))
+      .limit(limit);
+    res.json(inspections);
+  } catch (error) {
+    console.error('Error fetching recent inspections:', error);
+    res.status(500).json({ error: 'Failed to fetch recent inspections' });
+  }
+});
+
 // Get inspection details
 router.get('/inspections/:inspectionId', async (req, res) => {
   try {
@@ -379,20 +422,6 @@ router.get('/stats/overview', async (req, res) => {
   } catch (error) {
     console.error('Error fetching vehicle stats:', error);
     res.status(500).json({ error: 'Failed to fetch vehicle stats' });
-  }
-});
-
-// Get upcoming inspections
-router.get('/inspections/upcoming', async (req, res) => {
-  try {
-    const { days } = req.query;
-    const upcomingDays = days ? parseInt(days as string) : 7;
-    
-    const inspections = await storage.getUpcomingInspections(upcomingDays);
-    res.json(inspections);
-  } catch (error) {
-    console.error('Error fetching upcoming inspections:', error);
-    res.status(500).json({ error: 'Failed to fetch upcoming inspections' });
   }
 });
 
