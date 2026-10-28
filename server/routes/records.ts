@@ -6,6 +6,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { FARM_RECORD_TYPES } from '@shared/schema';
+import { isAreaGeometry } from '@shared/geo';
 import { getFarmId, getUserId, requireFarm } from '../middleware/auth';
 import { uploadAttachments } from '../middleware/upload';
 import { saveAttachments, toApiAttachment } from '../domain/attachments';
@@ -15,6 +16,7 @@ import {
   updateRecord,
   deleteRecord,
   listRecords,
+  listMappedRecords,
   toApiRecords,
   RecordValidationError,
 } from '../domain/records';
@@ -39,6 +41,7 @@ const recordSchema = z.object({
   pastureIds: z.array(z.string().uuid()).max(100).optional(),
   latitude: coordinate,
   longitude: coordinate,
+  area: z.any().nullish().refine(v => v == null || isAreaGeometry(v), 'Draw the area with at least 3 points'),
   details: z.record(z.any()).optional(),
   tags: z.array(z.string().trim().min(1).max(60)).max(20).optional(),
 });
@@ -124,6 +127,67 @@ router.post('/', withUploads, async (req, res) => {
     res.status(created ? 201 : 200).json(apiRecord);
   } catch (error) {
     handleError(res, error, 'Failed to save record');
+  }
+});
+
+const daysMs = 24 * 60 * 60 * 1000;
+const num = (v: unknown) => (v === '' || v == null || Number.isNaN(Number(v)) ? undefined : Number(v));
+
+/**
+ * One-line summary shown on the map, e.g. "Tordon 2.5 L/ha" or "45 bales"
+ */
+function mapLabel(type: string, d: Record<string, any>): string {
+  const rate = num(d.rate) != null ? `${num(d.rate)} ${d.rateUnit ?? (type === 'fertiliser' ? 'kg/ha' : 'L/ha')}` : '';
+  switch (type) {
+    case 'spray':
+    case 'fertiliser':
+      return [d.product, rate].filter(Boolean).join(' ');
+    case 'baleage':
+      return [num(d.bales) != null ? `${num(d.bales)} bales` : '', d.contractor].filter(Boolean).join(' · ');
+    case 'effluent':
+      return num(d.depthMm) != null ? `${num(d.depthMm)} mm` : '';
+    default:
+      return '';
+  }
+}
+
+// GET /api/records/map?type=spray,fertiliser,baleage&from=&to= - drawn areas as GeoJSON
+router.get('/map', async (req, res) => {
+  try {
+    const query = z.object({
+      from: z.coerce.date().optional(),
+      to: z.coerce.date().optional(),
+    }).parse(req.query);
+    const records = await listMappedRecords(getFarmId(req)!, { ...query, types: csv(req.query.type) });
+    const now = Date.now();
+    res.json({
+      type: 'FeatureCollection',
+      features: records.map(r => {
+        const d = r.details ?? {};
+        const withholdingDays = r.type === 'spray' ? num(d.withholdingDays) : undefined;
+        const withholdingUntil = withholdingDays != null ? new Date(r.occurredAt.getTime() + withholdingDays * daysMs) : undefined;
+        return {
+          type: 'Feature',
+          id: r.id,
+          geometry: r.area,
+          properties: {
+            id: r.id,
+            type: r.type,
+            title: r.title,
+            occurredAt: r.occurredAt.toISOString(),
+            areaHa: r.areaHa != null ? Number(r.areaHa) : null,
+            label: mapLabel(r.type, d),
+            product: d.product ?? null,
+            rate: num(d.rate) ?? null,
+            rateUnit: d.rateUnit ?? null,
+            withholdingUntil: withholdingUntil?.toISOString() ?? null,
+            withholdingActive: withholdingUntil ? withholdingUntil.getTime() > now : false,
+          },
+        };
+      }),
+    });
+  } catch (error) {
+    handleError(res, error, 'Failed to fetch map records');
   }
 });
 

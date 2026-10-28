@@ -3,6 +3,7 @@ import { farmRecords, pastures, users, type FarmRecord, type FarmRecordType } fr
 import { and, desc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { setTags, tagsFor, entityIdsWithTags } from './tags';
 import { attachmentsFor, toApiAttachment } from './attachments';
+import { areaHectares, type AreaGeometry } from '@shared/geo';
 
 export class RecordValidationError extends Error {}
 
@@ -14,6 +15,7 @@ export interface RecordInput {
   pastureIds?: string[];
   latitude?: number | null;
   longitude?: number | null;
+  area?: AreaGeometry | null;
   details?: Record<string, any>;
   tags?: string[];
 }
@@ -64,6 +66,8 @@ export async function createRecord(
       pastureIds,
       latitude: input.latitude?.toString() ?? null,
       longitude: input.longitude?.toString() ?? null,
+      area: input.area ?? null,
+      areaHa: input.area ? areaHectares(input.area).toFixed(2) : null,
       details: input.details ?? {},
       recordedBy: userId,
       clientId: clientId ?? null,
@@ -96,8 +100,12 @@ export async function updateRecord(farmId: string, id: string, input: Partial<Re
   const existing = await getRecord(farmId, id);
   if (!existing) return undefined;
 
-  const { tags, pastureIds, latitude, longitude, ...rest } = input;
+  const { tags, pastureIds, latitude, longitude, area, ...rest } = input;
   const updates: Partial<typeof farmRecords.$inferInsert> = { ...rest, updatedAt: new Date() };
+  if (area !== undefined) {
+    updates.area = area;
+    updates.areaHa = area ? areaHectares(area).toFixed(2) : null;
+  }
   if (pastureIds !== undefined) updates.pastureIds = await checkPastures(farmId, pastureIds);
   if (latitude !== undefined) updates.latitude = latitude?.toString() ?? null;
   if (longitude !== undefined) updates.longitude = longitude?.toString() ?? null;
@@ -186,6 +194,8 @@ export async function toApiRecords(records: FarmRecord[]) {
     paddocks: r.pastureIds.map(id => ({ id, name: paddockName.get(id) ?? 'Unknown paddock' })),
     latitude: r.latitude != null ? Number(r.latitude) : null,
     longitude: r.longitude != null ? Number(r.longitude) : null,
+    area: r.area ?? null,
+    areaHa: r.areaHa != null ? Number(r.areaHa) : null,
     details: r.details,
     tags: (tagMap.get(r.id) ?? []).map(t => ({ id: t.id, name: t.name, slug: t.slug, color: t.color })),
     attachments: (attachmentMap.get(r.id) ?? []).map(toApiAttachment),
@@ -194,4 +204,15 @@ export async function toApiRecords(records: FarmRecord[]) {
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
   }));
+}
+
+/**
+ * Records with a drawn area, for map layers (newest first)
+ */
+export async function listMappedRecords(farmId: string, filters: { types?: string[]; from?: Date; to?: Date }) {
+  const conditions = [eq(farmRecords.farmId, farmId), isNull(farmRecords.deletedAt), sql`${farmRecords.area} IS NOT NULL`];
+  if (filters.types?.length) conditions.push(inArray(farmRecords.type, filters.types));
+  if (filters.from) conditions.push(gte(farmRecords.occurredAt, filters.from));
+  if (filters.to) conditions.push(lte(farmRecords.occurredAt, filters.to));
+  return db.select().from(farmRecords).where(and(...conditions)).orderBy(desc(farmRecords.occurredAt)).limit(500);
 }

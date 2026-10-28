@@ -32,6 +32,7 @@ const menuItems = [
   // Primary navigation - always visible
   { title: "Overview", url: "/app", icon: Home },
   { title: "Dashboard", url: "/app/dashboard", icon: BarChart3 },
+  { title: "Records", url: "/app/records", icon: ClipboardList },
   
   // Animals - core functionality
   {

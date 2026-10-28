@@ -1306,7 +1306,7 @@ export type InAppNotification = typeof notifications.$inferSelect;
 // What a farm record is about; drives the capture form and compliance reports
 export const FARM_RECORD_TYPES = [
   'fertiliser', 'spray', 'feed_in', 'baleage', 'effluent',
-  'fencing', 'job_done', 'maintenance', 'medical', 'health_safety', 'note',
+  'fencing', 'job_done', 'maintenance', 'medical', 'health_safety', 'note', 'document',
 ] as const;
 export type FarmRecordType = typeof FARM_RECORD_TYPES[number];
 
@@ -1322,6 +1322,9 @@ export const farmRecords = pgTable('farm_records', {
   pastureIds: jsonb('pasture_ids').$type<string[]>().default(sql`'[]'::jsonb`).notNull(),
   latitude: numeric('latitude', { precision: 10, scale: 7 }),
   longitude: numeric('longitude', { precision: 10, scale: 7 }),
+  // Area worked, drawn on the map: a GeoJSON Polygon or MultiPolygon ([lng, lat] order)
+  area: jsonb('area').$type<{ type: 'Polygon' | 'MultiPolygon'; coordinates: any }>(),
+  areaHa: numeric('area_ha', { precision: 10, scale: 2 }),
   details: jsonb('details').$type<Record<string, any>>().default(sql`'{}'::jsonb`).notNull(),
   recordedBy: uuid('recorded_by').references(() => users.id).notNull(),
   // Set by the device that captured it, so a record queued offline is only saved once

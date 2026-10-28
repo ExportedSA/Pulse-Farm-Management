@@ -7,7 +7,9 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
-import { GlobalSearch } from "@/components/GlobalSearch";
+import GlobalSearch, { OPEN_SEARCH_EVENT } from "@/components/global/Search";
+import { RecordFab } from "@/components/records/RecordFab";
+import RecordsPage from "@/pages/records-page";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { PWAProvider, usePWA } from "@/lib/pwa-context";
 import { FarmProvider } from "@/lib/farm-context";
@@ -15,7 +17,7 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { ChatProvider } from "@/contexts/ChatContext";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 import { FarmSwitcher } from "@/components/FarmSwitcher";
-import { Home as HomeIcon, LogOut, Wifi, WifiOff, Bell, MapPin } from "lucide-react";
+import { Home as HomeIcon, LogOut, Wifi, WifiOff, Bell, MapPin, Search } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -198,6 +200,7 @@ function Router() {
         <Route path="/app/animals/:id" component={AnimalDetailPage} />
         <Route path="/app/herd-reports" component={HerdReportsPage} />
         <Route path="/app/tasks" component={TaskListPage} />
+        <Route path="/app/records" component={RecordsPage} />
         <Route path="/app/equipment" component={EquipmentListPage} />
         <Route path="/app/equipment/:id" component={EquipmentDetailPage} />
         <Route path="/app/compliance-overview" component={ComplianceDashboard} />
@@ -362,6 +365,16 @@ function AppHeader() {
         <FarmSwitcher />
       </div>
       <div className="flex items-center gap-3">
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Search the farm"
+          title="Search (Ctrl K)"
+          onClick={() => window.dispatchEvent(new Event(OPEN_SEARCH_EVENT))}
+          data-testid="button-search"
+        >
+          <Search className="h-5 w-5" strokeWidth={1.5} />
+        </Button>
         <NotificationCenter />
         <AlertsNotification />
         <div className="flex items-center gap-1.5">
@@ -456,8 +469,10 @@ function AppShell() {
         </div>
       </SidebarProvider>
       <GlobalSearch />
+      <RecordFab />
       <KeyboardShortcuts />
-      <Toaster position="bottom-right" />
+      {/* Sit above the floating Record button */}
+      <Toaster position="bottom-right" offset={96} />
     </>
   );
 }
