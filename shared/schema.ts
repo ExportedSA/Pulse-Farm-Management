@@ -1066,12 +1066,13 @@ export const pastures = pgTable('pastures', {
 // Farm Hazards (Interactive Mapping)
 export const farmHazards = pgTable('farm_hazards', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id),
   type: varchar('type', { length: 50 }).notNull(), // 'chemical', 'machinery', 'terrain', 'water', 'electrical', 'biosecurity'
   severity: varchar('severity', { length: 20 }).notNull(), // 'low', 'medium', 'high', 'critical'
   title: varchar('title', { length: 255 }).notNull(),
   description: text('description'),
-  latitude: numeric('latitude', { precision: 10, scale: 8 }).notNull(),
-  longitude: numeric('longitude', { precision: 11, scale: 8 }).notNull(),
+  latitude: numeric('latitude', { precision: 10, scale: 8 }), // optional: hazards are often logged without GPS
+  longitude: numeric('longitude', { precision: 11, scale: 8 }),
   location: varchar('location', { length: 255 }), // Human readable location description
   status: varchar('status', { length: 20 }).default('active').notNull(), // 'active', 'resolved', 'monitoring'
   riskLevel: integer('risk_level').default(1), // 1-5 risk assessment score
@@ -1090,6 +1091,24 @@ export const farmHazards = pgTable('farm_hazards', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
+
+// Health & safety incidents (injuries, near misses, property damage, ...)
+export const safetyIncidents = pgTable('safety_incidents', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  type: varchar('type', { length: 50 }).notNull(), // injury | near_miss | property_damage | environmental | other
+  description: text('description').notNull(),
+  severity: varchar('severity', { length: 20 }).notNull(), // minor | moderate | major | critical
+  status: varchar('status', { length: 20 }).default('open').notNull(), // open | investigating | resolved | closed
+  occurredAt: timestamp('occurred_at').notNull(),
+  location: varchar('location', { length: 255 }),
+  reportedBy: uuid('reported_by').references(() => users.id).notNull(),
+  resolvedAt: timestamp('resolved_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export type SafetyIncident = typeof safetyIncidents.$inferSelect;
 
 // Animal Treatments (Core RVM records)
 export const animalTreatments = pgTable('animal_treatments', {
@@ -1768,8 +1787,8 @@ export const taskPins = pgTable('task_pins', {
   id: uuid('id').primaryKey().defaultRandom(),
   title: varchar('title', { length: 255 }).notNull(),
   description: text('description'),
-  latitude: numeric('latitude', { precision: 10, scale: 8 }).notNull(),
-  longitude: numeric('longitude', { precision: 11, scale: 8 }).notNull(),
+  latitude: numeric('latitude', { precision: 10, scale: 8 }), // optional: hazards are often logged without GPS
+  longitude: numeric('longitude', { precision: 11, scale: 8 }),
   status: taskPinStatusEnum('status').default('pending').notNull(),
   priority: taskPinPriorityEnum('priority').default('medium').notNull(),
   category: varchar('category', { length: 100 }), // 'fence_repair', 'water_issue', 'animal_check', etc.

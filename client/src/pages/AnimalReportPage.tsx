@@ -96,7 +96,7 @@ export default function AnimalReportPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await pulseGet<AnimalInventory>('/api/reports/animal-inventory');
+      const data = await pulseGet<AnimalInventory>('/reports/animal-inventory');
       setInventory(data);
     } catch (err: any) {
       console.error('Failed to load animal inventory:', err);

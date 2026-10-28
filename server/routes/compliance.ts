@@ -1,93 +1,44 @@
 import { Router } from "express";
+import { z } from "zod";
 import { db } from "../db";
-import { farmHazards, users } from "@shared/schema";
-import { eq, and, isNull, desc } from "drizzle-orm";
-import { requireAuth, getUserId } from "../middleware/auth";
+import { farmHazards, safetyIncidents } from "@shared/schema";
+import { eq, and, desc } from "drizzle-orm";
+import { requireAuth, requireFarm, getUserId, getFarmId } from "../middleware/auth";
+import { getFarmRole } from "../domain/farms";
 import { triggerComplianceChecks, getComplianceStatus } from "../scheduler";
 import logger from "../config/logger";
 
 const router = Router();
+router.use(requireAuth, requireFarm);
 
-// Mock data for incidents and inductions (would be in database in production)
-let incidents = [
-  {
-    id: '1',
-    type: 'injury',
-    description: 'Worker slipped in milking shed due to wet floor',
-    severity: 'minor' as const,
-    status: 'open' as const,
-    occurredAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    reportedBy: 'demo-user',
-    location: 'Main Milking Shed',
-    createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
-  },
-  {
-    id: '2',
-    type: 'near miss',
-    description: 'Forklift nearly collided with pedestrian in yard',
-    severity: 'major' as const,
-    status: 'investigating' as const,
-    occurredAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-    reportedBy: 'demo-user',
-    location: 'Main Yard',
-    createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString()
+// IDs are uuids; anything else can't exist (and would be a database error)
+router.param("id", (_req, res, next, id) => {
+  if (!z.string().uuid().safeParse(id).success) {
+    return res.status(404).json({ error: "Not found" });
   }
-];
+  next();
+});
 
-let inductionModules = [
-  {
-    id: '1',
-    title: 'Farm Safety Induction',
-    description: 'Basic safety procedures and emergency protocols',
-    type: 'safety' as const,
-    isMandatory: true,
-    estimatedDuration: 30,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  },
-  {
-    id: '2',
-    title: 'Milking Equipment Operation',
-    description: 'Safe operation of milking machinery and equipment',
-    type: 'equipment' as const,
-    isMandatory: true,
-    estimatedDuration: 45,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  },
-  {
-    id: '3',
-    title: 'Biosecurity Protocols',
-    description: 'Farm biosecurity measures and disease prevention',
-    type: 'biosecurity' as const,
-    isMandatory: false,
-    estimatedDuration: 20,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+function validationError(res: any, error: unknown) {
+  if (error instanceof z.ZodError) {
+    res.status(400).json({ error: "Validation failed", details: error.errors });
+    return true;
   }
-];
-
-let inductionCompletions = [
-  {
-    id: '1',
-    moduleId: '1',
-    userId: 'demo-user',
-    completedAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-    score: 95
-  }
-];
+  return false;
+}
 
 // ============================================
 // HAZARDS
 // ============================================
 
-// Get all hazards
-router.get("/hazards", requireAuth, async (req, res) => {
+// Get the farm's hazards
+router.get("/hazards", async (req, res) => {
   try {
     const hazards = await db.select()
       .from(farmHazards)
+      .where(eq(farmHazards.farmId, getFarmId(req)!))
       .orderBy(desc(farmHazards.createdAt));
-    
+
     res.json(hazards);
   } catch (error) {
     console.error("Failed to fetch hazards:", error);
@@ -96,53 +47,59 @@ router.get("/hazards", requireAuth, async (req, res) => {
 });
 
 // Create new hazard
-router.post("/hazards", requireAuth, async (req, res) => {
+router.post("/hazards", async (req, res) => {
   try {
-    const userId = getUserId(req)!;
-    const { title, description, type, riskLevel, location, severity } = req.body;
-    
+    const data = z.object({
+      title: z.string().min(1).max(255),
+      description: z.string().optional(),
+      type: z.string().min(1).max(50),
+      riskLevel: z.coerce.number().int().min(1).max(5).default(3),
+      severity: z.enum(["low", "medium", "high", "critical"]).optional(),
+      location: z.string().max(255).optional(),
+      latitude: z.coerce.number().optional(),
+      longitude: z.coerce.number().optional(),
+    }).parse(req.body);
+
     const [hazard] = await db.insert(farmHazards).values({
-      title,
-      description,
-      type,
-      severity: severity || (riskLevel <= 2 ? 'low' : riskLevel <= 3 ? 'medium' : 'high'),
-      riskLevel: riskLevel || 3,
-      location,
-      latitude: -37.7889, // Default coordinates (should be provided by frontend)
-      longitude: 175.3098,
+      farmId: getFarmId(req)!,
+      title: data.title,
+      description: data.description,
+      type: data.type,
+      severity: data.severity ?? (data.riskLevel <= 2 ? 'low' : data.riskLevel <= 3 ? 'medium' : 'high'),
+      riskLevel: data.riskLevel,
+      location: data.location,
+      latitude: data.latitude?.toString(),
+      longitude: data.longitude?.toString(),
       status: 'active',
-      mitigationRequired: riskLevel > 2,
-      reportedBy: userId,
-      createdAt: new Date(),
+      mitigationRequired: data.riskLevel > 2,
+      reportedBy: getUserId(req)!,
     }).returning();
-    
+
     res.status(201).json(hazard);
   } catch (error) {
+    if (validationError(res, error)) return;
     console.error("Failed to create hazard:", error);
     res.status(500).json({ error: "Failed to create hazard" });
   }
 });
 
 // Resolve hazard
-router.post("/hazards/:id/resolve", requireAuth, async (req, res) => {
+router.post("/hazards/:id/resolve", async (req, res) => {
   try {
-    const { id } = req.params;
-    const userId = getUserId(req)!;
-    
     const [resolvedHazard] = await db.update(farmHazards)
       .set({
         status: 'resolved',
-        resolvedBy: userId,
+        resolvedBy: getUserId(req)!,
         resolvedAt: new Date(),
         updatedAt: new Date(),
       })
-      .where(eq(farmHazards.id, id))
+      .where(and(eq(farmHazards.id, req.params.id), eq(farmHazards.farmId, getFarmId(req)!)))
       .returning();
-    
+
     if (!resolvedHazard) {
       return res.status(404).json({ error: "Hazard not found" });
     }
-    
+
     res.json(resolvedHazard);
   } catch (error) {
     console.error("Failed to resolve hazard:", error);
@@ -154,10 +111,15 @@ router.post("/hazards/:id/resolve", requireAuth, async (req, res) => {
 // INCIDENTS
 // ============================================
 
-// Get all incidents
-router.get("/incidents", requireAuth, async (req, res) => {
+const INCIDENT_STATUSES = ["open", "investigating", "resolved", "closed"] as const;
+
+// Get the farm's incidents, newest first
+router.get("/incidents", async (req, res) => {
   try {
-    // In production, this would query the database
+    const incidents = await db.select()
+      .from(safetyIncidents)
+      .where(eq(safetyIncidents.farmId, getFarmId(req)!))
+      .orderBy(desc(safetyIncidents.occurredAt));
     res.json(incidents);
   } catch (error) {
     console.error("Failed to fetch incidents:", error);
@@ -165,111 +127,48 @@ router.get("/incidents", requireAuth, async (req, res) => {
   }
 });
 
-// Create new incident
-router.post("/incidents", requireAuth, async (req, res) => {
+// Report an incident
+router.post("/incidents", async (req, res) => {
   try {
-    const userId = getUserId(req)!;
-    const { type, description, occurredAt, severity, location } = req.body;
-    
-    const newIncident = {
-      id: String(incidents.length + 1),
-      type,
-      description,
-      severity,
-      status: 'open' as const,
-      occurredAt: new Date(occurredAt).toISOString(),
-      reportedBy: userId,
-      location,
-      createdAt: new Date().toISOString(),
-    };
-    
-    incidents.unshift(newIncident);
-    res.status(201).json(newIncident);
+    const data = z.object({
+      type: z.string().min(1).max(50),
+      description: z.string().min(1),
+      severity: z.enum(["minor", "moderate", "major", "critical"]),
+      occurredAt: z.coerce.date().refine(d => d <= new Date(), "Can't be in the future"),
+      location: z.string().max(255).optional(),
+    }).parse(req.body);
+
+    const [incident] = await db.insert(safetyIncidents).values({
+      ...data,
+      farmId: getFarmId(req)!,
+      reportedBy: getUserId(req)!,
+    }).returning();
+    res.status(201).json(incident);
   } catch (error) {
+    if (validationError(res, error)) return;
     console.error("Failed to create incident:", error);
     res.status(500).json({ error: "Failed to create incident" });
   }
 });
 
 // Update incident status
-router.patch("/incidents/:id/status", requireAuth, async (req, res) => {
+router.patch("/incidents/:id/status", async (req, res) => {
   try {
-    const { id } = req.params;
-    const { status } = req.body;
-    
-    const incident = incidents.find(i => i.id === id);
+    const { status } = z.object({ status: z.enum(INCIDENT_STATUSES) }).parse(req.body);
+    const resolved = status === 'resolved' || status === 'closed';
+    const [incident] = await db.update(safetyIncidents)
+      .set({ status, resolvedAt: resolved ? new Date() : null, updatedAt: new Date() })
+      .where(and(eq(safetyIncidents.id, req.params.id), eq(safetyIncidents.farmId, getFarmId(req)!)))
+      .returning();
+
     if (!incident) {
       return res.status(404).json({ error: "Incident not found" });
     }
-    
-    incident.status = status;
-    if (status === 'resolved' || status === 'closed') {
-      incident.resolvedAt = new Date().toISOString();
-    }
-    
     res.json(incident);
   } catch (error) {
+    if (validationError(res, error)) return;
     console.error("Failed to update incident:", error);
     res.status(500).json({ error: "Failed to update incident" });
-  }
-});
-
-// ============================================
-// INDUCTIONS
-// ============================================
-
-// Get induction modules
-router.get("/inductions", requireAuth, async (req, res) => {
-  try {
-    // In production, this would query the database
-    res.json(inductionModules);
-  } catch (error) {
-    console.error("Failed to fetch inductions:", error);
-    res.status(500).json({ error: "Failed to fetch inductions" });
-  }
-});
-
-// Get induction completions for a user
-router.get("/inductions/completions", requireAuth, async (req, res) => {
-  try {
-    const { userId } = req.query;
-    const targetUserId = userId || getUserId(req)!;
-    
-    // In production, this would query the database
-    const userCompletions = inductionCompletions.filter(c => c.userId === targetUserId);
-    res.json(userCompletions);
-  } catch (error) {
-    console.error("Failed to fetch induction completions:", error);
-    res.status(500).json({ error: "Failed to fetch induction completions" });
-  }
-});
-
-// ============================================
-// CHECK-IN
-// ============================================
-
-// Create check-in (stub endpoint)
-router.post("/checkins", requireAuth, async (req, res) => {
-  try {
-    const userId = getUserId(req)!;
-    const checkInData = {
-      ...req.body,
-      id: String(Date.now()),
-      checkInTime: new Date().toISOString(),
-      checkedInBy: userId,
-    };
-    
-    // In production, this would save to database
-    console.log("Check-in created:", checkInData);
-    
-    res.status(201).json({
-      success: true,
-      message: "Check-in successful",
-      checkIn: checkInData
-    });
-  } catch (error) {
-    console.error("Failed to create check-in:", error);
-    res.status(500).json({ error: "Failed to create check-in" });
   }
 });
 
@@ -279,44 +178,40 @@ router.post("/checkins", requireAuth, async (req, res) => {
  * GET /api/compliance/status
  * Get current compliance status summary
  */
-router.get("/status", requireAuth, async (req, res) => {
+router.get("/status", async (req, res) => {
   try {
-    const farmId = (req.user as any).farmId;
-    const status = await getComplianceStatus(farmId);
+    const status = await getComplianceStatus(getFarmId(req)!);
     res.json(status);
   } catch (error) {
-    logger.error({ error }, "Failed to get compliance status");
+    logger.error({ err: error }, "Failed to get compliance status");
     res.status(500).json({ error: "Failed to get compliance status" });
   }
 });
 
 /**
  * POST /api/compliance/run-checks
- * Manually trigger compliance checks (admin only)
+ * Manually trigger compliance checks (farm owners and managers)
  */
-router.post("/run-checks", requireAuth, async (req, res) => {
+router.post("/run-checks", async (req, res) => {
   try {
-    const farmId = (req.user as any).farmId;
-    const userId = (req.user as any).id;
-    const userRole = (req.user as any).role;
-
-    // Only allow managers/admins to trigger checks
-    const allowedRoles = ['owner', 'manager', 'admin'];
-    if (!userRole || !allowedRoles.includes(userRole.toLowerCase())) {
+    const farmId = getFarmId(req)!;
+    const userId = getUserId(req)!;
+    const role = await getFarmRole(userId, farmId);
+    if (role !== 'owner' && role !== 'manager') {
       return res.status(403).json({ error: "You do not have permission to run compliance checks" });
     }
 
     logger.info({ userId, farmId }, "Manual compliance check triggered via API");
-    
+
     const result = await triggerComplianceChecks(farmId);
-    
+
     if (result.success) {
       res.json(result);
     } else {
       res.status(500).json(result);
     }
   } catch (error) {
-    logger.error({ error }, "Failed to run compliance checks");
+    logger.error({ err: error }, "Failed to run compliance checks");
     res.status(500).json({ error: "Failed to run compliance checks" });
   }
 });

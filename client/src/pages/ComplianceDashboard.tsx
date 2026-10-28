@@ -96,9 +96,9 @@ export default function ComplianceDashboard() {
 
     try {
       const [safety, compliance, animals] = await Promise.all([
-        pulseGet<SafetyReport>('/api/reports/safety').catch(() => null),
-        pulseGet<ComplianceStatus>('/api/compliance/status').catch(() => null),
-        pulseGet<AnimalInventory>('/api/reports/animal-inventory').catch(() => null),
+        pulseGet<SafetyReport>('/reports/safety').catch(() => null),
+        pulseGet<ComplianceStatus>('/compliance/status').catch(() => null),
+        pulseGet<AnimalInventory>('/reports/animal-inventory').catch(() => null),
       ]);
 
       setSafetyReport(safety);

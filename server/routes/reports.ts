@@ -1024,7 +1024,7 @@ router.get('/api/reports/safety', requireAuth, async (req: Request, res: Respons
       return res.status(403).json({ error: 'You do not have permission to access reports' });
     }
 
-    // Get hazard counts (farmHazards uses createdAt, not identifiedAt, and no farmId)
+    // Get the farm's hazard counts (farmHazards uses createdAt, not identifiedAt)
     const allHazards = await db
       .select({
         id: farmHazards.id,
@@ -1036,6 +1036,7 @@ router.get('/api/reports/safety', requireAuth, async (req: Request, res: Respons
         location: farmHazards.location,
       })
       .from(farmHazards)
+      .where(eq(farmHazards.farmId, farmId))
       .orderBy(desc(farmHazards.createdAt));
 
     const openHazards = allHazards.filter(h => 

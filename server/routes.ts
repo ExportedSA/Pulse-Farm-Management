@@ -59,7 +59,6 @@ import lineageRouter from "./routes/lineage";
 import herdReportsRouter from "./routes/herd-reports";
 import pastureWalksRouter from "./routes/pasture-walks";
 // import rosterRouter from "./routes/roster"; // Duplicate - already imported on line 25
-import healthSafetyRouter from "./routes/health-safety";
 import financialAnalyticsRouter from "./routes/financial-analytics";
 import benchmarkingRouter from "./routes/benchmarking";
 import healthRouter from "./routes/health";
@@ -280,7 +279,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/roster", requireAuth, rosterRouter);
   
   // Health & Safety routes
-  app.use("/api/health-safety", requireAuth, healthSafetyRouter);
   
   // Recurring Tasks routes
   app.use("/api/recurring-tasks", requireAuth, recurringTasksRouter);

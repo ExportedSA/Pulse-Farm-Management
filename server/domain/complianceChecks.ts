@@ -8,6 +8,7 @@ import {
   users,
   tasks,
   farmHazards,
+  farmMembers,
 } from '@shared/schema';
 import { eq, and, lt, gte, isNull, sql, desc, inArray } from 'drizzle-orm';
 import { createTask } from './tasks';
@@ -44,17 +45,26 @@ interface ComplianceRunResult {
  * Get manager user IDs for a farm to assign tasks to
  */
 async function getManagerUserIds(farmId?: string): Promise<string[]> {
+  // Tasks need a farm, so without one there is nobody to assign them to
+  if (!farmId) return [];
+
   const managers = await db
-    .select({ id: users.id })
-    .from(users)
+    .select({ id: users.id, role: farmMembers.role })
+    .from(farmMembers)
+    .innerJoin(users, eq(farmMembers.userId, users.id))
     .where(
       and(
+        eq(farmMembers.farmId, farmId),
+        eq(farmMembers.isActive, true),
         eq(users.isActive, true),
-        inArray(users.role, ['owner', 'manager'])
+        inArray(farmMembers.role, ['owner', 'manager'])
       )
     );
   
-  return managers.map(m => m.id);
+  // Prefer managers over owners for day-to-day follow-up
+  return managers
+    .sort((a, b) => (a.role === 'manager' ? 0 : 1) - (b.role === 'manager' ? 0 : 1))
+    .map(m => m.id);
 }
 
 /**
@@ -303,6 +313,9 @@ export async function checkUnresolvedHazards(farmId?: string): Promise<Complianc
       inArray(farmHazards.status, ['active', 'monitoring']),
       lt(farmHazards.createdAt, thresholdDate),
     ];
+    if (farmId) {
+      conditions.push(eq(farmHazards.farmId, farmId));
+    }
 
     const openHazards = await db
       .select({
@@ -312,6 +325,7 @@ export async function checkUnresolvedHazards(farmId?: string): Promise<Complianc
         createdAt: farmHazards.createdAt,
         status: farmHazards.status,
         severity: farmHazards.severity,
+        farmId: farmHazards.farmId,
       })
       .from(farmHazards)
       .where(and(...conditions));
@@ -328,16 +342,17 @@ export async function checkUnresolvedHazards(farmId?: string): Promise<Complianc
       }
 
       // Get managers to assign task to
-      const managerIds = await getManagerUserIds(farmId);
+      const hazardFarmId = hazard.farmId ?? farmId;
+      const managerIds = await getManagerUserIds(hazardFarmId ?? undefined);
       const assigneeId = managerIds[0];
 
-      if (assigneeId && farmId) {
+      if (assigneeId && hazardFarmId) {
         try {
           const daysOpen = Math.floor((Date.now() - new Date(hazard.createdAt).getTime()) / (1000 * 60 * 60 * 24));
           const isHighRisk = hazard.severity === 'critical' || hazard.severity === 'high';
           
           await createTask({
-            farmId: farmId,
+            farmId: hazardFarmId,
             title: `${AUTO_TASK_PREFIX} ${taskTitle}`,
             description: `This hazard has been open for ${daysOpen} days. Severity: ${hazard.severity}. Please take action to resolve or mitigate.`,
             priority: isHighRisk ? 'urgent' : 'high',

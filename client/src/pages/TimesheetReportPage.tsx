@@ -121,7 +121,7 @@ export default function TimesheetReportPage() {
         return;
       }
 
-      const data = await pulseGet<TimesheetSummary>(`/api/reports/timesheet-summary?from=${from}&to=${to}`);
+      const data = await pulseGet<TimesheetSummary>(`/reports/timesheet-summary?from=${from}&to=${to}`);
       setReport(data);
     } catch (err: any) {
       console.error('Failed to load timesheet report:', err);

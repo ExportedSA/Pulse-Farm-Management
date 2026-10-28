@@ -82,7 +82,6 @@ import AnimalLineagePage from "@/pages/animal-lineage-page";
 import AnimalHealthPage from "@/pages/AnimalHealthPage";
 import AnimalDetailPage from "@/pages/AnimalDetailPage";
 import TaskListPage from "@/pages/TaskListPage";
-import MyTimePage from "@/pages/MyTimePage";
 import EquipmentListPage from "@/pages/EquipmentListPage";
 import EquipmentDetailPage from "@/pages/EquipmentDetailPage";
 import ComplianceDashboard from "@/pages/ComplianceDashboard";
@@ -199,7 +198,6 @@ function Router() {
         <Route path="/app/animals/:id" component={AnimalDetailPage} />
         <Route path="/app/herd-reports" component={HerdReportsPage} />
         <Route path="/app/tasks" component={TaskListPage} />
-        <Route path="/app/my-time" component={MyTimePage} />
         <Route path="/app/equipment" component={EquipmentListPage} />
         <Route path="/app/equipment/:id" component={EquipmentDetailPage} />
         <Route path="/app/compliance-overview" component={ComplianceDashboard} />

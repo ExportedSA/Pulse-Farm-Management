@@ -73,7 +73,7 @@ export default function SafetyReportPage() {
     setError(null);
 
     try {
-      const data = await pulseGet<SafetyReport>('/api/reports/safety');
+      const data = await pulseGet<SafetyReport>('/reports/safety');
       setReport(data);
     } catch (err: any) {
       console.error('Failed to load safety report:', err);
