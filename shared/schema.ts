@@ -1040,6 +1040,7 @@ export const eidScanSessions = pgTable('eid_scan_sessions', {
 // Pastures (Paddocks)
 export const pastures = pgTable('pastures', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id),
   name: varchar('name', { length: 255 }).notNull(),
   paddockNumber: integer('paddock_number'),
   area: integer('area'),
@@ -1299,6 +1300,91 @@ export const notifications = pgTable('notifications', {
 });
 
 export type InAppNotification = typeof notifications.$inferSelect;
+
+// ===== FARM RECORDS, TAGS & ATTACHMENTS =====
+
+// What a farm record is about; drives the capture form and compliance reports
+export const FARM_RECORD_TYPES = [
+  'fertiliser', 'spray', 'feed_in', 'baleage', 'effluent',
+  'fencing', 'job_done', 'maintenance', 'medical', 'health_safety', 'note',
+] as const;
+export type FarmRecordType = typeof FARM_RECORD_TYPES[number];
+
+// One captured fact about the farm: an input applied, work done, an event observed.
+// Type-specific fields (product, rate, docket number...) live in `details`.
+export const farmRecords = pgTable('farm_records', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  type: varchar('type', { length: 30 }).notNull(),
+  title: varchar('title', { length: 255 }).notNull(),
+  notes: text('notes'),
+  occurredAt: timestamp('occurred_at').notNull(),
+  pastureIds: jsonb('pasture_ids').$type<string[]>().default(sql`'[]'::jsonb`).notNull(),
+  latitude: numeric('latitude', { precision: 10, scale: 7 }),
+  longitude: numeric('longitude', { precision: 10, scale: 7 }),
+  details: jsonb('details').$type<Record<string, any>>().default(sql`'{}'::jsonb`).notNull(),
+  recordedBy: uuid('recorded_by').references(() => users.id).notNull(),
+  // Set by the device that captured it, so a record queued offline is only saved once
+  clientId: varchar('client_id', { length: 64 }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  deletedAt: timestamp('deleted_at'),
+}, (table) => ({
+  uniqueClientId: sql`UNIQUE (farm_id, client_id)`,
+}));
+
+export type FarmRecord = typeof farmRecords.$inferSelect;
+
+// Farm-wide labels (fencing, medical, H&S...) that can be put on anything
+export const tags = pgTable('tags', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  name: varchar('name', { length: 60 }).notNull(),
+  slug: varchar('slug', { length: 60 }).notNull(),
+  color: varchar('color', { length: 20 }),
+  isDefault: boolean('is_default').default(false).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  uniqueFarmSlug: sql`UNIQUE (farm_id, slug)`,
+}));
+
+export type Tag = typeof tags.$inferSelect;
+
+// Kinds of thing a tag or attachment can belong to
+export const TAGGABLE_TYPES = ['record', 'job', 'task', 'animal', 'chat_message', 'attachment'] as const;
+export type TaggableType = typeof TAGGABLE_TYPES[number];
+
+export const taggings = pgTable('taggings', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tagId: uuid('tag_id').references(() => tags.id, { onDelete: 'cascade' }).notNull(),
+  entityType: varchar('entity_type', { length: 30 }).notNull(),
+  entityId: uuid('entity_id').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  uniqueTagging: sql`UNIQUE (tag_id, entity_type, entity_id)`,
+}));
+
+// Photos, voice notes and documents attached to any record, job, task, animal or message
+export const attachments = pgTable('attachments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  entityType: varchar('entity_type', { length: 30 }).notNull(),
+  entityId: uuid('entity_id').notNull(),
+  kind: varchar('kind', { length: 20 }).notNull(), // photo | voice | document
+  url: text('url').notNull(),
+  storageKey: text('storage_key').notNull(),
+  fileName: varchar('file_name', { length: 255 }),
+  mimeType: varchar('mime_type', { length: 100 }),
+  fileSize: integer('file_size'),
+  caption: text('caption'),
+  latitude: numeric('latitude', { precision: 10, scale: 7 }),
+  longitude: numeric('longitude', { precision: 10, scale: 7 }),
+  takenAt: timestamp('taken_at'),
+  uploadedBy: uuid('uploaded_by').references(() => users.id).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+export type Attachment = typeof attachments.$inferSelect;
 
 // Activity Logs (Phase 6E: Audit trail for user actions)
 export const activityLogs = pgTable('activity_logs', {
