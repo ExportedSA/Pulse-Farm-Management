@@ -1,6 +1,6 @@
 import { db } from '../db';
 import { farms, farmMembers, users, type Farm } from '@shared/schema';
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, and, asc, inArray } from 'drizzle-orm';
 
 export type FarmRole = 'owner' | 'manager' | 'worker' | 'viewer';
 
@@ -58,9 +58,9 @@ export async function isFarmMember(userId: string, farmId: string): Promise<bool
 }
 
 /**
- * IDs of all active users on a farm
+ * IDs of all active users on a farm, optionally only those with certain farm roles
  */
-export async function listFarmUserIds(farmId: string): Promise<string[]> {
+export async function listFarmUserIds(farmId: string, roles?: FarmRole[]): Promise<string[]> {
   const rows = await db
     .select({ userId: farmMembers.userId })
     .from(farmMembers)
@@ -69,6 +69,7 @@ export async function listFarmUserIds(farmId: string): Promise<string[]> {
       eq(farmMembers.farmId, farmId),
       eq(farmMembers.isActive, true),
       eq(users.isActive, true),
+      roles ? inArray(farmMembers.role, roles) : undefined,
     ));
 
   return rows.map(r => r.userId);

@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { notifyUsers } from '../domain/notifications';
+import { listFarmUserIds } from '../domain/farms';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth';
 import {
@@ -23,7 +25,7 @@ import {
 } from '../domain/tasks';
 import { chatWebSocket } from '../websocket';
 import { db } from '../db';
-import { users, notificationLogs } from '@shared/schema';
+import { users } from '@shared/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 import logger from '../config/logger';
 
@@ -147,27 +149,18 @@ router.post('/', requireAuth, async (req, res) => {
         });
 
         // Create notification for assignee
-        await db.insert(notificationLogs).values({
-          userId: data.assignedToId,
-          type: 'task',
+        await notifyUsers([data.assignedToId], {
+          type: 'task_assigned',
           title: 'New Task Assigned',
           message: `You have been assigned a new task: ${task.title}`,
-          data: { taskId: task.id, taskTitle: task.title },
-          isRead: false,
-          createdAt: new Date(),
+          farmId,
+          link: '/app/tasks',
+          metadata: { taskId: task.id, taskTitle: task.title },
         });
       }
 
-      // Broadcast to managers that a new task was created
-      const managers = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(and(
-          eq(users.isActive, true),
-          inArray(users.role, ['owner', 'manager', 'admin'])
-        ));
-      
-      const managerIds = managers.map(m => m.id).filter(id => id !== userId);
+      // Broadcast to the farm's managers that a new task was created
+      const managerIds = (await listFarmUserIds(farmId, ['owner', 'manager'])).filter(id => id !== userId);
       if (managerIds.length > 0) {
         chatWebSocket.broadcastTaskCreated(managerIds, {
           ...task,

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { listFarmUserIds } from '../domain/farms';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth';
 import {
@@ -121,15 +122,8 @@ router.post('/clock-in', requireAuth, async (req, res) => {
     // Emit WebSocket event to managers
     try {
       const staffName = (req.user as any).name || 'Unknown';
-      const managers = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(and(
-          eq(users.isActive, true),
-          inArray(users.role, ['owner', 'manager', 'admin'])
-        ));
-      
-      const managerIds = managers.map(m => m.id).filter(id => id !== userId);
+      // The farm's owners and managers
+      const managerIds = (await listFarmUserIds(farmId, ['owner', 'manager'])).filter(id => id !== userId);
       if (managerIds.length > 0) {
         chatWebSocket.broadcastUserClockedIn(managerIds, staffName, targetStaffProfileId);
       }
@@ -181,15 +175,8 @@ router.post('/clock-out', requireAuth, async (req, res) => {
     // Emit WebSocket event to managers
     try {
       const staffName = (req.user as any).name || 'Unknown';
-      const managers = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(and(
-          eq(users.isActive, true),
-          inArray(users.role, ['owner', 'manager', 'admin'])
-        ));
-      
-      const managerIds = managers.map(m => m.id).filter(id => id !== userId);
+      // The farm's owners and managers
+      const managerIds = (await listFarmUserIds(farmId, ['owner', 'manager'])).filter(id => id !== userId);
       if (managerIds.length > 0) {
         chatWebSocket.broadcastUserClockedOut(managerIds, staffName, targetStaffProfileId, entry.totalHours || '0');
       }

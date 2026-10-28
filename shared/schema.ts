@@ -1282,6 +1282,24 @@ export const notificationLogs = pgTable('notification_logs', {
   sentAt: timestamp('sent_at').defaultNow().notNull(),
 });
 
+// In-app notifications shown in the notification bell (email/SMS deliveries are logged
+// separately in notification_logs)
+export const notifications = pgTable('notifications', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  farmId: uuid('farm_id').references(() => farms.id),
+  type: varchar('type', { length: 50 }).notNull(), // e.g. animal_health, task_due, weather_alert
+  title: varchar('title', { length: 255 }).notNull(),
+  message: text('message').notNull(),
+  link: varchar('link', { length: 500 }),
+  priority: varchar('priority', { length: 10 }).default('normal').notNull(), // low | normal | high | urgent
+  metadata: jsonb('metadata').$type<Record<string, any>>(),
+  readAt: timestamp('read_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+export type InAppNotification = typeof notifications.$inferSelect;
+
 // Activity Logs (Phase 6E: Audit trail for user actions)
 export const activityLogs = pgTable('activity_logs', {
   id: uuid('id').primaryKey().defaultRandom(),

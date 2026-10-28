@@ -1,40 +1,19 @@
 import { Router } from 'express';
-import { deliverNotification, createAndDeliverNotification, type NotificationData } from '../services/notifications';
+import { z } from 'zod';
+import { deliverNotification } from '../services/notifications';
+import { getUserId, getFarmId } from '../middleware/auth';
+import { isFarmMember } from '../domain/farms';
+import {
+  notifyUsers,
+  listNotifications,
+  countNotifications,
+  markRead,
+  deleteNotifications,
+  toApiNotification,
+  type NewNotification,
+} from '../domain/notifications';
 
 const router = Router();
-
-// Notification types
-type NotificationType = 
-  | 'task_due'
-  | 'task_overdue'
-  | 'task_assigned'
-  | 'task_completed'
-  | 'weather_alert'
-  | 'weather_reschedule'
-  | 'checklist_reminder'
-  | 'animal_health'
-  | 'compliance_due'
-  | 'system'
-  | 'message';
-
-interface Notification {
-  id: string;
-  type: NotificationType;
-  title: string;
-  message: string;
-  icon?: string;
-  link?: string;
-  priority: 'low' | 'normal' | 'high' | 'urgent';
-  read: boolean;
-  createdAt: string;
-  expiresAt?: string;
-  userId: string;
-  metadata?: Record<string, any>;
-}
-
-// In-memory notification store (would be database in production)
-let notifications: Notification[] = [];
-let notificationIdCounter = 1;
 
 // User notification preferences (would be in database)
 const userPreferences: Map<string, {
@@ -72,242 +51,119 @@ const getDefaultPreferences = () => ({
   },
 });
 
-// Generate demo notifications
-function generateDemoNotifications(userId: string): Notification[] {
-  const now = new Date();
-  return [
-    {
-      id: `notif-${notificationIdCounter++}`,
-      type: 'task_due',
-      title: 'Task Due Soon',
-      message: 'Morning Feed - Paddock A is due in 30 minutes',
-      icon: '⏰',
-      link: '/app/jobs',
-      priority: 'high',
-      read: false,
-      createdAt: new Date(now.getTime() - 5 * 60000).toISOString(),
-      userId,
-      metadata: { taskId: '1', taskTitle: 'Morning Feed - Paddock A' },
-    },
-    {
-      id: `notif-${notificationIdCounter++}`,
-      type: 'weather_alert',
-      title: 'Weather Warning',
-      message: 'Rain expected tomorrow. Consider rescheduling outdoor tasks.',
-      icon: '🌧️',
-      link: '/app/weather',
-      priority: 'normal',
-      read: false,
-      createdAt: new Date(now.getTime() - 15 * 60000).toISOString(),
-      userId,
-      metadata: { condition: 'rain', date: new Date(now.getTime() + 86400000).toISOString().split('T')[0] },
-    },
-    {
-      id: `notif-${notificationIdCounter++}`,
-      type: 'task_assigned',
-      title: 'New Task Assigned',
-      message: 'You have been assigned to "Fence Repair - North Boundary"',
-      icon: '📋',
-      link: '/app/jobs',
-      priority: 'normal',
-      read: false,
-      createdAt: new Date(now.getTime() - 30 * 60000).toISOString(),
-      userId,
-      metadata: { taskId: '2', assignedBy: 'John Smith' },
-    },
-    {
-      id: `notif-${notificationIdCounter++}`,
-      type: 'checklist_reminder',
-      title: 'Checklist Incomplete',
-      message: '2 required items remaining on "Health Check - Dairy Herd"',
-      icon: '✅',
-      link: '/app/jobs',
-      priority: 'normal',
-      read: true,
-      createdAt: new Date(now.getTime() - 2 * 3600000).toISOString(),
-      userId,
-      metadata: { taskId: '3', remaining: 2 },
-    },
-    {
-      id: `notif-${notificationIdCounter++}`,
-      type: 'compliance_due',
-      title: 'Compliance Reminder',
-      message: 'NAIT records update due in 3 days',
-      icon: '📝',
-      link: '/app/nait',
-      priority: 'normal',
-      read: true,
-      createdAt: new Date(now.getTime() - 4 * 3600000).toISOString(),
-      userId,
-      metadata: { dueDate: new Date(now.getTime() + 3 * 86400000).toISOString().split('T')[0] },
-    },
-    {
-      id: `notif-${notificationIdCounter++}`,
-      type: 'animal_health',
-      title: 'Health Alert',
-      message: 'Cow #1234 treatment reminder - Antibiotics due today',
-      icon: '🩺',
-      link: '/app/livestock',
-      priority: 'high',
-      read: true,
-      createdAt: new Date(now.getTime() - 6 * 3600000).toISOString(),
-      userId,
-      metadata: { animalId: '1234', treatment: 'Antibiotics' },
-    },
-    {
-      id: `notif-${notificationIdCounter++}`,
-      type: 'task_completed',
-      title: 'Task Completed',
-      message: 'Sarah Johnson completed "Afternoon Milking"',
-      icon: '✓',
-      link: '/app/jobs',
-      priority: 'low',
-      read: true,
-      createdAt: new Date(now.getTime() - 12 * 3600000).toISOString(),
-      userId,
-      metadata: { taskId: '4', completedBy: 'Sarah Johnson' },
-    },
-  ];
-}
-
-// Initialize demo notifications
-const demoUserId = 'demo-user';
-notifications = generateDemoNotifications(demoUserId);
-
 // ============================================
 // ENDPOINTS
 // ============================================
 
-// Get all notifications for current user
-router.get('/', (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
-  const { unreadOnly, type, limit = 50 } = req.query;
-  
-  let userNotifications = notifications.filter(n => n.userId === userId);
-  
-  // Filter by unread
-  if (unreadOnly === 'true') {
-    userNotifications = userNotifications.filter(n => !n.read);
+// Get notifications for the signed-in user
+router.get('/', async (req, res) => {
+  try {
+    const userId = getUserId(req)!;
+    const { unreadOnly, type, limit } = req.query;
+    const rows = await listNotifications(userId, {
+      unreadOnly: unreadOnly === 'true',
+      type: typeof type === 'string' ? type : undefined,
+      limit: Number(limit) || 50,
+    });
+    res.json({
+      notifications: rows.map(toApiNotification),
+      unreadCount: await countNotifications(userId, true),
+      total: await countNotifications(userId, false),
+    });
+  } catch (error) {
+    console.error('Failed to fetch notifications:', error);
+    res.status(500).json({ error: 'Failed to fetch notifications' });
   }
-  
-  // Filter by type
-  if (type) {
-    userNotifications = userNotifications.filter(n => n.type === type);
-  }
-  
-  // Sort by date (newest first)
-  userNotifications.sort((a, b) => 
-    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
-  
-  // Limit results
-  userNotifications = userNotifications.slice(0, Number(limit));
-  
-  const unreadCount = notifications.filter(n => n.userId === userId && !n.read).length;
-  
-  res.json({
-    notifications: userNotifications,
-    unreadCount,
-    total: notifications.filter(n => n.userId === userId).length,
-  });
 });
 
 // Get unread count
-router.get('/unread-count', (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
-  const unreadCount = notifications.filter(n => n.userId === userId && !n.read).length;
-  
-  res.json({ unreadCount });
+router.get('/unread-count', async (req, res) => {
+  try {
+    res.json({ unreadCount: await countNotifications(getUserId(req)!, true) });
+  } catch (error) {
+    console.error('Failed to count notifications:', error);
+    res.status(500).json({ error: 'Failed to count notifications' });
+  }
 });
 
+const idSchema = z.string().uuid();
+
 // Mark notification as read
-router.post('/:id/read', (req, res) => {
-  const { id } = req.params;
-  const userId = (req.user as any)?.id || 'demo-user';
-  
-  const notification = notifications.find(n => n.id === id && n.userId === userId);
-  
-  if (!notification) {
-    return res.status(404).json({ error: 'Notification not found' });
+router.post('/:id/read', async (req, res) => {
+  try {
+    const userId = getUserId(req)!;
+    if (!idSchema.safeParse(req.params.id).success) {
+      return res.status(404).json({ error: 'Notification not found' });
+    }
+    const updated = await markRead(userId, req.params.id);
+    if (updated === 0) {
+      // Either already read or not this user's notification
+      const [existing] = await listNotifications(userId, { limit: 200 }).then(rows => rows.filter(n => n.id === req.params.id));
+      if (!existing) return res.status(404).json({ error: 'Notification not found' });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to mark notification read:', error);
+    res.status(500).json({ error: 'Failed to mark notification read' });
   }
-  
-  notification.read = true;
-  
-  res.json({ success: true, notification });
 });
 
 // Mark all as read
-router.post('/mark-all-read', (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
-  
-  notifications
-    .filter(n => n.userId === userId && !n.read)
-    .forEach(n => { n.read = true; });
-  
-  res.json({ success: true });
+router.post('/mark-all-read', async (req, res) => {
+  try {
+    const updated = await markRead(getUserId(req)!);
+    res.json({ success: true, updated });
+  } catch (error) {
+    console.error('Failed to mark notifications read:', error);
+    res.status(500).json({ error: 'Failed to mark notifications read' });
+  }
 });
 
 // Delete notification
-router.delete('/:id', (req, res) => {
-  const { id } = req.params;
-  const userId = (req.user as any)?.id || 'demo-user';
-  
-  const index = notifications.findIndex(n => n.id === id && n.userId === userId);
-  
-  if (index === -1) {
-    return res.status(404).json({ error: 'Notification not found' });
+router.delete('/:id', async (req, res) => {
+  try {
+    if (!idSchema.safeParse(req.params.id).success) {
+      return res.status(404).json({ error: 'Notification not found' });
+    }
+    const deleted = await deleteNotifications(getUserId(req)!, req.params.id);
+    if (deleted === 0) return res.status(404).json({ error: 'Notification not found' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to delete notification:', error);
+    res.status(500).json({ error: 'Failed to delete notification' });
   }
-  
-  notifications.splice(index, 1);
-  
-  res.json({ success: true });
 });
 
 // Clear all notifications
-router.delete('/', (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
-  
-  notifications = notifications.filter(n => n.userId !== userId);
-  
-  res.json({ success: true });
+router.delete('/', async (req, res) => {
+  try {
+    await deleteNotifications(getUserId(req)!);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to clear notifications:', error);
+    res.status(500).json({ error: 'Failed to clear notifications' });
+  }
 });
 
-// Create notification (internal use / testing)
-router.post('/', async (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
-  const { type, title, message, icon, link, priority = 'normal', metadata, deliver = true } = req.body;
-  
-  const notification: Notification = {
-    id: `notif-${notificationIdCounter++}`,
-    type,
-    title,
-    message,
-    icon,
-    link,
-    priority,
-    read: false,
-    createdAt: new Date().toISOString(),
-    userId,
-    metadata,
-  };
-  
-  notifications.unshift(notification);
-  
-  // Get user preferences for delivery
-  const preferences = userPreferences.get(userId) || getDefaultPreferences();
-  
-  // Deliver via external services if requested
+const PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
+
+/**
+ * Store an in-app notification for one user, then email/SMS it according to their preferences
+ */
+async function createAndDeliver(userId: string, notification: NewNotification, deliver: boolean) {
+  const [row] = await notifyUsers([userId], notification);
   let delivery = { email: false, sms: false };
   if (deliver) {
     try {
+      const preferences = userPreferences.get(userId) || getDefaultPreferences();
       delivery = await deliverNotification(
         {
           userId,
-          title,
-          message,
-          type,
-          priority,
-          metadata,
+          title: notification.title,
+          message: notification.message,
+          type: notification.type as any,
+          priority: notification.priority ?? 'normal',
+          metadata: notification.metadata,
         },
         {
           emailEnabled: preferences.emailEnabled,
@@ -317,11 +173,45 @@ router.post('/', async (req, res) => {
       );
     } catch (error) {
       console.error('[NOTIFICATIONS] Delivery failed:', error);
-      // Still return success for in-app notification
+      // The in-app notification is still stored
     }
   }
-  
-  res.status(201).json({ notification, delivery });
+  return { notification: toApiNotification(row), delivery };
+}
+
+/**
+ * Who a notification is for: the signed-in user, or another member of their farm
+ */
+async function resolveRecipient(req: any, requested?: string): Promise<string | null> {
+  const me = getUserId(req)!;
+  if (!requested || requested === me) return me;
+  const farmId = getFarmId(req);
+  if (!farmId || !z.string().uuid().safeParse(requested).success) return null;
+  return (await isFarmMember(requested, farmId)) ? requested : null;
+}
+
+// Create notification (internal use / testing)
+router.post('/', async (req, res) => {
+  try {
+    const data = z.object({
+      type: z.string().min(1).max(50),
+      title: z.string().min(1).max(255),
+      message: z.string().min(1),
+      link: z.string().max(500).optional(),
+      priority: z.enum(PRIORITIES).default('normal'),
+      metadata: z.record(z.any()).optional(),
+      deliver: z.boolean().default(true),
+    }).parse(req.body);
+    const { deliver, ...notification } = data;
+    const result = await createAndDeliver(getUserId(req)!, { ...notification, farmId: getFarmId(req) }, deliver);
+    res.status(201).json(result);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Validation failed', details: error.errors });
+    }
+    console.error('Failed to create notification:', error);
+    res.status(500).json({ error: 'Failed to create notification' });
+  }
 });
 
 // ============================================
@@ -330,7 +220,7 @@ router.post('/', async (req, res) => {
 
 // Get notification preferences
 router.get('/preferences', (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
+  const userId = getUserId(req)!;
   
   const preferences = userPreferences.get(userId) || getDefaultPreferences();
   
@@ -339,7 +229,7 @@ router.get('/preferences', (req, res) => {
 
 // Update notification preferences
 router.patch('/preferences', (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
+  const userId = getUserId(req)!;
   const updates = req.body;
   
   const current = userPreferences.get(userId) || getDefaultPreferences();
@@ -369,7 +259,7 @@ const pushSubscriptions: Map<string, any> = new Map();
 
 // Subscribe to push notifications
 router.post('/push/subscribe', (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
+  const userId = getUserId(req)!;
   const subscription = req.body;
   
   pushSubscriptions.set(userId, subscription);
@@ -379,114 +269,26 @@ router.post('/push/subscribe', (req, res) => {
 
 // Unsubscribe from push notifications
 router.post('/push/unsubscribe', (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
+  const userId = getUserId(req)!;
   
   pushSubscriptions.delete(userId);
   
   res.json({ success: true, message: 'Push subscription removed' });
 });
 
-// Test push notification (no auth for testing)
-router.post('/push/test-no-auth', async (req, res) => {
-  const userId = 'demo-user';
-  
-  // Create a test notification
-  const notification: Notification = {
-    id: `notif-${notificationIdCounter++}`,
-    type: 'system',
-    title: 'Test Notification',
-    message: 'Push notifications are working! 🎉',
-    icon: '🔔',
-    priority: 'normal',
-    read: false,
-    createdAt: new Date().toISOString(),
-    userId,
-  };
-  
-  notifications.unshift(notification);
-  
-  // Test external delivery
-  try {
-    const delivery = await deliverNotification(
-      {
-        userId,
-        title: notification.title,
-        message: notification.message,
-        type: notification.type,
-        priority: notification.priority,
-      },
-      {
-        emailEnabled: true,
-        smsEnabled: true,
-      }
-    );
-    
-    res.json({ 
-      success: true, 
-      notification,
-      delivery,
-      message: 'Test notification sent (check console for email/SMS logs)',
-    });
-  } catch (error) {
-    console.error('[NOTIFICATIONS] Test delivery failed:', error);
-    res.json({ 
-      success: true, 
-      notification,
-      delivery: { email: false, sms: false },
-      message: 'In-app notification created, external delivery failed',
-    });
-  }
-});
-
-// Test push notification
+// Test notification: stores one for the signed-in user and tries email/SMS delivery
 router.post('/push/test', async (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
-  
-  // Create a test notification
-  const notification: Notification = {
-    id: `notif-${notificationIdCounter++}`,
-    type: 'system',
-    title: 'Test Notification',
-    message: 'Push notifications are working! 🎉',
-    icon: '🔔',
-    priority: 'normal',
-    read: false,
-    createdAt: new Date().toISOString(),
-    userId,
-  };
-  
-  notifications.unshift(notification);
-  
-  // Test external delivery
   try {
-    const delivery = await deliverNotification(
-      {
-        userId,
-        title: notification.title,
-        message: notification.message,
-        type: notification.type,
-        priority: notification.priority,
-      },
-      {
-        emailEnabled: true,
-        smsEnabled: true,
-      }
-    );
-    
-    res.json({ 
-      success: true, 
-      notification,
-      delivery,
-      message: 'Test notification sent (check console for email/SMS logs)',
-    });
+    const result = await createAndDeliver(getUserId(req)!, {
+      type: 'system',
+      title: 'Test Notification',
+      message: 'Notifications are working! 🎉',
+      farmId: getFarmId(req),
+    }, true);
+    res.json({ success: true, ...result, message: 'Test notification sent' });
   } catch (error) {
-    console.error('[NOTIFICATIONS] Test delivery failed:', error);
-    res.json({ 
-      success: true, 
-      notification,
-      delivery: { email: false, sms: false },
-      message: 'In-app notification created, external delivery failed',
-    });
+    console.error('[NOTIFICATIONS] Test notification failed:', error);
+    res.status(500).json({ error: 'Failed to send test notification' });
   }
 });
 
@@ -496,93 +298,45 @@ router.post('/push/test', async (req, res) => {
 
 // Trigger task due notification
 router.post('/trigger/task-due', async (req, res) => {
-  const { userId, taskId, taskTitle, dueIn } = req.body;
-  
-  const notification: Notification = {
-    id: `notif-${notificationIdCounter++}`,
-    type: 'task_due',
-    title: 'Task Due Soon',
-    message: `${taskTitle} is due in ${dueIn}`,
-    icon: '⏰',
-    link: '/app/jobs',
-    priority: 'high',
-    read: false,
-    createdAt: new Date().toISOString(),
-    userId: userId || 'demo-user',
-    metadata: { taskId, taskTitle },
-  };
-  
-  notifications.unshift(notification);
-  
-  // Deliver via external services
   try {
-    const preferences = userPreferences.get(userId) || getDefaultPreferences();
-    const delivery = await deliverNotification(
-      {
-        userId: userId || 'demo-user',
-        title: notification.title,
-        message: notification.message,
-        type: notification.type,
-        priority: notification.priority,
-        metadata: notification.metadata,
-      },
-      {
-        emailEnabled: preferences.emailEnabled,
-        smsEnabled: preferences.emailEnabled,
-        quietHours: preferences.quietHours,
-      }
-    );
-    
-    res.json({ success: true, notification, delivery });
+    const { userId, taskId, taskTitle, dueIn } = req.body;
+    const recipient = await resolveRecipient(req, userId);
+    if (!recipient) return res.status(404).json({ error: 'User not found on this farm' });
+    const result = await createAndDeliver(recipient, {
+      type: 'task_due',
+      title: 'Task Due Soon',
+      message: `${taskTitle} is due in ${dueIn}`,
+      link: '/app/jobs',
+      priority: 'high',
+      farmId: getFarmId(req),
+      metadata: { taskId, taskTitle },
+    }, true);
+    res.json({ success: true, ...result });
   } catch (error) {
-    console.error('[NOTIFICATIONS] Delivery failed:', error);
-    res.json({ success: true, notification, delivery: { email: false, sms: false } });
+    console.error('Failed to send task notification:', error);
+    res.status(500).json({ error: 'Failed to send task notification' });
   }
 });
 
 // Trigger weather alert notification
 router.post('/trigger/weather-alert', async (req, res) => {
-  const { userId, condition, message: alertMessage, date } = req.body;
-  
-  const notification: Notification = {
-    id: `notif-${notificationIdCounter++}`,
-    type: 'weather_alert',
-    title: 'Weather Alert',
-    message: alertMessage || `${condition} expected. Check your outdoor tasks.`,
-    icon: '🌧️',
-    link: '/app/weather',
-    priority: 'normal',
-    read: false,
-    createdAt: new Date().toISOString(),
-    userId: userId || 'demo-user',
-    metadata: { condition, date },
-  };
-  
-  notifications.unshift(notification);
-  
-  // Deliver via external services
   try {
-    const preferences = userPreferences.get(userId) || getDefaultPreferences();
-    const delivery = await deliverNotification(
-      {
-        userId: userId || 'demo-user',
-        title: notification.title,
-        message: notification.message,
-        type: notification.type,
-        priority: notification.priority,
-        metadata: notification.metadata,
-      },
-      {
-        emailEnabled: preferences.emailEnabled,
-        smsEnabled: preferences.emailEnabled,
-        quietHours: preferences.quietHours,
-      }
-    );
-    
-    res.json({ success: true, notification, delivery });
+    const { userId, condition, message: alertMessage, date } = req.body;
+    const recipient = await resolveRecipient(req, userId);
+    if (!recipient) return res.status(404).json({ error: 'User not found on this farm' });
+    const result = await createAndDeliver(recipient, {
+      type: 'weather_alert',
+      title: 'Weather Alert',
+      message: alertMessage || `${condition} expected. Check your outdoor tasks.`,
+      link: '/app/weather',
+      priority: 'normal',
+      farmId: getFarmId(req),
+      metadata: { condition, date },
+    }, true);
+    res.json({ success: true, ...result });
   } catch (error) {
-    console.error('[NOTIFICATIONS] Delivery failed:', error);
-    res.json({ success: true, notification, delivery: { email: false, sms: false } });
+    console.error('Failed to send weather notification:', error);
+    res.status(500).json({ error: 'Failed to send weather notification' });
   }
 });
 

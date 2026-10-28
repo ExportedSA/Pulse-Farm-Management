@@ -1,4 +1,6 @@
 import { Router } from "express";
+import { listFarmUserIds } from '../domain/farms';
+import { notifyUsers } from '../domain/notifications';
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import {
@@ -24,7 +26,7 @@ import {
 import { getOrCreateAnimalChannel } from "../domain/chat";
 import { chatWebSocket } from "../websocket";
 import { db } from "../db";
-import { users, notificationLogs } from "@shared/schema";
+import { users } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import logger from "../config/logger";
 
@@ -209,10 +211,8 @@ router.post("/", requireAuth, async (req, res) => {
 
     // Broadcast WebSocket event to all farm users
     try {
-      const farmUsers = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.isActive, true));
+      // Everyone on this farm (not every user in the database)
+      const farmUsers = (await listFarmUserIds(farmId)).map(id => ({ id }));
       
       const userIds = farmUsers.map(u => u.id).filter(id => id !== userId);
       chatWebSocket.broadcastAnimalAdded(userIds, {
@@ -271,10 +271,8 @@ router.patch("/:id", requireAuth, async (req, res) => {
 
     // Broadcast WebSocket event to all farm users
     try {
-      const farmUsers = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.isActive, true));
+      // Everyone on this farm (not every user in the database)
+      const farmUsers = (await listFarmUserIds(farmId)).map(id => ({ id }));
       
       const userIds = farmUsers.map(u => u.id).filter(uid => uid !== userId);
       chatWebSocket.broadcastAnimalUpdated(userIds, {
@@ -328,10 +326,8 @@ router.delete("/:id", requireAuth, async (req, res) => {
 
     // Broadcast WebSocket event to all farm users
     try {
-      const farmUsers = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.isActive, true));
+      // Everyone on this farm (not every user in the database)
+      const farmUsers = (await listFarmUserIds(farmId)).map(id => ({ id }));
       
       const userIds = farmUsers.map(u => u.id).filter(uid => uid !== userId);
       chatWebSocket.broadcastAnimalRemoved(userIds, id, removalStatus);
@@ -374,10 +370,8 @@ router.delete("/:id/permanent", requireAuth, async (req, res) => {
 
     // Broadcast WebSocket event to all farm users
     try {
-      const farmUsers = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.isActive, true));
+      // Everyone on this farm (not every user in the database)
+      const farmUsers = (await listFarmUserIds(farmId)).map(id => ({ id }));
       
       const userIds = farmUsers.map(u => u.id).filter(uid => uid !== userId);
       chatWebSocket.broadcastAnimalRemoved(userIds, id, 'deleted');
@@ -480,47 +474,27 @@ router.post("/:animalId/health", requireAuth, async (req, res) => {
       const animalName = animal.name || animal.visualId || 'Unknown Animal';
       const notificationMessage = `New ${data.type} record for ${animalName}: ${data.description.substring(0, 100)}${data.description.length > 100 ? '...' : ''}`;
       
-      // Get all active users (in production, filter by farm and role)
-      const farmUsers = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.isActive, true));
+      // Everyone on this farm (not every user in the database)
+      const farmUsers = (await listFarmUserIds(farmId)).map(id => ({ id }));
 
-      // Create notification for each user (except the one who created the record)
-      const notificationPromises = farmUsers
-        .filter(u => u.id !== userId)
-        .map(async (user) => {
-          try {
-            await db.insert(notificationLogs).values({
-              userId: user.id,
-              type: 'animal_health',
-              title: `Animal Health: ${animalName}`,
-              message: notificationMessage,
-              metadata: {
-                animalId,
-                recordId: record.id,
-                recordType: data.type,
-                severity: data.severity,
-              },
-              read: false,
-              createdAt: new Date(),
-            });
-
-            // Also send real-time notification via WebSocket
-            chatWebSocket.broadcastNotification(user.id, {
-              type: 'animal_health',
-              title: `Animal Health: ${animalName}`,
-              message: notificationMessage,
-              animalId,
-              recordId: record.id,
-            });
-          } catch (notifError) {
-            logger.error({ error: notifError, userId: user.id }, "Failed to create notification");
-          }
-        });
-
-      await Promise.allSettled(notificationPromises);
-      logger.info({ animalId, notifiedUsers: farmUsers.length - 1 }, "Created health record notifications");
+      // Notify everyone except the person who recorded it (stored for the bell + pushed live)
+      const recipients = farmUsers.map(u => u.id).filter(id => id !== userId);
+      const urgent = data.severity === 'high' || data.severity === 'critical';
+      await notifyUsers(recipients, {
+        type: 'animal_health',
+        title: `Animal Health: ${animalName}`,
+        message: notificationMessage,
+        farmId,
+        link: `/app/animals/${animalId}/health`,
+        priority: urgent ? 'high' : 'normal',
+        metadata: {
+          animalId,
+          recordId: record.id,
+          recordType: data.type,
+          severity: data.severity,
+        },
+      });
+      logger.info({ animalId, notifiedUsers: recipients.length }, "Created health record notifications");
     } catch (notifError) {
       logger.error({ error: notifError }, "Failed to create notifications for health record");
     }
