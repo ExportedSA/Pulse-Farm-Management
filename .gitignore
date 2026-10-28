@@ -44,6 +44,7 @@ attached_assets
 # Logs & databases
 *.log
 *.sql
+!scripts/migrations/*.sql
 *.db
 
 # Temp directories
