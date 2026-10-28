@@ -3687,7 +3687,7 @@ export type InsertRecurringTaskInstance = z.infer<typeof insertRecurringTaskInst
 // ============================================
 
 // Job status enum
-export const jobStatusEnum = pgEnum('job_status', ['open', 'in_progress', 'completed', 'cancelled']);
+export const jobStatusEnum = pgEnum('job_status', ['open', 'in_progress', 'completed', 'cancelled', 'blocked']);
 
 // Task status enum
 export const taskStatusEnum = pgEnum('task_status', ['pending', 'in_progress', 'done', 'cancelled']);
@@ -3725,11 +3725,34 @@ export const jobs = pgTable('jobs', {
   // Metadata
   notes: text('notes'),
   tags: jsonb('tags').$type<string[]>().default([]),
+
+  // Scheduling and field details used by the Jobs, Kanban and Calendar pages
+  startTime: varchar('start_time', { length: 5 }), // HH:MM
+  endTime: varchar('end_time', { length: 5 }), // HH:MM
+  endDate: timestamp('end_date'),
+  latitude: numeric('latitude', { precision: 10, scale: 7 }),
+  longitude: numeric('longitude', { precision: 10, scale: 7 }),
+  photoUrls: jsonb('photo_urls').$type<string[]>().default(sql`'[]'::jsonb`).notNull(),
+  checklistItems: jsonb('checklist_items').$type<{
+    id: string; text: string; required?: boolean; completed?: boolean;
+    completedAt?: string; completedBy?: string; completedByName?: string; order?: number;
+  }[]>().default(sql`'[]'::jsonb`).notNull(),
+  estimatedDuration: integer('estimated_duration'), // minutes
   
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
+
+// People assigned to a job (a job can have several)
+export const jobAssignments = pgTable('job_assignments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  jobId: uuid('job_id').references(() => jobs.id, { onDelete: 'cascade' }).notNull(),
+  userId: uuid('user_id').references(() => users.id).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  uniqueJobUser: sql`UNIQUE (job_id, user_id)`,
+}));
 
 // Tasks - individual work items, can be standalone or part of a job
 export const tasks = pgTable('tasks', {
