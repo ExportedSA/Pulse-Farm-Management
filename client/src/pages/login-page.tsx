@@ -81,7 +81,7 @@ export default function LoginPage() {
                       <Input
                         {...field}
                         type="email"
-                        placeholder="admin@pulse.farm"
+                        placeholder="owner@demo.com"
                         autoComplete="email"
                         data-testid="input-login-email"
                       />
@@ -127,9 +127,9 @@ export default function LoginPage() {
               Demo credentials for testing:
             </p>
             <div className="mt-3 text-xs text-gray-400 space-y-1">
-              <p className="text-center font-mono">admin@pulse.farm / admin123</p>
-              <p className="text-center font-mono">manager@pulse.farm / manager123</p>
-              <p className="text-center font-mono">staff@pulse.farm / staff123</p>
+              <p className="text-center font-mono">owner@demo.com / password123</p>
+              <p className="text-center font-mono">manager@demo.com / password123</p>
+              <p className="text-center font-mono">worker@demo.com / password123</p>
             </div>
           </div>
         </CardContent>

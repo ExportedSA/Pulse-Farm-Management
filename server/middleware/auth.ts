@@ -59,16 +59,38 @@ export function verifyToken(token: string): JWTPayload {
   }
 }
 
-// Extract token from Authorization header
+// httpOnly cookie carrying the access token, so plain same-origin fetch() calls are authenticated
+export const AUTH_COOKIE = 'pulse_token';
+
+export const authCookieOptions = {
+  httpOnly: true,
+  sameSite: 'lax' as const,
+  secure: process.env.NODE_ENV === 'production',
+  maxAge: 24 * 60 * 60 * 1000, // matches JWT_EXPIRES_IN
+  path: '/',
+};
+
+// Extract token from Authorization header, falling back to the auth cookie
 function extractToken(req: Request): string | null {
   const authHeader = req.headers.authorization;
-  if (!authHeader) return null;
-  
+  if (!authHeader) return extractCookieToken(req);
+
   // Expect "Bearer <token>"
   const parts = authHeader.split(' ');
   if (parts.length !== 2 || parts[0] !== 'Bearer') return null;
-  
+
   return parts[1];
+}
+
+function extractCookieToken(req: Request): string | null {
+  const cookieHeader = req.headers.cookie;
+  if (!cookieHeader) return null;
+
+  for (const pair of cookieHeader.split(';')) {
+    const [name, ...rest] = pair.trim().split('=');
+    if (name === AUTH_COOKIE) return decodeURIComponent(rest.join('='));
+  }
+  return null;
 }
 
 // JWT authentication middleware

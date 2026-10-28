@@ -24,10 +24,30 @@ const STORAGE_KEY = "pulse_user_snapshot";
 function getUserSnapshot(): User | null {
   try {
     const snapshot = localStorage.getItem(STORAGE_KEY);
-    return snapshot ? JSON.parse(snapshot) : null;
+    const user: User | null = snapshot ? JSON.parse(snapshot) : null;
+    // Drop the fake user an earlier build stored when login failed
+    if (user?.id === "offline-dev") {
+      localStorage.removeItem(STORAGE_KEY);
+      return null;
+    }
+    return user;
   } catch {
     return null;
   }
+}
+
+// apiRequest errors look like "401: {json body}"
+function getStatus(err: unknown): number | null {
+  const match = err instanceof Error ? /^(\d{3}):/.exec(err.message) : null;
+  return match ? Number(match[1]) : null;
+}
+
+function signInErrorMessage(err: unknown): string {
+  const status = getStatus(err);
+  if (status === 401) return "Invalid email or password";
+  if (status === 429) return "Too many sign-in attempts. Please wait a minute and try again.";
+  if (status === null) return "Can't reach the Pulse server. Check your connection and try again.";
+  return "Sign-in failed. Please try again.";
 }
 
 function setUserSnapshot(user: User | null) {
@@ -41,7 +61,7 @@ function setUserSnapshot(user: User | null) {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [offlineUser, setOfflineUser] = useState<User | null>(getUserSnapshot);
 
-  const { data: authData, isLoading } = useQuery<{ user: User }>({
+  const { data: authData, isLoading, error: authError } = useQuery<{ user: User }>({
     queryKey: ["/api/auth/user"],
     retry: false,
     refetchOnWindowFocus: true,
@@ -54,6 +74,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setOfflineUser(authData.user);
     }
   }, [authData]);
+
+  // The server says the session is gone, so the cached user must not keep the UI signed in.
+  // Other failures (offline, server down) keep the cached user for offline use.
+  useEffect(() => {
+    if (getStatus(authError) === 401) {
+      setUserSnapshot(null);
+      setOfflineUser(null);
+    }
+  }, [authError]);
 
   const signInMutation = useMutation({
     mutationFn: ({ email, password }: { email: string; password: string }) =>
@@ -80,16 +109,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signIn: async (email: string, password: string) => {
       try {
         await signInMutation.mutateAsync({ email, password });
-        // Wait for the user query to refetch and complete before returning
-        await queryClient.refetchQueries({ queryKey: ["/api/auth/user"] });
-      } catch (_err) {
-        // Offline/dev fallback: set a local demo user so the UI can be navigated
-        const demoUser: User = { id: "offline-dev", name: "Demo Admin", role: "admin", email };
-        setUserSnapshot(demoUser);
-        setOfflineUser(demoUser);
-        // Also set the query data directly so RequireAuth sees it immediately
-        queryClient.setQueryData(["/api/auth/user"], { user: demoUser });
+      } catch (err) {
+        throw new Error(signInErrorMessage(err));
       }
+      // Wait for the user query to refetch and complete before returning
+      await queryClient.refetchQueries({ queryKey: ["/api/auth/user"] });
     },
     signOut: async () => {
       try {

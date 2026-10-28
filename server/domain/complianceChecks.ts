@@ -50,7 +50,7 @@ async function getManagerUserIds(farmId?: string): Promise<string[]> {
     .where(
       and(
         eq(users.isActive, true),
-        inArray(users.role, ['owner', 'manager', 'admin'])
+        inArray(users.role, ['owner', 'manager'])
       )
     );
   
@@ -112,7 +112,7 @@ export async function checkAnimalHealthCompliance(farmId?: string): Promise<Comp
     const activeAnimals = await db
       .select({
         id: animals.id,
-        visualTag: animals.visualTag,
+        visualId: animals.visualId,
         name: animals.name,
         farmId: animals.farmId,
       })
@@ -138,7 +138,7 @@ export async function checkAnimalHealthCompliance(farmId?: string): Promise<Comp
         result.issuesFound++;
 
         // Check if task already exists
-        const animalName = animal.name || animal.visualTag || animal.id;
+        const animalName = animal.name || animal.visualId || animal.id;
         const taskTitle = `Health check due for ${animalName}`;
         
         if (await autoTaskExists(taskTitle, animal.id, 'animal')) {
@@ -149,10 +149,11 @@ export async function checkAnimalHealthCompliance(farmId?: string): Promise<Comp
         const managerIds = await getManagerUserIds(animal.farmId ?? undefined);
         const assigneeId = managerIds[0]; // Assign to first manager
 
-        if (assigneeId) {
+        // Tasks belong to a farm, so an animal without one can only be reported
+        if (assigneeId && animal.farmId) {
           try {
             await createTask({
-              farmId: animal.farmId ?? undefined,
+              farmId: animal.farmId,
               title: `${AUTO_TASK_PREFIX} ${taskTitle}`,
               description: `This animal has not had a health record in over ${ANIMAL_HEALTH_CHECK_THRESHOLD_DAYS} days. Please schedule a health check or vet visit.`,
               priority: 'medium',
@@ -161,7 +162,7 @@ export async function checkAnimalHealthCompliance(farmId?: string): Promise<Comp
               createdById: assigneeId, // Use manager as creator since we don't have system user
               assignedToId: assigneeId,
               animalId: animal.id,
-              dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // Due in 7 days
+              dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // Due in 7 days
             });
             result.tasksCreated++;
             logger.info({ animalId: animal.id, animalName }, 'Created health check task for animal');
@@ -251,10 +252,10 @@ export async function checkEquipmentMaintenance(farmId?: string): Promise<Compli
         const managerIds = await getManagerUserIds(equip.farmId ?? undefined);
         const assigneeId = managerIds[0];
 
-        if (assigneeId) {
+        if (assigneeId && equip.farmId) {
           try {
             await createTask({
-              farmId: equip.farmId ?? undefined,
+              farmId: equip.farmId,
               title: `${AUTO_TASK_PREFIX} ${taskTitle}`,
               description: `${equip.type} "${equip.name}" requires maintenance. ${reason}. Please schedule service.`,
               priority: equip.status === 'maintenance_due' ? 'high' : 'medium',
@@ -330,7 +331,7 @@ export async function checkUnresolvedHazards(farmId?: string): Promise<Complianc
       const managerIds = await getManagerUserIds(farmId);
       const assigneeId = managerIds[0];
 
-      if (assigneeId) {
+      if (assigneeId && farmId) {
         try {
           const daysOpen = Math.floor((Date.now() - new Date(hazard.createdAt).getTime()) / (1000 * 60 * 60 * 24));
           const isHighRisk = hazard.severity === 'critical' || hazard.severity === 'high';
@@ -417,7 +418,7 @@ export async function checkStaffTrainingCompliance(farmId?: string): Promise<Com
         const managerIds = await getManagerUserIds(farmId);
         const assigneeId = managerIds[0];
 
-        if (assigneeId) {
+        if (assigneeId && farmId) {
           try {
             await createTask({
               farmId: farmId,

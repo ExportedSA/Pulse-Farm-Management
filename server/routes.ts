@@ -109,7 +109,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(corsConfig);
   
   // Rate limiting
-  app.use(apiLimiter);
+  app.use("/api", apiLimiter);
   
   // Add request logging middleware
   app.use(httpLogger);
@@ -149,13 +149,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/analytics/health", requireAuth, healthAnalyticsRouter);
 
   // ===== FINANCIAL ANALYTICS =====
-  app.use(requireAuth, financialAnalyticsRouter);
+  // These routers declare full /api/... paths, so guard their prefix rather than every request
+  app.use("/api/financial-analytics", requireAuth);
+  app.use(financialAnalyticsRouter);
 
   // ===== BENCHMARKING =====
-  app.use(requireAuth, benchmarkingRouter);
+  app.use("/api/benchmarking", requireAuth);
+  app.use(benchmarkingRouter);
 
   // ===== REPORTS & PDF GENERATION =====
-  app.use(requireAuth, reportsRouter);
+  app.use("/api/reports", requireAuth);
+  app.use(reportsRouter);
 
   // ===== EXTERNAL API INTEGRATIONS (NAIT, Weather, LIC, Fonterra) =====
   app.use(externalApisRouter);
@@ -167,7 +171,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(multiFarmRouter);
 
   // ===== ANIMAL TAG MANAGEMENT =====
-  app.use(requireAuth, animalTagsRouter);
+  app.use(/^\/api\/animals\/(tags\/bulk|[^/]+\/tags|[^/]+\/tag-history)/, requireAuth);
+  app.use(animalTagsRouter);
 
   // ===== PHASE OVERLAY: MEDICINE & WITHHOLD =====
   app.use("/api/med", requireAuth, medCoreRouter);

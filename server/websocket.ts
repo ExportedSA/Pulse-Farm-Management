@@ -5,6 +5,18 @@ import { verifyToken } from './middleware/auth';
 import { initRedis, getInstanceId, publishToRedis, subscribeToRedis, REDIS_CHANNELS, isRedisAvailable } from './config/redis';
 import logger from './config/logger';
 
+// Attach a WebSocketServer that only claims upgrades for its own path. ws's { server, path }
+// option rejects every other upgrade with a 400, which breaks Vite's HMR socket on the same server.
+function attachWebSocketServer(server: Server, path: string): WebSocketServer {
+  const wss = new WebSocketServer({ noServer: true });
+  server.on('upgrade', (req, socket, head) => {
+    const pathname = new URL(req.url || '', 'http://localhost').pathname;
+    if (pathname !== path) return;
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+  });
+  return wss;
+}
+
 interface ChatClient {
   ws: WebSocket;
   userId: string;
@@ -51,10 +63,7 @@ class ChatWebSocketServer {
       logger.warn('Redis not available, WebSocket server running in single-instance mode');
     }
     
-    this.wss = new WebSocketServer({ 
-      server,
-      path: '/ws/chat'
-    });
+    this.wss = attachWebSocketServer(server, '/ws/chat');
 
     this.wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
       const connectionId = this.generateConnectionId();
@@ -777,10 +786,7 @@ class ScannerWebSocketServer {
   private sessions: Map<string, ScannerSession> = new Map();
 
   initialize(server: Server) {
-    this.wss = new WebSocketServer({ 
-      server,
-      path: '/ws/scanner'
-    });
+    this.wss = attachWebSocketServer(server, '/ws/scanner');
 
     this.wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
       const url = new URL(req.url || '', `http://${req.headers.host}`);

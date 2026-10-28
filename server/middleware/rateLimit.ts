@@ -4,7 +4,7 @@ import { Request, Response } from 'express';
 // General API rate limiter - 100 requests per 15 minutes per IP
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per window
+  max: process.env.NODE_ENV === "production" ? 100 : 1000, // Limit each IP to 100 requests per window (looser in dev)
   message: {
     error: 'Too many requests from this IP, please try again later.',
     retryAfter: '15 minutes'
@@ -27,6 +27,8 @@ export const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false },
+  // Only count login/register/refresh attempts, not the "who am I" checks the client makes on every page
+  skip: (req) => req.method === 'GET',
 });
 
 // File upload rate limiter - 10 uploads per minute

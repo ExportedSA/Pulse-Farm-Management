@@ -6,6 +6,9 @@ import { type Server } from "http";
 import viteConfig from "../vite.config";
 import { nanoid } from "nanoid";
 
+// The dev server runs as CJS under tsx (no import.meta); the prod build is ESM (no __dirname)
+const dirname = typeof __dirname !== "undefined" ? __dirname : import.meta.dirname;
+
 const viteLogger = createLogger();
 
 export function log(message: string, source = "express") {
@@ -41,12 +44,12 @@ export async function setupVite(app: Express, server: Server) {
   });
 
   app.use(vite.middlewares);
-  app.use("*", async (req, res, next) => {
+  app.use(async (req, res, next) => {
     const url = req.originalUrl;
 
     try {
       const clientTemplate = path.resolve(
-        import.meta.dirname,
+        dirname,
         "..",
         "client",
         "index.html",
@@ -68,7 +71,7 @@ export async function setupVite(app: Express, server: Server) {
 }
 
 export function serveStatic(app: Express) {
-  const distPath = path.resolve(import.meta.dirname, "public");
+  const distPath = path.resolve(dirname, "public");
 
   if (!fs.existsSync(distPath)) {
     throw new Error(
@@ -79,7 +82,7 @@ export function serveStatic(app: Express) {
   app.use(express.static(distPath));
 
   // fall through to index.html if the file doesn't exist
-  app.use("*", (_req, res) => {
+  app.use((_req, res) => {
     res.sendFile(path.resolve(distPath, "index.html"));
   });
 }

@@ -4,7 +4,7 @@ import { db } from '../db';
 import { users, farms } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 import { hashPassword } from '../password';
-import { generateToken, generateRefreshToken, verifyToken, type AuthenticatedRequest } from '../middleware/auth';
+import { generateToken, generateRefreshToken, verifyToken, requireAuth, AUTH_COOKIE, authCookieOptions, type AuthenticatedRequest } from '../middleware/auth';
 import { sanitizeUser } from '../auth-utils';
 
 const router = Router();
@@ -143,8 +143,8 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    // Get user's farm
-    const [userFarm] = await db.select().from(farms).where(eq(farms.ownerId, user.id)).limit(1);
+    // farms has no owner/membership column yet, so there is no farm to look up
+    const userFarm: typeof farms.$inferSelect | undefined = undefined;
 
     // Generate tokens
     const tokenPayload = {
@@ -161,6 +161,8 @@ router.post('/login', async (req, res) => {
     await db.update(users)
       .set({ lastLoginAt: new Date() })
       .where(eq(users.id, user.id));
+
+    res.cookie(AUTH_COOKIE, accessToken, authCookieOptions);
 
     // Return user data without password
     res.json({
@@ -202,8 +204,8 @@ router.post('/refresh', async (req, res) => {
       });
     }
 
-    // Get user's farm
-    const [userFarm] = await db.select().from(farms).where(eq(farms.ownerId, user.id)).limit(1);
+    // farms has no owner/membership column yet, so there is no farm to look up
+    const userFarm: typeof farms.$inferSelect | undefined = undefined;
 
     // Generate new tokens
     const tokenPayload = {
@@ -215,6 +217,8 @@ router.post('/refresh', async (req, res) => {
 
     const newAccessToken = generateToken(tokenPayload);
     const newRefreshToken = generateRefreshToken(tokenPayload);
+
+    res.cookie(AUTH_COOKIE, newAccessToken, authCookieOptions);
 
     res.json({
       accessToken: newAccessToken,
@@ -234,8 +238,15 @@ router.post('/refresh', async (req, res) => {
   }
 });
 
-// GET /api/auth/me - Get current user info
-router.get('/me', async (req: AuthenticatedRequest, res) => {
+// POST /api/auth/logout - Clear the auth cookie
+router.post('/logout', (_req, res) => {
+  const { maxAge, ...clearOptions } = authCookieOptions;
+  res.clearCookie(AUTH_COOKIE, clearOptions);
+  res.json({ success: true });
+});
+
+// GET /api/auth/me (and /user, which the web client queries) - Get current user info
+router.get(['/me', '/user'], requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({
@@ -253,8 +264,8 @@ router.get('/me', async (req: AuthenticatedRequest, res) => {
       });
     }
 
-    // Get user's farm
-    const [userFarm] = await db.select().from(farms).where(eq(farms.ownerId, user.id)).limit(1);
+    // farms has no owner/membership column yet, so there is no farm to look up
+    const userFarm: typeof farms.$inferSelect | undefined = undefined;
 
     res.json({
       user: sanitizeUser(user),
