@@ -336,6 +336,7 @@ router.get('/timesheets/all', async (req, res) => {
       .from(timesheets)
       .leftJoin(staffProfiles, eq(timesheets.staffProfileId, staffProfiles.id))
       .leftJoin(users, eq(staffProfiles.userId, users.id))
+      .where(eq(timesheets.farmId, (req.user as any).farmId))
       .orderBy(desc(timesheets.date));
 
     res.json(results.map(r => ({
@@ -344,33 +345,7 @@ router.get('/timesheets/all', async (req, res) => {
     })));
   } catch (error) {
     console.error('Error fetching timesheets:', error);
-    // Return mock data
-    res.json([
-      {
-        id: 'ts-1',
-        staffProfileId: 'staff-1',
-        date: new Date().toISOString().split('T')[0],
-        startTime: '07:00',
-        endTime: '15:30',
-        breakMinutes: 30,
-        totalHours: '8.00',
-        taskDescription: 'Morning milking and paddock checks',
-        status: 'approved',
-        staffName: 'John Smith',
-      },
-      {
-        id: 'ts-2',
-        staffProfileId: 'staff-2',
-        date: new Date().toISOString().split('T')[0],
-        startTime: '06:00',
-        endTime: '14:00',
-        breakMinutes: 30,
-        totalHours: '7.50',
-        taskDescription: 'Stock movement and fencing repairs',
-        status: 'pending',
-        staffName: 'Sarah Johnson',
-      },
-    ]);
+    res.status(500).json({ error: 'Failed to fetch timesheets' });
   }
 });
 

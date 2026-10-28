@@ -171,9 +171,9 @@ export default function FarmCalendarPage() {
 
   // Fetch animal treatments
   const { data: treatments = [] } = useQuery<any[]>({
-    queryKey: ['/api/animal-treatments'],
+    queryKey: ['/api/treatments'],
     queryFn: async () => {
-      const res = await fetch('/api/animal-treatments');
+      const res = await fetch('/api/treatments');
       if (!res.ok) return [];
       return res.json();
     },

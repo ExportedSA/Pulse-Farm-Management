@@ -1,5 +1,8 @@
 import express, { type Request, Response } from "express";
 import { storage } from "./storage";
+import { db } from "./db";
+import { visitors, visitorSignIns } from "@shared/schema";
+import { desc, eq } from "drizzle-orm";
 import { 
   type InsertVisitor, 
   type InsertVisitorSignIn, 
@@ -271,6 +274,31 @@ router.get("/admin/visitors/:id/signins", async (req: Request, res: Response) =>
 });
 
 // Get all active visitor sign-ins
+// Most recent visitor sign-ins with who signed in (Operations hub activity feed)
+router.get("/admin/recent", async (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 10, 50);
+    const rows = await db
+      .select({
+        id: visitorSignIns.id,
+        name: visitors.name,
+        company: visitors.company,
+        location: visitorSignIns.locationCode,
+        purpose: visitorSignIns.purpose,
+        signInTime: visitorSignIns.signInTime,
+        signOutTime: visitorSignIns.signOutTime,
+      })
+      .from(visitorSignIns)
+      .innerJoin(visitors, eq(visitorSignIns.visitorId, visitors.id))
+      .orderBy(desc(visitorSignIns.signInTime))
+      .limit(limit);
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching recent sign-ins:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.get("/admin/signins/active", async (req: Request, res: Response) => {
   try {
     const activeSignIns = await storage.getActiveVisitorSignIns();

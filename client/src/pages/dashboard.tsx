@@ -28,7 +28,7 @@ export default function Dashboard() {
   });
 
   const { data: treatments = [], isLoading: isLoadingTreatments } = useQuery<AnimalTreatment[]>({
-    queryKey: ['/api/animal-treatments'],
+    queryKey: ['/api/treatments'],
   });
 
   const { data: pastures = [], isLoading: isLoadingPastures } = useQuery<Pasture[]>({

@@ -61,7 +61,7 @@ export default function LandingDashboard() {
   });
 
   const { data: treatments = [], isLoading: loadingTreatments } = useQuery<AnimalTreatment[]>({
-    queryKey: ['/api/animal-treatments'],
+    queryKey: ['/api/treatments'],
   });
 
   const { data: pastures = [], isLoading: loadingPastures } = useQuery<Pasture[]>({
