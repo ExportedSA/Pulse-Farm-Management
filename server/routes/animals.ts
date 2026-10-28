@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { getUserId } from '../middleware/auth';
 import { listFarmUserIds } from '../domain/farms';
 import { notifyUsers } from '../domain/notifications';
 import { z } from "zod";
@@ -202,7 +203,7 @@ router.post("/", requireAuth, async (req, res) => {
     // Create a chat channel for this animal
     try {
       const channelName = data.name ? `Animal: ${data.name}` : `Animal: ${data.visualId || animal.id}`;
-      await getOrCreateAnimalChannel(animal.id, channelName, farmId);
+      await getOrCreateAnimalChannel(animal.id, channelName, farmId, getUserId(req));
       logger.info({ animalId: animal.id, channelName }, "Created chat channel for animal");
     } catch (chatError) {
       logger.error({ error: chatError, animalId: animal.id }, "Failed to create chat channel for animal");
@@ -460,8 +461,13 @@ router.post("/:animalId/health", requireAuth, async (req, res) => {
     
     // 1. Broadcast WebSocket event to users subscribed to this animal's channel
     try {
-      const animalChannelId = `animal-${animalId}`;
-      chatWebSocket.broadcastNewHealthRecord(animalChannelId, animalId, {
+      // Animals added before channels were created get theirs on first use
+      const channel = await getOrCreateAnimalChannel(
+        animalId,
+        `Animal: ${animal.name || animal.visualId || animalId}`,
+        farmId,
+      );
+      chatWebSocket.broadcastNewHealthRecord(channel.id, animalId, {
         ...record,
         animalName: animal.name || animal.visualId || animalId,
       });

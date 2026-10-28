@@ -4,12 +4,22 @@ import { eq, and } from 'drizzle-orm';
 import { listFarmUserIds } from './farms';
 
 /**
+ * Automatically created channels need a creator; use the farm's (first) owner
+ */
+async function getFarmOwnerId(farmId: string): Promise<string> {
+  const [ownerId] = await listFarmUserIds(farmId, ['owner']);
+  if (!ownerId) throw new Error(`Farm ${farmId} has no active owner`);
+  return ownerId;
+}
+
+/**
  * Create or get a context channel for a job
  */
 export async function getOrCreateJobChannel(
   jobId: string,
   channelName: string,
-  farmId: string
+  farmId: string,
+  createdById?: string
 ): Promise<ChatChannel> {
   // Check if channel already exists
   const [existingChannel] = await db
@@ -35,7 +45,7 @@ export async function getOrCreateJobChannel(
       type: 'context',
       contextType: 'job',
       contextId: jobId,
-      createdBy: 'system', // This should be replaced with actual user ID
+      createdBy: createdById ?? await getFarmOwnerId(farmId),
       isActive: true,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -54,7 +64,8 @@ export async function getOrCreateJobChannel(
 export async function getOrCreateAnimalChannel(
   animalId: string,
   channelName: string,
-  farmId: string
+  farmId: string,
+  createdById?: string
 ): Promise<ChatChannel> {
   // Check if channel already exists
   const [existingChannel] = await db
@@ -80,7 +91,7 @@ export async function getOrCreateAnimalChannel(
       type: 'context',
       contextType: 'animal',
       contextId: animalId,
-      createdBy: 'system', // This should be replaced with actual user ID
+      createdBy: createdById ?? await getFarmOwnerId(farmId),
       isActive: true,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -99,7 +110,8 @@ export async function getOrCreateAnimalChannel(
 export async function getOrCreateEquipmentChannel(
   equipmentId: string,
   channelName: string,
-  farmId: string
+  farmId: string,
+  createdById?: string
 ): Promise<ChatChannel> {
   // Check if channel already exists
   const [existingChannel] = await db
@@ -125,7 +137,7 @@ export async function getOrCreateEquipmentChannel(
       type: 'context',
       contextType: 'equipment',
       contextId: equipmentId,
-      createdBy: 'system', // This should be replaced with actual user ID
+      createdBy: createdById ?? await getFarmOwnerId(farmId),
       isActive: true,
       createdAt: new Date(),
       updatedAt: new Date(),

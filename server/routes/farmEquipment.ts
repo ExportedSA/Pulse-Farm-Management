@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { getUserId } from '../middleware/auth';
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import {
@@ -216,7 +217,7 @@ router.post("/", requireAuth, async (req, res) => {
     // Create a chat channel for this equipment
     try {
       const channelName = `Equipment: ${data.name}`;
-      await getOrCreateEquipmentChannel(equipmentRecord.id, channelName, farmId);
+      await getOrCreateEquipmentChannel(equipmentRecord.id, channelName, farmId, getUserId(req));
       logger.info({ equipmentId: equipmentRecord.id, channelName }, "Created chat channel for equipment");
     } catch (chatError) {
       logger.error({ error: chatError, equipmentId: equipmentRecord.id }, "Failed to create chat channel for equipment");
