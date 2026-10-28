@@ -4,6 +4,7 @@ import type { Request, Response, NextFunction } from 'express';
 // JWT payload interface
 export interface JWTPayload {
   userId: string;
+  name?: string;
   email?: string;
   role?: string;
   farmId?: string;
@@ -13,7 +14,14 @@ export interface JWTPayload {
 
 // Extended Request interface to include user
 export interface AuthenticatedRequest extends Request {
-  user?: JWTPayload;
+  user?: RequestUser;
+}
+
+// Much of the route code reads `req.user.id`, so the user ID is exposed under both names
+export type RequestUser = JWTPayload & { id: string };
+
+function toRequestUser(payload: JWTPayload): RequestUser {
+  return { ...payload, id: payload.userId };
 }
 
 /**
@@ -135,7 +143,7 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
     }
     
     const payload = verifyToken(token);
-    req.user = payload;
+    req.user = toRequestUser(payload);
     
     next();
   } catch (error) {
@@ -154,7 +162,7 @@ export function optionalAuth(req: AuthenticatedRequest, res: Response, next: Nex
     
     if (token) {
       const payload = verifyToken(token);
-      req.user = payload;
+      req.user = toRequestUser(payload);
     }
     
     next();

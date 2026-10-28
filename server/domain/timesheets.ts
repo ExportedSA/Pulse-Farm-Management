@@ -84,6 +84,21 @@ async function getStaffProfileForUser(userId: string): Promise<string | null> {
 }
 
 /**
+ * The user's staff profile ID, creating a basic profile on first use so any
+ * signed-in user can track time
+ */
+export async function getOrCreateStaffProfileForUser(userId: string): Promise<string> {
+  const existing = await getStaffProfileForUser(userId);
+  if (existing) return existing;
+
+  const [profile] = await db
+    .insert(staffProfiles)
+    .values({ userId, startDate: getCurrentDate() })
+    .returning({ id: staffProfiles.id });
+  return profile.id;
+}
+
+/**
  * Check if user has manager/admin role (can approve timesheets)
  */
 export async function canApproveTimesheets(userId: string): Promise<boolean> {
@@ -141,7 +156,10 @@ function getCurrentTime(): string {
  * Get current date in YYYY-MM-DD format
  */
 function getCurrentDate(): string {
-  return new Date().toISOString().split('T')[0];
+  // Local date, to match getCurrentTime (toISOString would give the UTC date,
+  // which in NZ is still "yesterday" until midday or 1pm)
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
 // ===== TIMESHEET FUNCTIONS =====

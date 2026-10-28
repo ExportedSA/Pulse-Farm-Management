@@ -74,6 +74,7 @@ router.post('/register', async (req, res) => {
     // Generate tokens
     const tokenPayload = {
       userId: result.user.id,
+      name: result.user.name,
       email: result.user.email,
       role: result.user.role,
       farmId: result.farm?.id,
@@ -150,6 +151,7 @@ router.post('/login', async (req, res) => {
     // Generate tokens
     const tokenPayload = {
       userId: user.id,
+      name: user.name,
       email: user.email,
       role: user.role,
       farmId: userFarm?.id,
@@ -211,6 +213,7 @@ router.post('/refresh', async (req, res) => {
     // Generate new tokens
     const tokenPayload = {
       userId: user.id,
+      name: user.name,
       email: user.email,
       role: user.role,
       farmId: userFarm?.id,

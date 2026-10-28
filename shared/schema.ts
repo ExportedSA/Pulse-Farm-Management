@@ -3363,6 +3363,9 @@ export const timesheets = pgTable('timesheets', {
   approvedBy: uuid('approved_by').references(() => users.id),
   approvedAt: timestamp('approved_at'),
   notes: text('notes'),
+  // Individual breaks and logged tasks within the shift (minutes in `duration`)
+  breaks: jsonb('breaks').$type<{ start: string; end?: string; duration?: number }[]>().default(sql`'[]'::jsonb`).notNull(),
+  taskLog: jsonb('task_log').$type<{ taskTitle: string; startTime: string; endTime?: string; duration?: number; category?: string }[]>().default(sql`'[]'::jsonb`).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
