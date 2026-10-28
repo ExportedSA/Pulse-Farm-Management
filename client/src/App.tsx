@@ -178,12 +178,10 @@ function Router() {
         <Route path="/app/reports" component={ReportsExportPage} />
         <Route path="/app/weather" component={WeatherIntegrationPage} />
         <Route path="/app/milk-analytics" component={MilkAnalyticsPage} />
-        <Route path="/app/compliance" component={CompliancePage} />
         <Route path="/app/farm-compliance" component={FarmCompliancePage} />
         <Route path="/app/nait" component={NaitRecordsPage} />
         <Route path="/app/treatments/:section?" component={Home} />
         <Route path="/app/batch-treatment" component={BatchTreatmentPage} />
-        <Route path="/app/animals" component={AnimalsList} />
         <Route path="/app/import" component={CSVImportPage} />
         <Route path="/app/stock-reconciliation" component={StockReconciliationPage} />
         <Route path="/app/map-tasks" component={MapTasksPage} />
