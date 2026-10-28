@@ -31,6 +31,20 @@ export function getFarmId(req: Request): string | undefined {
   return (req as AuthenticatedRequest).user?.farmId;
 }
 
+/**
+ * Use after requireAuth on farm-scoped routes. Tokens issued before a user joined a farm
+ * have no farmId; signing in again picks the farm up.
+ */
+export function requireFarm(req: Request, res: Response, next: NextFunction) {
+  if (!getFarmId(req)) {
+    return res.status(403).json({
+      error: 'No farm selected',
+      message: 'Your account is not linked to a farm. Sign in again, or ask a farm owner to add you.',
+    });
+  }
+  next();
+}
+
 // JWT Secret from environment
 function getJWTSecret(): string {
   const secret = process.env.JWT_SECRET;

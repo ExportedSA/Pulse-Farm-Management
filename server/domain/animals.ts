@@ -1,7 +1,6 @@
 import { db } from '../db';
 import { animals, animalHealthRecords, users, type Animal } from '@shared/schema';
 import { eq, and, desc } from 'drizzle-orm';
-import { nanoid } from 'nanoid';
 
 // ===== CUSTOM ERROR CLASSES =====
 
@@ -84,7 +83,6 @@ export async function createAnimal(params: {
   notes?: string;
 }): Promise<Animal> {
   const [animal] = await db.insert(animals).values({
-    id: nanoid(),
     ...params,
     createdAt: new Date(),
     updatedAt: new Date(),

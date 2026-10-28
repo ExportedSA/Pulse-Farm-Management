@@ -3899,6 +3899,23 @@ export const equipmentServiceHistory = pgTable('equipment_service_history', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// Recurring maintenance plans per piece of equipment (several per item, e.g. oil + belts)
+export const equipmentMaintenanceSchedules = pgTable('equipment_maintenance_schedules', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  equipmentId: uuid('equipment_id').references(() => equipment.id, { onDelete: 'cascade' }).notNull(),
+  maintenanceType: varchar('maintenance_type', { length: 100 }).notNull(), // e.g. "Oil change"
+  frequency: varchar('frequency', { length: 20 }).notNull(), // weekly | monthly | quarterly | yearly
+  nextDue: date('next_due').notNull(),
+  lastCompleted: date('last_completed'),
+  priority: varchar('priority', { length: 10 }).default('medium').notNull(), // high | medium | low
+  estimatedCost: numeric('estimated_cost', { precision: 10, scale: 2 }),
+  notes: text('notes'),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // IoT Device types and status
 export const deviceTypeEnum = pgEnum('device_type', [
   'temperature_sensor',

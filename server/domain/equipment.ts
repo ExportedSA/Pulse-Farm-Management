@@ -11,7 +11,6 @@ import {
   type DeviceDataLog,
 } from '@shared/schema';
 import { eq, and, desc, lt, gte, isNull, isNotNull } from 'drizzle-orm';
-import { nanoid } from 'nanoid';
 
 // ===== ERROR CLASSES =====
 
@@ -62,7 +61,6 @@ export async function createEquipment(params: {
   notes?: string;
 }): Promise<Equipment> {
   const [equipmentRecord] = await db.insert(equipment).values({
-    id: nanoid(),
     ...params,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -242,7 +240,6 @@ export async function logServiceHistory(params: {
   notes?: string;
 }): Promise<any> {
   const [serviceRecord] = await db.insert(equipmentServiceHistory).values({
-    id: nanoid(),
     ...params,
     createdAt: new Date(),
   }).returning();
@@ -306,7 +303,6 @@ export async function registerDevice(params: {
   }
 
   const [device] = await db.insert(devices).values({
-    id: nanoid(),
     ...params,
     status: 'offline', // New devices start offline until they ping
     isActive: true,
@@ -498,7 +494,6 @@ export async function logDeviceData(params: {
   await updateDeviceStatus(params.deviceId, 'online', params.data);
 
   const [log] = await db.insert(deviceDataLogs).values({
-    id: nanoid(),
     ...params,
     createdAt: new Date(),
   }).returning();

@@ -1,7 +1,6 @@
 import { db } from '../db';
 import { chatChannels, chatChannelMembers, type ChatChannel } from '@shared/schema';
 import { eq, and } from 'drizzle-orm';
-import { nanoid } from 'nanoid';
 import { listFarmUserIds } from './farms';
 
 /**
@@ -32,7 +31,6 @@ export async function getOrCreateJobChannel(
   const [newChannel] = await db
     .insert(chatChannels)
     .values({
-      id: nanoid(),
       name: channelName,
       type: 'context',
       contextType: 'job',
@@ -78,7 +76,6 @@ export async function getOrCreateAnimalChannel(
   const [newChannel] = await db
     .insert(chatChannels)
     .values({
-      id: nanoid(),
       name: channelName,
       type: 'context',
       contextType: 'animal',
@@ -124,7 +121,6 @@ export async function getOrCreateEquipmentChannel(
   const [newChannel] = await db
     .insert(chatChannels)
     .values({
-      id: nanoid(),
       name: channelName,
       type: 'context',
       contextType: 'equipment',
@@ -154,7 +150,6 @@ async function addFarmStaffToChannel(channelId: string, farmId: string): Promise
     await db
       .insert(chatChannelMembers)
       .values({
-        id: nanoid(),
         channelId,
         userId: user.id,
         role: 'member',
