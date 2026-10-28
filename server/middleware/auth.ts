@@ -16,6 +16,21 @@ export interface AuthenticatedRequest extends Request {
   user?: JWTPayload;
 }
 
+/**
+ * The signed-in user's ID (set by requireAuth/optionalAuth). The JWT payload calls it
+ * `userId`; reading `req.user.id` always gives undefined.
+ */
+export function getUserId(req: Request): string | undefined {
+  return (req as AuthenticatedRequest).user?.userId;
+}
+
+/**
+ * The farm the signed-in user is working in, from their token
+ */
+export function getFarmId(req: Request): string | undefined {
+  return (req as AuthenticatedRequest).user?.farmId;
+}
+
 // JWT Secret from environment
 function getJWTSecret(): string {
   const secret = process.env.JWT_SECRET;

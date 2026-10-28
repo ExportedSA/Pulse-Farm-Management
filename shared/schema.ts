@@ -131,6 +131,23 @@ export const farms = pgTable('farms', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// Farm Members (which users belong to which farm, and their role on that farm)
+export const farmMembers = pgTable('farm_members', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  userId: uuid('user_id').references(() => users.id).notNull(),
+  role: userRoleEnum('role').default('worker').notNull(),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  uniqueFarmUser: sql`UNIQUE (farm_id, user_id)`,
+}));
+
+export type Farm = typeof farms.$inferSelect;
+export type FarmMember = typeof farmMembers.$inferSelect;
+export type InsertFarmMember = typeof farmMembers.$inferInsert;
+
 // Product Batches (Stock/Inventory Records - formerly RecordItem)
 export const productBatches = pgTable('product_batches', {
   id: uuid('id').primaryKey().defaultRandom(),

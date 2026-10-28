@@ -67,6 +67,7 @@ import reportsRouter from "./routes/reports";
 import externalApisRouter from "./routes/external-apis";
 import iotRouter from "./routes/iot";
 import multiFarmRouter from "./routes/multi-farm";
+import farmsRouter from "./routes/farms";
 import animalTagsRouter from "./routes/animal-tags";
 // Phase overlay routes
 import medCoreRouter from "./routes/med.core";
@@ -167,7 +168,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ===== IOT INTEGRATIONS =====
   app.use(iotRouter);
 
-  // ===== MULTI-FARM MANAGEMENT =====
+  // ===== FARMS & MEMBERSHIP =====
+  app.use("/api/farms", requireAuth, farmsRouter);
+
+  // ===== MULTI-FARM MANAGEMENT (groups, comparisons) =====
   app.use(multiFarmRouter);
 
   // ===== ANIMAL TAG MANAGEMENT =====

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { getUserId } from '../middleware/auth';
 import { z } from 'zod';
 import { db } from '../db';
 import {
@@ -296,7 +297,7 @@ router.post('/:id/documents', async (req, res) => {
 router.put('/documents/:docId/verify', async (req, res) => {
   try {
     const { docId } = req.params;
-    const userId = 'demo-user'; // Simplified auth
+    const userId = getUserId(req)!; // requireAuth guarantees a user
 
     const [updated] = await db
       .update(contractorDocuments)

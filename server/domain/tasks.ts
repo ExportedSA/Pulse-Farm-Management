@@ -1,4 +1,5 @@
 import { db } from '../db';
+import { isFarmMember } from './farms';
 import { 
   tasks, 
   jobs, 
@@ -89,18 +90,10 @@ export interface CreateJobParams {
 // ===== HELPER FUNCTIONS =====
 
 /**
- * Verify that a user belongs to the farm (via staff profile or user record)
+ * Verify that a user is an active member of the farm
  */
 async function verifyUserInFarm(userId: string, farmId: string): Promise<boolean> {
-  // For now, we assume all active users can be assigned tasks
-  // In a more complex system, check staff_profiles or farm membership
-  const [user] = await db
-    .select()
-    .from(users)
-    .where(and(eq(users.id, userId), eq(users.isActive, true)))
-    .limit(1);
-  
-  return !!user;
+  return isFarmMember(userId, farmId);
 }
 
 /**

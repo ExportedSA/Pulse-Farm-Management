@@ -7,78 +7,7 @@ import { multiFarmService } from '../services/multi-farm-service';
 
 const router = Router();
 
-// ============ Farm Management ============
-
-// Get all farms for user
-router.get('/api/farms', async (req: Request, res: Response) => {
-  try {
-    // In production, get userId from auth context
-    const userId = (req as any).user?.id || 'user-001';
-    const farms = multiFarmService.getFarmsForUser(userId);
-    res.json({ success: true, data: farms });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to fetch farms' });
-  }
-});
-
-// Get all farms (admin)
-router.get('/api/farms/all', async (req: Request, res: Response) => {
-  try {
-    const farms = multiFarmService.getAllFarms();
-    res.json({ success: true, data: farms });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to fetch farms' });
-  }
-});
-
-// Get farm by ID
-router.get('/api/farms/:farmId', async (req: Request, res: Response) => {
-  try {
-    const farm = multiFarmService.getFarm(req.params.farmId);
-    if (!farm) {
-      return res.status(404).json({ success: false, error: 'Farm not found' });
-    }
-    res.json({ success: true, data: farm });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to fetch farm' });
-  }
-});
-
-// Create new farm
-router.post('/api/farms', async (req: Request, res: Response) => {
-  try {
-    const farm = multiFarmService.createFarm(req.body);
-    res.json({ success: true, data: farm });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to create farm' });
-  }
-});
-
-// Update farm
-router.put('/api/farms/:farmId', async (req: Request, res: Response) => {
-  try {
-    const farm = multiFarmService.updateFarm(req.params.farmId, req.body);
-    if (!farm) {
-      return res.status(404).json({ success: false, error: 'Farm not found' });
-    }
-    res.json({ success: true, data: farm });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to update farm' });
-  }
-});
-
-// Archive farm
-router.post('/api/farms/:farmId/archive', async (req: Request, res: Response) => {
-  try {
-    const success = multiFarmService.archiveFarm(req.params.farmId);
-    if (!success) {
-      return res.status(404).json({ success: false, error: 'Farm not found' });
-    }
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to archive farm' });
-  }
-});
+// Farm CRUD and membership live in routes/farms.ts (database-backed)
 
 // ============ Farm Groups ============
 

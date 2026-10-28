@@ -1,7 +1,8 @@
 import { db } from '../db';
-import { chatChannels, chatChannelMembers, users, type ChatChannel } from '@shared/schema';
+import { chatChannels, chatChannelMembers, type ChatChannel } from '@shared/schema';
 import { eq, and } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
+import { listFarmUserIds } from './farms';
 
 /**
  * Create or get a context channel for a job
@@ -145,13 +146,8 @@ export async function getOrCreateEquipmentChannel(
  * Add all active farm staff to a channel
  */
 async function addFarmStaffToChannel(channelId: string, farmId: string): Promise<void> {
-  // Get all active users for the farm
-  // Note: This is a simplified approach. In a real implementation, you'd have a proper
-  // staff profiles table with farm associations
-  const farmUsers = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.farmId, farmId));
+  // Get all active members of the farm
+  const farmUsers = (await listFarmUserIds(farmId)).map(id => ({ id }));
 
   // Add each user to the channel
   for (const user of farmUsers) {

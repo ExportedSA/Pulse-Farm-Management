@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db } from "../db";
 import { farmHazards, users } from "@shared/schema";
 import { eq, and, isNull, desc } from "drizzle-orm";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, getUserId } from "../middleware/auth";
 import { triggerComplianceChecks, getComplianceStatus } from "../scheduler";
 import logger from "../config/logger";
 
@@ -98,7 +98,7 @@ router.get("/hazards", requireAuth, async (req, res) => {
 // Create new hazard
 router.post("/hazards", requireAuth, async (req, res) => {
   try {
-    const userId = (req.user as any)?.id || "demo-user";
+    const userId = getUserId(req)!;
     const { title, description, type, riskLevel, location, severity } = req.body;
     
     const [hazard] = await db.insert(farmHazards).values({
@@ -127,7 +127,7 @@ router.post("/hazards", requireAuth, async (req, res) => {
 router.post("/hazards/:id/resolve", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = (req.user as any)?.id || "demo-user";
+    const userId = getUserId(req)!;
     
     const [resolvedHazard] = await db.update(farmHazards)
       .set({
@@ -168,7 +168,7 @@ router.get("/incidents", requireAuth, async (req, res) => {
 // Create new incident
 router.post("/incidents", requireAuth, async (req, res) => {
   try {
-    const userId = (req.user as any)?.id || "demo-user";
+    const userId = getUserId(req)!;
     const { type, description, occurredAt, severity, location } = req.body;
     
     const newIncident = {
@@ -233,7 +233,7 @@ router.get("/inductions", requireAuth, async (req, res) => {
 router.get("/inductions/completions", requireAuth, async (req, res) => {
   try {
     const { userId } = req.query;
-    const targetUserId = userId || (req.user as any)?.id || "demo-user";
+    const targetUserId = userId || getUserId(req)!;
     
     // In production, this would query the database
     const userCompletions = inductionCompletions.filter(c => c.userId === targetUserId);
@@ -251,7 +251,7 @@ router.get("/inductions/completions", requireAuth, async (req, res) => {
 // Create check-in (stub endpoint)
 router.post("/checkins", requireAuth, async (req, res) => {
   try {
-    const userId = (req.user as any)?.id || "demo-user";
+    const userId = getUserId(req)!;
     const checkInData = {
       ...req.body,
       id: String(Date.now()),

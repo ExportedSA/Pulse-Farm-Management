@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../db';
-import { users, farms } from '@shared/schema';
+import { users, farms, farmMembers } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 import { hashPassword } from '../password';
 import { generateToken, generateRefreshToken, verifyToken, requireAuth, AUTH_COOKIE, authCookieOptions, type AuthenticatedRequest } from '../middleware/auth';
 import { sanitizeUser } from '../auth-utils';
+import { getUserFarm } from '../domain/farms';
 
 const router = Router();
 
@@ -61,12 +62,10 @@ router.post('/register', async (req, res) => {
       if (farmName) {
         [farm] = await tx.insert(farms).values({
           name: farmName,
-          ownerId: newUser.id,
-          address: '',
-          phone: '',
-          email: email,
+          contactEmail: email,
           isActive: true,
         }).returning();
+        await tx.insert(farmMembers).values({ farmId: farm.id, userId: newUser.id, role: 'owner' });
       }
 
       return { user: newUser, farm };
@@ -87,6 +86,8 @@ router.post('/register', async (req, res) => {
     await db.update(users)
       .set({ lastLoginAt: new Date() })
       .where(eq(users.id, result.user.id));
+
+    res.cookie(AUTH_COOKIE, accessToken, authCookieOptions);
 
     // Return user data without password
     res.status(201).json({
@@ -143,8 +144,8 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    // farms has no owner/membership column yet, so there is no farm to look up
-    const userFarm: typeof farms.$inferSelect | undefined = undefined;
+    // The user's default farm (first active membership)
+    const userFarm = await getUserFarm(user.id);
 
     // Generate tokens
     const tokenPayload = {
@@ -204,8 +205,8 @@ router.post('/refresh', async (req, res) => {
       });
     }
 
-    // farms has no owner/membership column yet, so there is no farm to look up
-    const userFarm: typeof farms.$inferSelect | undefined = undefined;
+    // The user's default farm (first active membership)
+    const userFarm = await getUserFarm(user.id);
 
     // Generate new tokens
     const tokenPayload = {
@@ -264,8 +265,8 @@ router.get(['/me', '/user'], requireAuth, async (req: AuthenticatedRequest, res)
       });
     }
 
-    // farms has no owner/membership column yet, so there is no farm to look up
-    const userFarm: typeof farms.$inferSelect | undefined = undefined;
+    // The user's default farm (first active membership)
+    const userFarm = await getUserFarm(user.id);
 
     res.json({
       user: sanitizeUser(user),
