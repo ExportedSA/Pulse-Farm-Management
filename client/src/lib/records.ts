@@ -120,7 +120,7 @@ export const RECORD_TYPES: RecordTypeDef[] = [
     type: "document", label: "Document", color: "#495057", defaultTags: ["Compliance"], mapped: false, titleFrom: "documentType",
     fields: [
       { key: "documentType", label: "Document", kind: "select", required: true, options: [
-        "Feed declaration", "Consent", "Certificate", "Spray plan", "Nutrient budget", "Farm plan", "Contract", "Invoice", "Other",
+        "Feed declaration", "ASD", "Consent", "Certificate", "Spray plan", "Nutrient budget", "Farm plan", "Contract", "Invoice", "Other",
       ] },
       { key: "issuer", label: "From", kind: "text", placeholder: "Supplier, council, vet…" },
       { key: "reference", label: "Reference", kind: "text" },

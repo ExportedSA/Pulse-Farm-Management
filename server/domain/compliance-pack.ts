@@ -139,12 +139,12 @@ async function loadSeason(farmId: string, season: string) {
       lt(stockTransactions.date, ymd(to)),
     ))
     .orderBy(asc(stockTransactions.date));
-  const ids = [...records.map(r => r.id), ...documents.map(d => d.id), ...stock.map(l => l.movementId).filter((id): id is string => !!id)];
+  const ids = [...records.map(r => r.id), ...documents.map(d => d.id)];
   const photos = ids.length
     ? await db
       .select({ entityId: attachments.entityId })
       .from(attachments)
-      .where(and(eq(attachments.farmId, farmId), inArray(attachments.entityType, ['record', 'stock_movement']), inArray(attachments.entityId, ids)))
+      .where(and(eq(attachments.farmId, farmId), eq(attachments.entityType, 'record'), inArray(attachments.entityId, ids)))
     : [];
   const treatments = await db
     .select({
@@ -377,7 +377,7 @@ export async function complianceReadiness(farmId: string, season: string, now = 
   const stockIssues: Issue[] = [];
   for (const [id, lines] of Array.from(offFarm)) {
     const first = lines[0];
-    if (!first.asdNumber && !data.withPhoto.has(id)) {
+    if (!first.asdNumber && !(first.recordId && data.withPhoto.has(first.recordId))) {
       const head = lines.reduce((sum, l) => sum + l.quantity, 0);
       stockIssues.push({
         title: `${STOCK_MOVEMENT_LABELS[first.type as StockMovementType]}: ${head} head (${first.date})`,
@@ -526,7 +526,7 @@ export async function auditPack(farmId: string, season: string) {
     headers: ['Date', 'Movement', 'Stock class', 'Head', 'From / to', 'Their NAIT number', 'ASD number', 'ASD photo', 'Notes'],
     rows: data.stock.map(l => [l.date, STOCK_MOVEMENT_LABELS[l.type as StockMovementType] ?? l.type, text(l.stockClass), String(l.quantity),
       text(l.fromLocation ?? l.toLocation), text(l.otherPartyNait), text(l.asdNumber),
-      l.movementId && data.withPhoto.has(l.movementId) ? 'Yes' : 'No', text(l.notes)]),
+      l.recordId && data.withPhoto.has(l.recordId) ? 'Yes' : 'No', text(l.notes)]),
   });
 
   sections.push({

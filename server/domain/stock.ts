@@ -2,11 +2,12 @@ import { randomUUID } from 'crypto';
 import { db } from '../db';
 import { animals, stockCounts, stockTransactions, type StockCount } from '@shared/schema';
 import { and, count, desc, eq, isNull } from 'drizzle-orm';
-import { STOCK_IN_TYPES, STOCK_OUT_TYPES, type StockMovementType } from '@shared/stock';
+import { STOCK_IN_TYPES, STOCK_OUT_TYPES, STOCK_MOVEMENT_LABELS, type StockMovementType } from '@shared/stock';
 import { attachmentsFor, saveAttachments, toApiAttachment } from './attachments';
+import { createRecord, deleteRecord } from './records';
 
-// Stock reconciliation: tallies per stock class from the last stocktake plus movements since,
-// with each movement's ASD form photographed as evidence
+// Stock reconciliation: tallies per stock class from the last stocktake plus movements since.
+// Each movement's ASD photo is kept as a Document record in Records, which the movement points at.
 
 export interface MovementInput {
   type: StockMovementType;
@@ -25,9 +26,26 @@ export async function createMovement(farmId: string, userId: string, input: Move
   const movementId = randomUUID();
   const incoming = direction(input.type) > 0;
   const party = input.otherParty || null;
+
+  let recordId: string | null = null;
+  if (files.length > 0) {
+    const head = input.lines.map(l => `${l.quantity} ${l.stockClass}`).join(', ');
+    const { record } = await createRecord(farmId, userId, {
+      type: 'document',
+      title: [`ASD${input.asdNumber ? ` ${input.asdNumber}` : ''}`, `${STOCK_MOVEMENT_LABELS[input.type]} ${head}`].join(' – ').slice(0, 255),
+      occurredAt: new Date(input.date),
+      notes: input.notes || null,
+      details: { documentType: 'ASD', reference: input.asdNumber || undefined, issuer: party || undefined, movementId },
+      tags: ['Compliance'],
+    });
+    await saveAttachments(farmId, 'record', record.id, files, userId, { takenAt: new Date(input.date) });
+    recordId = record.id;
+  }
+
   await db.insert(stockTransactions).values(input.lines.map(line => ({
     farmId,
     movementId,
+    recordId,
     type: input.type,
     date: input.date,
     quantity: line.quantity,
@@ -42,9 +60,6 @@ export async function createMovement(farmId: string, userId: string, input: Move
     notes: input.notes || null,
     createdBy: userId,
   })));
-  if (files.length > 0) {
-    await saveAttachments(farmId, 'stock_movement', movementId, files, userId, { takenAt: new Date(input.date) });
-  }
   return movementId;
 }
 
@@ -53,7 +68,10 @@ export async function deleteMovement(farmId: string, movementId: string): Promis
     .update(stockTransactions)
     .set({ deletedAt: new Date() })
     .where(and(eq(stockTransactions.farmId, farmId), eq(stockTransactions.movementId, movementId), isNull(stockTransactions.deletedAt)))
-    .returning({ id: stockTransactions.id });
+    .returning({ id: stockTransactions.id, recordId: stockTransactions.recordId });
+  // The ASD record goes too; both stay in the audit history
+  const recordId = rows.find(r => r.recordId)?.recordId;
+  if (recordId) await deleteRecord(farmId, recordId);
   return rows.length > 0;
 }
 
@@ -99,6 +117,7 @@ export async function stockReconciliation(farmId: string) {
     if (!movements.has(key)) {
       movements.set(key, {
         id: key,
+        recordId: line.recordId,
         type: line.type,
         date: line.date,
         asdNumber: line.asdNumber,
@@ -112,8 +131,8 @@ export async function stockReconciliation(farmId: string) {
     movements.get(key).lines.push({ stockClass: line.stockClass, quantity: line.quantity });
   }
   const recent = Array.from(movements.values()).slice(0, 100);
-  const files = await attachmentsFor('stock_movement', recent.map(m => m.id));
-  for (const m of recent) m.attachments = (files.get(m.id) ?? []).map(toApiAttachment);
+  const files = await attachmentsFor('record', recent.map(m => m.recordId).filter(Boolean));
+  for (const m of recent) m.attachments = (m.recordId ? files.get(m.recordId) ?? [] : []).map(toApiAttachment);
 
   // Animals tagged in the register, to compare with the tally
   const [{ register }] = await db

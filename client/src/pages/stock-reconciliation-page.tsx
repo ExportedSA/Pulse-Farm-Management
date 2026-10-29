@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { Camera, ClipboardCheck, Paperclip, Plus, Trash2, X } from "lucide-react";
@@ -17,7 +18,7 @@ interface ClassTally {
   stockClass: string; counted: { count: number; countedAt: string } | null; in: number; out: number; tally: number;
 }
 interface Movement {
-  id: string; type: StockMovementType; date: string; asdNumber: string | null; otherParty: string | null;
+  id: string; recordId: string | null; type: StockMovementType; date: string; asdNumber: string | null; otherParty: string | null;
   otherPartyNait: string | null; notes: string | null;
   lines: { stockClass: string | null; quantity: number }[];
   attachments: { id: string; kind: string; url: string; fileName: string | null }[];
@@ -36,6 +37,30 @@ const isIn = (type: StockMovementType) => (STOCK_IN_TYPES as readonly string[]).
 const QUERY_KEY = ["/api/stock-recon"];
 
 const selectClass = "h-9 w-full rounded-md border bg-background px-2 text-sm";
+
+// Long side of a stored ASD photo: plenty to read the form, small enough to upload on farm signal
+const ASD_MAX_PX = 2400;
+
+/**
+ * ASD photos are kept as PNG. Images the browser can't decode (e.g. HEIC outside Safari) are kept as they are.
+ */
+async function toPng(file: File): Promise<File> {
+  if (!file.type.startsWith("image/") || file.type === "image/png") return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, ASD_MAX_PX / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, "image/png"));
+    if (!blob) return file;
+    return new File([blob], file.name.replace(/\.[^.]+$/, "") + ".png", { type: "image/png" });
+  } catch {
+    return file;
+  }
+}
 
 /**
  * Photograph the ASD, then enter what it says while looking at the photo
@@ -87,14 +112,19 @@ function MovementDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const addFiles = (list: FileList | null) => setFiles(f => [...f, ...Array.from(list ?? [])].slice(0, 8));
+  const addFiles = async (list: FileList | null) => {
+    const converted = await Promise.all(Array.from(list ?? []).map(toPng));
+    setFiles(f => [...f, ...converted].slice(0, 8));
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Stock movement</DialogTitle>
-          <DialogDescription>Take a photo of the ASD, then fill in the numbers from it. The photo is kept as your evidence.</DialogDescription>
+          <DialogDescription>
+            Take a photo of the ASD, then fill in the numbers from it. The photo is saved as a PNG in Records (Documents) and linked to this movement.
+          </DialogDescription>
         </DialogHeader>
         <div className="grid gap-5 md:grid-cols-2">
           <div className="space-y-2">
@@ -289,6 +319,9 @@ function MovementRow({ m, onDelete }: { m: Movement; onDelete: (id: string) => v
           )}
         </p>
         {m.notes && <p className="text-xs mt-0.5">{m.notes}</p>}
+        {m.recordId && (
+          <Link href="/app/records#documents" className="text-xs underline text-pulse-forest">ASD record in Records</Link>
+        )}
       </div>
       <div className="flex items-center gap-2">
         {m.attachments.map(a => (

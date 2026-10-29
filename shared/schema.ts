@@ -1355,7 +1355,7 @@ export const tags = pgTable('tags', {
 export type Tag = typeof tags.$inferSelect;
 
 // Kinds of thing a tag or attachment can belong to
-export const TAGGABLE_TYPES = ['record', 'job', 'task', 'animal', 'chat_message', 'attachment', 'stock_movement'] as const;
+export const TAGGABLE_TYPES = ['record', 'job', 'task', 'animal', 'chat_message', 'attachment'] as const;
 export type TaggableType = typeof TAGGABLE_TYPES[number];
 
 export const taggings = pgTable('taggings', {
@@ -1958,6 +1958,8 @@ export const stockTransactions = pgTable('stock_transactions', {
   farmId: uuid('farm_id').references(() => farms.id),
   // Lines from one ASD / movement share a movement id; its photos attach to that id
   movementId: uuid('movement_id'),
+  // The Document record (in Records) that holds the ASD photo
+  recordId: uuid('record_id').references(() => farmRecords.id),
   stockClass: varchar('stock_class', { length: 50 }),
   asdNumber: varchar('asd_number', { length: 50 }),
   otherPartyNait: varchar('other_party_nait', { length: 50 }),
