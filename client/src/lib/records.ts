@@ -3,7 +3,7 @@
 import type { AreaGeometry } from "@shared/geo";
 
 export type RecordType =
-  | "spray" | "fertiliser" | "feed_in" | "baleage" | "effluent"
+  | "spray" | "fertiliser" | "feed_in" | "feed_out" | "baleage" | "effluent" | "monthly_check"
   | "fencing" | "job_done" | "maintenance" | "medical" | "health_safety" | "note" | "document";
 
 export interface FieldDef {
@@ -28,33 +28,47 @@ export interface RecordTypeDef {
   titleFrom?: string;
 }
 
+export const MONTHLY_CHECK_ITEMS = [
+  { key: "plantCheck", label: "Plant check" },
+  { key: "milkCooling", label: "Milk cooling" },
+  { key: "extendedMilkCooling", label: "Extended milk cooling" },
+  { key: "cleanliness", label: "General cleanliness" },
+  { key: "drugExpiry", label: "Drug expiry check" },
+  { key: "chemicalUse", label: "Chemical use" },
+  { key: "washWater", label: "Wash programme and water quality" },
+  { key: "treatmentManagement", label: "Management of animal treatments" },
+  { key: "milkHygiene", label: "Milk health and hygiene" },
+];
+
 export const RECORD_TYPES: RecordTypeDef[] = [
   {
-    type: "spray", label: "Spray", color: "#9c36b5", defaultTags: ["Spray"], mapped: true, titleFrom: "product",
+    type: "spray", label: "Spray", color: "#9c36b5", defaultTags: ["Spray"], mapped: true, titleFrom: "reasonForUse",
+    // Products, active ingredients and rates are entered as a tank mix (details.products)
     fields: [
-      { key: "product", label: "Chemical / product", kind: "text", required: true, placeholder: "e.g. Tordon Brushkiller" },
-      { key: "activeIngredient", label: "Active ingredient", kind: "text", placeholder: "e.g. triclopyr + picloram" },
-      { key: "rate", label: "Rate", kind: "number", required: true },
-      { key: "rateUnit", label: "Rate unit", kind: "select", options: ["L/ha", "mL/ha", "kg/ha", "g/ha", "mL/10L"] },
+      { key: "reasonForUse", label: "Reason for use", kind: "text", required: true, placeholder: "e.g. thistles, ragwort, gorse" },
+      { key: "applicationMethod", label: "Application method", kind: "select", required: true, options: ["Boom sprayer", "Spot spray / handgun", "Knapsack", "Weed wiper", "Aerial", "Other"] },
       { key: "waterRate", label: "Water rate", kind: "number", unit: "L/ha" },
-      { key: "target", label: "Target weed or pest", kind: "text", placeholder: "e.g. thistles, gorse" },
-      { key: "withholdingDays", label: "Grazing withholding", kind: "number", unit: "days" },
+      { key: "withholdingDays", label: "Non-grazing period", kind: "number", unit: "days", required: true },
       { key: "windDirection", label: "Wind direction", kind: "select", options: ["Calm", "N", "NE", "E", "SE", "S", "SW", "W", "NW"] },
       { key: "windSpeed", label: "Wind speed", kind: "number", unit: "km/h" },
       { key: "temperature", label: "Temperature", kind: "number", unit: "°C" },
-      { key: "operator", label: "Applied by", kind: "text" },
+      { key: "operator", label: "Person applying", kind: "text", required: true },
       { key: "operatorCert", label: "Operator certificate no.", kind: "text", placeholder: "e.g. Growsafe number" },
     ],
   },
   {
     type: "fertiliser", label: "Fertiliser", color: "#5c940d", defaultTags: ["Fertiliser"], mapped: true, titleFrom: "product",
+    // The product is picked from the library, which fills in the analysis
     fields: [
-      { key: "product", label: "Product", kind: "text", required: true, placeholder: "e.g. Urea, SustaiN, Superten" },
-      { key: "rate", label: "Rate", kind: "number", required: true, unit: "kg/ha" },
+      { key: "rate", label: "Rate", kind: "number", unit: "kg/ha" },
+      { key: "amountApplied", label: "Or total applied", kind: "number" },
+      { key: "amountUnit", label: "Total unit", kind: "select", options: ["t", "kg"] },
       { key: "nPercent", label: "Nitrogen (N)", kind: "number", unit: "%" },
       { key: "pPercent", label: "Phosphorus (P)", kind: "number", unit: "%" },
       { key: "kPercent", label: "Potassium (K)", kind: "number", unit: "%" },
       { key: "sPercent", label: "Sulphur (S)", kind: "number", unit: "%" },
+      { key: "reasonForUse", label: "Reason", kind: "select", options: ["Pasture", "Crop", "Maintenance", "Capital"] },
+      { key: "applicationMethod", label: "Application method", kind: "select", options: ["Ground spreader", "Aerial", "Fertigation", "By hand"] },
       { key: "applicator", label: "Spread by", kind: "text", placeholder: "Owner, or contractor name" },
       { key: "docketNumber", label: "Docket number", kind: "text" },
     ],
@@ -83,12 +97,34 @@ export const RECORD_TYPES: RecordTypeDef[] = [
     ],
   },
   {
+    type: "feed_out", label: "Feed out / grazing", color: "#e8590c", defaultTags: ["Feed"], mapped: true, titleFrom: "product",
+    fields: [
+      { key: "product", label: "Feed", kind: "text", required: true, placeholder: "e.g. Pasture, baleage, PKE, maize silage" },
+      { key: "mob", label: "Mob / group", kind: "text", placeholder: "e.g. Milkers, Mob 2, Heifers" },
+      { key: "amount", label: "Amount fed", kind: "number" },
+      { key: "unit", label: "Unit", kind: "select", options: ["t", "kg", "bales", "kg DM"] },
+      { key: "source", label: "Source", kind: "select", required: true, options: ["Home-grown", "Bought in"] },
+      { key: "hectaresGrazed", label: "Area grazed", kind: "number", unit: "ha" },
+    ],
+  },
+  {
     type: "effluent", label: "Effluent", color: "#5f3dc4", defaultTags: ["Effluent"], mapped: true,
     fields: [
       { key: "depthMm", label: "Depth applied", kind: "number", unit: "mm" },
       { key: "volumeM3", label: "Volume", kind: "number", unit: "m³" },
       { key: "pondLevel", label: "Pond level", kind: "number", unit: "%" },
       { key: "soilCondition", label: "Soil condition", kind: "select", options: ["Dry", "Moist", "Wet", "Saturated"] },
+    ],
+  },
+  {
+    type: "monthly_check", label: "Monthly check", color: "#0c8599", defaultTags: ["Compliance"], mapped: false,
+    titleFrom: "month",
+    // Fonterra Dairy Diary monthly checks
+    fields: [
+      { key: "month", label: "Month checked", kind: "select", required: true, options: [
+        "June", "July", "August", "September", "October", "November", "December", "January", "February", "March", "April", "May",
+      ] },
+      ...MONTHLY_CHECK_ITEMS.map(item => ({ key: item.key, label: item.label, kind: "select" as const, options: ["Pass", "Fail", "N/A"] })),
     ],
   },
   {
@@ -157,15 +193,35 @@ export function detailSummary(record: Pick<FarmRecord, "type" | "details">): str
   const parts: string[] = [];
   switch (record.type) {
     case "spray":
-      if (has(d.product)) parts.push(d.product);
-      if (has(d.rate)) parts.push(`${d.rate} ${d.rateUnit ?? "L/ha"}`);
-      if (has(d.withholdingDays)) parts.push(`${d.withholdingDays} day withholding`);
+      if (Array.isArray(d.products) && d.products.length > 0) {
+        parts.push(d.products.map((p: any) => [p.product, has(p.rate) ? `${p.rate} ${p.rateUnit ?? "L/ha"}` : ""].filter(Boolean).join(" ")).join(" + "));
+      } else if (has(d.product)) {
+        parts.push([d.product, has(d.rate) ? `${d.rate} ${d.rateUnit ?? "L/ha"}` : ""].filter(Boolean).join(" "));
+      }
+      if (has(d.reasonForUse)) parts.push(`for ${d.reasonForUse}`);
+      if (has(d.applicationMethod)) parts.push(d.applicationMethod);
+      if (has(d.withholdingDays)) parts.push(`${d.withholdingDays} day non-grazing`);
       break;
     case "fertiliser":
       if (has(d.product)) parts.push(d.product);
       if (has(d.rate)) parts.push(`${d.rate} kg/ha`);
-      if (has(d.rate) && has(d.nPercent)) parts.push(`${Math.round(Number(d.rate) * Number(d.nPercent)) / 100} kg N/ha`);
+      else if (has(d.amountApplied)) parts.push(`${d.amountApplied} ${d.amountUnit ?? "kg"} total`);
+      if (has(d.rate) && has(d.nPercent) && Number(d.nPercent) > 0) parts.push(`${Math.round(Number(d.rate) * Number(d.nPercent)) / 100} kg N/ha`);
       break;
+    case "feed_out":
+      if (has(d.product)) parts.push(d.product);
+      if (has(d.amount)) parts.push(`${d.amount} ${d.unit ?? ""}`.trim());
+      if (has(d.mob)) parts.push(`to ${d.mob}`);
+      if (has(d.source)) parts.push(d.source.toLowerCase());
+      break;
+    case "monthly_check": {
+      const results = MONTHLY_CHECK_ITEMS.map(i => d[i.key]).filter(has);
+      const fails = MONTHLY_CHECK_ITEMS.filter(i => d[i.key] === "Fail").map(i => i.label);
+      if (has(d.month)) parts.push(d.month);
+      if (results.length) parts.push(`${results.filter(r => r === "Pass").length}/${results.length} passed`);
+      if (fails.length) parts.push(`Failed: ${fails.join(", ")}`);
+      break;
+    }
     case "feed_in":
       if (has(d.product)) parts.push(d.product);
       if (has(d.quantity)) parts.push(`${d.quantity} ${d.unit ?? ""}`.trim());
@@ -201,6 +257,31 @@ async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
   }
   return body as T;
 }
+
+export interface LibraryProduct {
+  id: string; kind: string; name: string; shared: boolean;
+  nPercent: number | null; pPercent: number | null; kPercent: number | null; sPercent: number | null;
+  mgPercent: number | null; caPercent: number | null;
+  activeIngredient: string | null; defaultRate: number | null; rateUnit: string | null;
+  withholdingDays: number | null; notes: string | null;
+}
+export const fetchProducts = (kind: string) => apiJson<LibraryProduct[]>(`/api/records/products?kind=${kind}`);
+
+export interface SeasonSummary {
+  season: string;
+  effectiveAreaHa: number | null;
+  effectiveAreaSource: string | null;
+  nitrogen: { capKgPerHa: number; syntheticKg: number; syntheticKgPerHa: number | null; effluentKg: number; totalKgPerHa: number | null };
+  phosphorusKgPerHa: number | null;
+  potassiumKgPerHa: number | null;
+  feed: { boughtInT: number; importedFedT: number; homeGrownFedT: number; homeGrownSupplementPct: number | null };
+  feedOnHand: { product: string; unit: string; quantity: number }[];
+  spray: { applications: number; activeWithholding: number };
+  monthlyChecks: number;
+  incomplete: { id: string; title: string; reason: string }[];
+}
+export const fetchSeasonSummary = (season?: string) =>
+  apiJson<SeasonSummary>(`/api/records/summary${season ? `?season=${encodeURIComponent(season)}` : ""}`);
 
 export const fetchRecords = (params: URLSearchParams) => apiJson<FarmRecord[]>(`/api/records?${params}`);
 export const fetchTags = () => apiJson<(RecordTag & { isDefault: boolean })[]>("/api/tags");

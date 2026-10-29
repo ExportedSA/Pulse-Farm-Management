@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { RecordsMap, type MapFeature } from "@/components/records/RecordsMap";
 import { NEW_RECORD_EVENT } from "@/components/records/RecordFab";
+import { SeasonPanel } from "@/components/records/SeasonPanel";
 import {
   RECORD_TYPES,
   recordTypeDef,
@@ -28,9 +29,10 @@ const TABS: { key: string; label: string; types: RecordType[]; newType: RecordTy
   { key: "all", label: "All", types: [], newType: "spray" },
   { key: "spray", label: "Spray", types: ["spray"], newType: "spray" },
   { key: "fertiliser", label: "Fertiliser", types: ["fertiliser"], newType: "fertiliser" },
-  { key: "feed", label: "Feed", types: ["feed_in", "baleage"], newType: "feed_in" },
+  { key: "feed", label: "Feed", types: ["feed_in", "feed_out", "baleage"], newType: "feed_in" },
   { key: "effluent", label: "Effluent", types: ["effluent"], newType: "effluent" },
   { key: "work", label: "Work & events", types: ["fencing", "job_done", "maintenance", "medical", "health_safety", "note"], newType: "job_done" },
+  { key: "checks", label: "Monthly checks", types: ["monthly_check"], newType: "monthly_check" },
   { key: "documents", label: "Documents", types: ["document"], newType: "document" },
 ];
 
@@ -195,6 +197,8 @@ export default function RecordsPage() {
           <Plus className="h-4 w-4 mr-1" />New {current.key === "all" ? "record" : recordTypeDef(current.newType).label.toLowerCase()}
         </Button>
       </div>
+
+      <SeasonPanel />
 
       <div className="flex gap-1 overflow-x-auto border-b" role="tablist" aria-label="Record categories">
         {TABS.map(t => (

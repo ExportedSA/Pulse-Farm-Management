@@ -1306,6 +1306,7 @@ export type InAppNotification = typeof notifications.$inferSelect;
 // What a farm record is about; drives the capture form and compliance reports
 export const FARM_RECORD_TYPES = [
   'fertiliser', 'spray', 'feed_in', 'baleage', 'effluent',
+  'feed_out', 'monthly_check',
   'fencing', 'job_done', 'maintenance', 'medical', 'health_safety', 'note', 'document',
 ] as const;
 export type FarmRecordType = typeof FARM_RECORD_TYPES[number];
@@ -1388,6 +1389,29 @@ export const attachments = pgTable('attachments', {
 });
 
 export type Attachment = typeof attachments.$inferSelect;
+
+// Fertilisers, effluent, chemicals and feeds that records can pick from. Rows with no
+// farm are the shared library; farms can add their own. Analysis is % by weight.
+export const inputProducts = pgTable('input_products', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id),
+  kind: varchar('kind', { length: 20 }).notNull(), // fertiliser | effluent | chemical | feed
+  name: varchar('name', { length: 120 }).notNull(),
+  nPercent: numeric('n_percent', { precision: 6, scale: 3 }),
+  pPercent: numeric('p_percent', { precision: 6, scale: 3 }),
+  kPercent: numeric('k_percent', { precision: 6, scale: 3 }),
+  sPercent: numeric('s_percent', { precision: 6, scale: 3 }),
+  mgPercent: numeric('mg_percent', { precision: 6, scale: 3 }),
+  caPercent: numeric('ca_percent', { precision: 6, scale: 3 }),
+  activeIngredient: varchar('active_ingredient', { length: 255 }),
+  defaultRate: numeric('default_rate', { precision: 10, scale: 3 }),
+  rateUnit: varchar('rate_unit', { length: 20 }),
+  withholdingDays: integer('withholding_days'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+export type InputProduct = typeof inputProducts.$inferSelect;
 
 // Activity Logs (Phase 6E: Audit trail for user actions)
 export const activityLogs = pgTable('activity_logs', {

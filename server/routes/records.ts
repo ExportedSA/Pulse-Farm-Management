@@ -10,6 +10,9 @@ import { isAreaGeometry } from '@shared/geo';
 import { getFarmId, getUserId, requireFarm } from '../middleware/auth';
 import { uploadAttachments } from '../middleware/upload';
 import { saveAttachments, toApiAttachment } from '../domain/attachments';
+import { seasonSummary, seasonOf, listProducts } from '../domain/season';
+import { db } from '../db';
+import { inputProducts } from '@shared/schema';
 import {
   createRecord,
   getRecord,
@@ -140,6 +143,13 @@ function mapLabel(type: string, d: Record<string, any>): string {
   const rate = num(d.rate) != null ? `${num(d.rate)} ${d.rateUnit ?? (type === 'fertiliser' ? 'kg/ha' : 'L/ha')}` : '';
   switch (type) {
     case 'spray':
+      // Tank mixes list every product with its rate
+      if (Array.isArray(d.products) && d.products.length > 0) {
+        return d.products
+          .map((p: any) => [p.product, num(p.rate) != null ? `${num(p.rate)} ${p.rateUnit ?? 'L/ha'}` : ''].filter(Boolean).join(' '))
+          .join(' + ');
+      }
+      return [d.product, rate].filter(Boolean).join(' ');
     case 'fertiliser':
       return [d.product, rate].filter(Boolean).join(' ');
     case 'baleage':
@@ -177,7 +187,7 @@ router.get('/map', async (req, res) => {
             occurredAt: r.occurredAt.toISOString(),
             areaHa: r.areaHa != null ? Number(r.areaHa) : null,
             label: mapLabel(r.type, d),
-            product: d.product ?? null,
+            product: d.product ?? (Array.isArray(d.products) ? d.products.map((p: any) => p.product).filter(Boolean).join(' + ') : null),
             rate: num(d.rate) ?? null,
             rateUnit: d.rateUnit ?? null,
             withholdingUntil: withholdingUntil?.toISOString() ?? null,
@@ -188,6 +198,61 @@ router.get('/map', async (req, res) => {
     });
   } catch (error) {
     handleError(res, error, 'Failed to fetch map records');
+  }
+});
+
+// GET /api/records/summary?season=2026/27 - nitrogen vs the cap, feed and spray totals
+router.get('/summary', async (req, res) => {
+  try {
+    const season = z.string().regex(/^\d{4}\/\d{2}$/, 'Season must look like 2026/27')
+      .default(seasonOf(new Date()))
+      .parse(req.query.season);
+    res.json(await seasonSummary(getFarmId(req)!, season));
+  } catch (error) {
+    handleError(res, error, 'Failed to build season summary');
+  }
+});
+
+// GET /api/records/products?kind=fertiliser - shared library plus the farm's own products
+router.get('/products', async (req, res) => {
+  try {
+    const kind = z.enum(['fertiliser', 'effluent', 'chemical', 'feed']).optional().parse(req.query.kind);
+    res.json(await listProducts(getFarmId(req)!, kind));
+  } catch (error) {
+    handleError(res, error, 'Failed to fetch products');
+  }
+});
+
+// POST /api/records/products - add a product to the farm's own library
+router.post('/products', async (req, res) => {
+  try {
+    const pct = z.coerce.number().min(0).max(100).nullish();
+    const data = z.object({
+      kind: z.enum(['fertiliser', 'effluent', 'chemical', 'feed']),
+      name: z.string().trim().min(1).max(120),
+      nPercent: pct, pPercent: pct, kPercent: pct, sPercent: pct, mgPercent: pct, caPercent: pct,
+      activeIngredient: z.string().max(255).nullish(),
+      defaultRate: z.coerce.number().min(0).nullish(),
+      rateUnit: z.string().max(20).nullish(),
+      withholdingDays: z.coerce.number().int().min(0).max(365).nullish(),
+      notes: z.string().max(1000).nullish(),
+    }).parse(req.body);
+    const str = (v: number | null | undefined) => (v == null ? null : String(v));
+    const [product] = await db.insert(inputProducts).values({
+      farmId: getFarmId(req)!,
+      kind: data.kind,
+      name: data.name,
+      nPercent: str(data.nPercent), pPercent: str(data.pPercent), kPercent: str(data.kPercent),
+      sPercent: str(data.sPercent), mgPercent: str(data.mgPercent), caPercent: str(data.caPercent),
+      activeIngredient: data.activeIngredient ?? null,
+      defaultRate: str(data.defaultRate),
+      rateUnit: data.rateUnit ?? null,
+      withholdingDays: data.withholdingDays ?? null,
+      notes: data.notes ?? null,
+    }).returning();
+    res.status(201).json({ id: product.id, name: product.name, kind: product.kind });
+  } catch (error) {
+    handleError(res, error, 'Failed to save product');
   }
 });
 

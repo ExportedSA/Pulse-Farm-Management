@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import type { AreaGeometry } from "@shared/geo";
 import { AreaDrawer } from "./AreaDrawer";
+import { TankMixEditor, ProductPicker, type SprayProduct } from "./RecordInputs";
 import {
   RECORD_TYPES,
   recordTypeDef,
@@ -30,6 +31,35 @@ interface RecordDialogProps {
 }
 
 const nowLocal = () => format(new Date(), "yyyy-MM-dd'T'HH:mm");
+
+const emptySprayProduct = (): SprayProduct => ({ product: "", activeIngredient: "", rate: "", rateUnit: "L/ha" });
+
+// What a fresh record of each type starts with
+function initialDetails(type: RecordType): Record<string, any> {
+  if (type === "spray") return { products: [emptySprayProduct()] };
+  if (type === "fertiliser") return { amountUnit: "t" };
+  return {};
+}
+
+/**
+ * Checks beyond required fields: a spray needs at least one product with a rate,
+ * fertiliser needs a product and either a rate or the total applied
+ */
+function extraProblems(type: RecordType, d: Record<string, any>): string[] {
+  const has = (v: unknown) => v !== undefined && v !== null && v !== "";
+  if (type === "spray") {
+    const products: SprayProduct[] = d.products ?? [];
+    if (!products.some(p => p.product.trim() && has(p.rate))) return ["at least one product with its rate"];
+    if (products.some(p => p.product.trim() && !has(p.rate))) return ["a rate for every product"];
+  }
+  if (type === "fertiliser") {
+    const problems = [];
+    if (!has(d.product)) problems.push("Product");
+    if (!has(d.rate) && !has(d.amountApplied)) problems.push("Rate or total applied");
+    return problems;
+  }
+  return [];
+}
 
 function FieldInput({ field, value, onChange }: { field: FieldDef; value: any; onChange: (v: any) => void }) {
   const id = `record-field-${field.key}`;
@@ -107,7 +137,7 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray" }: Reco
     setPastureIds([]);
     setArea(null);
     setShowMap(recordTypeDef(initialType).mapped);
-    setDetails(initialType === "spray" ? { rateUnit: "L/ha" } : {});
+    setDetails(initialDetails(initialType));
     setNotes("");
     setTags(recordTypeDef(initialType).defaultTags);
     setFiles([]);
@@ -115,7 +145,7 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray" }: Reco
 
   const changeType = (next: RecordType) => {
     setType(next);
-    setDetails(next === "spray" ? { rateUnit: "L/ha" } : {});
+    setDetails(initialDetails(next));
     setTags(prev => Array.from(new Set([...prev.filter(t => !def.defaultTags.includes(t)), ...recordTypeDef(next).defaultTags])));
     setShowMap(prev => prev || recordTypeDef(next).mapped);
   };
@@ -126,11 +156,19 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray" }: Reco
     return [main || def.label, where && `– ${where}`].filter(Boolean).join(" ");
   }, [def, details, pastureIds, paddocks]);
 
-  const missing = def.fields.filter(f => f.required && (details[f.key] === undefined || details[f.key] === ""));
+  const missing = [
+    ...def.fields.filter(f => f.required && (details[f.key] === undefined || details[f.key] === "")).map(f => f.label),
+    ...extraProblems(type, details),
+  ];
+
+  // Sprays: the date stock can graze again
+  const safeToGraze = type === "spray" && details.withholdingDays !== undefined && details.withholdingDays !== ""
+    ? new Date(new Date(occurredAt).getTime() + Number(details.withholdingDays) * 24 * 60 * 60 * 1000)
+    : null;
 
   const submit = async () => {
     if (missing.length > 0) {
-      toast.error(`Fill in: ${missing.map(f => f.label).join(", ")}`);
+      toast.error(`Fill in: ${missing.join(", ")}`);
       return;
     }
     if (def.type === "document" && files.length === 0) {
@@ -146,7 +184,13 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray" }: Reco
         occurredAt: new Date(occurredAt).toISOString(),
         pastureIds,
         area,
-        details,
+        details: type === "spray"
+          ? {
+              ...details,
+              products: (details.products as SprayProduct[]).filter(p => p.product.trim()),
+              dateClear: safeToGraze ? format(safeToGraze, "yyyy-MM-dd") : undefined,
+            }
+          : details,
         tags,
       }, files);
       if (result === "saved") {
@@ -206,12 +250,41 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray" }: Reco
             </div>
           </div>
 
+          {type === "spray" && (
+            <TankMixEditor
+              value={details.products ?? [emptySprayProduct()]}
+              onChange={products => setDetails(d => ({ ...d, products }))}
+            />
+          )}
+
+          {(type === "fertiliser" || type === "effluent") && (
+            <ProductPicker
+              kind={type}
+              value={details.product ?? ""}
+              onChange={product => setDetails(d => ({ ...d, product }))}
+              onPick={p => setDetails(d => ({
+                ...d,
+                product: p.name,
+                nPercent: p.nPercent ?? undefined,
+                pPercent: p.pPercent ?? undefined,
+                kPercent: p.kPercent ?? undefined,
+                sPercent: p.sPercent ?? undefined,
+              }))}
+            />
+          )}
+
           {def.fields.length > 0 && (
             <div className="grid gap-3 sm:grid-cols-2">
               {def.fields.map(f => (
                 <FieldInput key={f.key} field={f} value={details[f.key]} onChange={v => setDetails(d => ({ ...d, [f.key]: v }))} />
               ))}
             </div>
+          )}
+
+          {safeToGraze && (
+            <p className="text-sm rounded-md border px-3 py-2 bg-muted">
+              Safe to graze from <strong>{format(safeToGraze, "EEEE d MMMM")}</strong>. The area shows on the map as withheld until then.
+            </p>
           )}
 
           {def.type !== "document" && (
