@@ -6,6 +6,8 @@ import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, requireFarm, getUserId, getFarmId } from "../middleware/auth";
 import { getFarmRole } from "../domain/farms";
 import { triggerComplianceChecks, getComplianceStatus } from "../scheduler";
+import { seasonOf } from "../domain/season";
+import { complianceReadiness, auditPack, toCsv, PACK_SECTIONS } from "../domain/compliance-pack";
 import logger from "../config/logger";
 
 const router = Router();
@@ -213,6 +215,57 @@ router.post("/run-checks", async (req, res) => {
   } catch (error) {
     logger.error({ err: error }, "Failed to run compliance checks");
     res.status(500).json({ error: "Failed to run compliance checks" });
+  }
+});
+
+// ===== AUDIT READINESS AND PACK =====
+
+const seasonParam = (value: unknown) =>
+  z.string().regex(/^\d{4}\/\d{2}$/, "Season must look like 2026/27").default(seasonOf(new Date())).parse(value);
+
+/**
+ * GET /api/compliance/readiness?season=2026/27
+ * Each Dairy Diary / Farm Dairy Records requirement checked against the farm's records
+ */
+router.get("/readiness", async (req, res) => {
+  try {
+    res.json(await complianceReadiness(getFarmId(req)!, seasonParam(req.query.season)));
+  } catch (error) {
+    if (error instanceof z.ZodError) return validationError(res, error);
+    logger.error({ err: error }, "Failed to check compliance readiness");
+    res.status(500).json({ error: "Failed to check compliance readiness" });
+  }
+});
+
+/**
+ * GET /api/compliance/pack?season=2026/27 - every audit pack section as rows
+ * GET /api/compliance/pack/:section.csv?season=2026/27 - one section as a spreadsheet
+ */
+router.get("/pack", async (req, res) => {
+  try {
+    res.json(await auditPack(getFarmId(req)!, seasonParam(req.query.season)));
+  } catch (error) {
+    if (error instanceof z.ZodError) return validationError(res, error);
+    logger.error({ err: error }, "Failed to build audit pack");
+    res.status(500).json({ error: "Failed to build audit pack" });
+  }
+});
+
+router.get("/pack/:section.csv", async (req, res) => {
+  try {
+    const key = req.params.section;
+    if (!(PACK_SECTIONS as readonly string[]).includes(key)) return res.status(404).json({ error: "No such section" });
+    const season = seasonParam(req.query.season);
+    const pack = await auditPack(getFarmId(req)!, season);
+    const section = pack.sections.find(s => s.key === key)!;
+    const name = `${(pack.farmName ?? "farm").replace(/[^A-Za-z0-9]+/g, "-")}-${key.replace(/_/g, "-")}-${season.replace("/", "-")}.csv`;
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${name}"`);
+    res.send(toCsv(section));
+  } catch (error) {
+    if (error instanceof z.ZodError) return validationError(res, error);
+    logger.error({ err: error }, "Failed to export audit pack");
+    res.status(500).json({ error: "Failed to export audit pack" });
   }
 });
 

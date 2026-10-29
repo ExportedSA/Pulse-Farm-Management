@@ -8,13 +8,13 @@ import { useFarm } from "@/lib/farm-context";
 import { fetchSeasonSummary } from "@/lib/records";
 
 // NZ dairy seasons start 1 June
-function currentSeason(): string {
+export function currentSeason(): string {
   const now = new Date();
   const start = now.getMonth() >= 5 ? now.getFullYear() : now.getFullYear() - 1;
   return `${start}/${String((start + 1) % 100).padStart(2, "0")}`;
 }
 
-function previousSeasons(count: number): string[] {
+export function previousSeasons(count: number): string[] {
   const start = Number(currentSeason().slice(0, 4));
   return Array.from({ length: count }, (_, i) => `${start - i}/${String((start - i + 1) % 100).padStart(2, "0")}`);
 }

@@ -15,9 +15,12 @@ import { AreaDrawer } from "./AreaDrawer";
 import { TankMixEditor, ProductPicker, type SprayProduct } from "./RecordInputs";
 import {
   RECORD_TYPES,
+  MONTHLY_CHECK_ITEMS,
   recordTypeDef,
   fetchTags,
   saveRecord,
+  updateRecord,
+  fetchRecord,
   type RecordType,
   type FieldDef,
 } from "@/lib/records";
@@ -28,6 +31,10 @@ interface RecordDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialType?: RecordType;
+  // Starting values for a new record, e.g. the month a missing monthly check is for
+  preset?: { details?: Record<string, any>; title?: string };
+  // Open an existing record to finish or correct it
+  editRecordId?: string | null;
 }
 
 const nowLocal = () => format(new Date(), "yyyy-MM-dd'T'HH:mm");
@@ -101,7 +108,7 @@ function FieldInput({ field, value, onChange }: { field: FieldDef; value: any; o
  * Capture a farm record: type, when, where (paddocks and/or a drawn area), details,
  * tags and evidence. Saves straight away, or keeps it on the device until there's signal.
  */
-export function RecordDialog({ open, onOpenChange, initialType = "spray" }: RecordDialogProps) {
+export function RecordDialog({ open, onOpenChange, initialType = "spray", preset, editRecordId }: RecordDialogProps) {
   const queryClient = useQueryClient();
   const [type, setType] = useState<RecordType>(initialType);
   const [title, setTitle] = useState("");
@@ -114,8 +121,16 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray" }: Reco
   const [tags, setTags] = useState<string[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
+  const [attachedCount, setAttachedCount] = useState(0);
+  const editing = Boolean(editRecordId);
 
   const def = recordTypeDef(type);
+
+  const { data: existing, isLoading: loadingExisting } = useQuery({
+    queryKey: ["/api/records", editRecordId],
+    queryFn: () => fetchRecord(editRecordId!),
+    enabled: open && editing,
+  });
 
   const { data: paddocks = [] } = useQuery<Paddock[]>({
     queryKey: ["/api/pastures", "for-records"],
@@ -128,20 +143,39 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray" }: Reco
   });
   const { data: farmTags = [] } = useQuery({ queryKey: ["/api/tags"], queryFn: fetchTags, enabled: open });
 
-  // Start each new record clean, with the type's usual tags
+  // Start each new record clean, with the type's usual tags (plus any preset)
   useEffect(() => {
-    if (!open) return;
+    if (!open || editing) return;
     setType(initialType);
-    setTitle("");
+    setTitle(preset?.title ?? "");
     setOccurredAt(nowLocal());
     setPastureIds([]);
     setArea(null);
     setShowMap(recordTypeDef(initialType).mapped);
-    setDetails(initialDetails(initialType));
+    setDetails({ ...initialDetails(initialType), ...(preset?.details ?? {}) });
     setNotes("");
     setTags(recordTypeDef(initialType).defaultTags);
     setFiles([]);
-  }, [open, initialType]);
+    setAttachedCount(0);
+  }, [open, initialType, preset, editing]);
+
+  // Editing: load what was saved
+  useEffect(() => {
+    if (!open || !editing || !existing) return;
+    setType(existing.type);
+    setTitle(existing.title);
+    setOccurredAt(format(new Date(existing.occurredAt), "yyyy-MM-dd'T'HH:mm"));
+    setPastureIds(existing.paddocks.map(p => p.id));
+    setArea(existing.area);
+    setShowMap(existing.area != null);
+    setDetails(existing.type === "spray" && !Array.isArray(existing.details.products)
+      ? { ...existing.details, products: [emptySprayProduct()] }
+      : existing.details);
+    setNotes(existing.notes ?? "");
+    setTags(existing.tags.map(t => t.name));
+    setFiles([]);
+    setAttachedCount(existing.attachments.length);
+  }, [open, editing, existing]);
 
   const changeType = (next: RecordType) => {
     setType(next);
@@ -171,13 +205,13 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray" }: Reco
       toast.error(`Fill in: ${missing.join(", ")}`);
       return;
     }
-    if (def.type === "document" && files.length === 0) {
+    if (def.type === "document" && files.length === 0 && attachedCount === 0) {
       toast.error("Attach the document (photo or PDF)");
       return;
     }
     setSaving(true);
     try {
-      const result = await saveRecord({
+      const draft = {
         type,
         title: (title || suggestedTitle).slice(0, 255),
         notes: notes || undefined,
@@ -192,10 +226,20 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray" }: Reco
             }
           : details,
         tags,
-      }, files);
+      };
+      if (editing) {
+        await updateRecord(editRecordId!, draft, files);
+        toast.success(`${def.label} record updated`);
+        queryClient.invalidateQueries({ queryKey: ["/api/records"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/compliance"] });
+        onOpenChange(false);
+        return;
+      }
+      const result = await saveRecord(draft, files);
       if (result === "saved") {
         toast.success(`${def.label} record saved`);
         queryClient.invalidateQueries({ queryKey: ["/api/records"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/compliance"] });
       } else {
         toast.success("No signal: saved on this device. It will upload when you're back online.");
       }
@@ -214,11 +258,15 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray" }: Reco
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>New record</DialogTitle>
+          <DialogTitle>{editing ? `Edit ${def.label.toLowerCase()} record` : "New record"}</DialogTitle>
           <DialogDescription>What was done, where and when. Add a photo of the docket or label as evidence.</DialogDescription>
         </DialogHeader>
 
+        {editing && loadingExisting ? (
+          <p className="text-sm text-muted-foreground py-6">Loading the record…</p>
+        ) : (
         <div className="space-y-5">
+          {!editing && (
           <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Record type">
             {RECORD_TYPES.map(t => (
               <button
@@ -238,6 +286,7 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray" }: Reco
               </button>
             ))}
           </div>
+          )}
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1">
@@ -271,6 +320,13 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray" }: Reco
                 sPercent: p.sPercent ?? undefined,
               }))}
             />
+          )}
+
+          {type === "monthly_check" && (
+            <Button type="button" variant="outline" size="sm"
+              onClick={() => setDetails(d => ({ ...d, ...Object.fromEntries(MONTHLY_CHECK_ITEMS.map(i => [i.key, d[i.key] || "Pass"])) }))}>
+              Mark the rest as passed
+            </Button>
           )}
 
           {def.fields.length > 0 && (
@@ -351,6 +407,11 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray" }: Reco
                   onChange={e => { setFiles(f => [...f, ...Array.from(e.target.files ?? [])].slice(0, 8)); e.target.value = ""; }} />
               </label>
             </div>
+            {attachedCount > 0 && (
+              <p className="text-sm text-muted-foreground">
+                {attachedCount} file{attachedCount === 1 ? "" : "s"} already attached. Anything you add here is added to {attachedCount === 1 ? "it" : "them"}.
+              </p>
+            )}
             {files.length > 0 && (
               <ul className="space-y-1 text-sm">
                 {files.map((f, i) => (
@@ -371,11 +432,12 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray" }: Reco
             <Textarea id="record-notes" rows={3} value={notes} onChange={e => setNotes(e.target.value)} />
           </div>
         </div>
+        )}
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={submit} disabled={saving} className="bg-pulse-forest hover:bg-pulse-forest-dark" data-testid="button-save-record">
-            {saving ? "Saving…" : "Save record"}
+          <Button onClick={submit} disabled={saving || (editing && !existing)} className="bg-pulse-forest hover:bg-pulse-forest-dark" data-testid="button-save-record">
+            {saving ? "Saving…" : editing ? "Save changes" : "Save record"}
           </Button>
         </DialogFooter>
       </DialogContent>

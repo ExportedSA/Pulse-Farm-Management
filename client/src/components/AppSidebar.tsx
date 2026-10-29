@@ -1,4 +1,4 @@
-import { Home, Syringe, Pill, Users, Sprout, Heart, Settings, BarChart3, ChevronDown, MessageSquare, Shield, FileText, Briefcase, Wrench, Scale, ChevronRight, GitFork, Rocket, Stethoscope, Baby, ClipboardList, Clock, Calendar } from "lucide-react";
+import { Home, Syringe, Pill, Users, Sprout, Heart, Settings, BarChart3, ChevronDown, MessageSquare, Shield, FileText, Briefcase, Wrench, Scale, ChevronRight, GitFork, Rocket, Stethoscope, Baby, ClipboardList, Clock, Calendar, HardHat } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useState, ComponentProps } from "react";
 import { useChatContext } from "@/contexts/ChatContext";
@@ -31,8 +31,8 @@ import {
 const menuItems = [
   // Primary navigation - always visible
   { title: "Overview", url: "/app", icon: Home },
-  { title: "Dashboard", url: "/app/dashboard", icon: BarChart3 },
   { title: "Records", url: "/app/records", icon: ClipboardList },
+  { title: "Compliance", url: "/app/compliance-overview", icon: Shield },
   
   // Animals - core functionality
   {
@@ -41,6 +41,7 @@ const menuItems = [
     subItems: [
       { title: "All Animals", url: "/app/animals" },
       { title: "Groups", url: "/app/groups" },
+      { title: "Weights", url: "/app/weight-growth" },
       { title: "Stock Reconciliation", url: "/app/stock-reconciliation" },
       { title: "Import CSV", url: "/app/import" },
     ],
@@ -83,9 +84,6 @@ const menuItems = [
     ],
   },
   
-  // Weights
-  { title: "Weights", url: "/app/weight-growth", icon: Scale },
-  
   // Pastures - simplified
   {
     title: "Pastures",
@@ -100,7 +98,7 @@ const menuItems = [
   // Operations - consolidated
   {
     title: "Operations",
-    icon: Wrench,
+    icon: Briefcase,
     subItems: [
       { title: "Hub", url: "/app/operations" },
       { title: "Tasks", url: "/app/tasks" },
@@ -123,16 +121,14 @@ const menuItems = [
     ],
   },
   
-  // Compliance - consolidated
+  // Schemes and registers that sit beside the audit pack
   {
-    title: "Compliance",
-    icon: Shield,
+    title: "Safety & schemes",
+    icon: HardHat,
     subItems: [
-      { title: "Overview", url: "/app/compliance-overview" },
+      { title: "Health & Safety", url: "/app/compliance" },
       { title: "NAIT", url: "/app/nait" },
       { title: "NZFAP", url: "/app/nzfap-compliance" },
-      { title: "Health & Safety", url: "/app/compliance" },
-      { title: "Farm Compliance", url: "/app/farm-compliance" },
     ],
   },
   
@@ -141,6 +137,7 @@ const menuItems = [
     title: "Reports",
     icon: BarChart3,
     subItems: [
+      { title: "Dashboard", url: "/app/dashboard" },
       { title: "Analytics", url: "/app/analytics" },
       { title: "Herd Reports", url: "/app/herd-reports" },
       { title: "Financial", url: "/app/financial" },

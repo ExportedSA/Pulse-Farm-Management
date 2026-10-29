@@ -1355,7 +1355,7 @@ export const tags = pgTable('tags', {
 export type Tag = typeof tags.$inferSelect;
 
 // Kinds of thing a tag or attachment can belong to
-export const TAGGABLE_TYPES = ['record', 'job', 'task', 'animal', 'chat_message', 'attachment'] as const;
+export const TAGGABLE_TYPES = ['record', 'job', 'task', 'animal', 'chat_message', 'attachment', 'stock_movement'] as const;
 export type TaggableType = typeof TAGGABLE_TYPES[number];
 
 export const taggings = pgTable('taggings', {
@@ -1955,6 +1955,13 @@ export const stockTransactionTypeEnum = pgEnum('stock_transaction_type', [
 
 export const stockTransactions = pgTable('stock_transactions', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id),
+  // Lines from one ASD / movement share a movement id; its photos attach to that id
+  movementId: uuid('movement_id'),
+  stockClass: varchar('stock_class', { length: 50 }),
+  asdNumber: varchar('asd_number', { length: 50 }),
+  otherPartyNait: varchar('other_party_nait', { length: 50 }),
+  deletedAt: timestamp('deleted_at'),
   type: stockTransactionTypeEnum('type').notNull(),
   date: date('date').notNull(),
   quantity: integer('quantity').notNull(),
@@ -1976,6 +1983,19 @@ export const stockTransactions = pgTable('stock_transactions', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
+
+// Stocktake: how many of a class were counted on farm on a date
+export const stockCounts = pgTable('stock_counts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  stockClass: varchar('stock_class', { length: 50 }).notNull(),
+  count: integer('count').notNull(),
+  countedAt: date('counted_at').notNull(),
+  notes: text('notes'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+export type StockCount = typeof stockCounts.$inferSelect;
 
 export const insertStockTransactionSchema = createInsertSchema(stockTransactions).omit({
   id: true,

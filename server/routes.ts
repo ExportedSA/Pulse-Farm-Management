@@ -68,6 +68,7 @@ import iotRouter from "./routes/iot";
 import multiFarmRouter from "./routes/multi-farm";
 import farmsRouter from "./routes/farms";
 import recordsRouter from "./routes/records";
+import stockReconRouter from "./routes/stock-recon";
 import { tagsRouter, attachmentsRouter, searchRouter } from "./routes/farm-data";
 import animalTagsRouter from "./routes/animal-tags";
 // Phase overlay routes
@@ -174,6 +175,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ===== FARM RECORDS, TAGS, ATTACHMENTS & SEARCH =====
   app.use("/api/records", requireAuth, recordsRouter);
+  app.use("/api/stock-recon", requireAuth, stockReconRouter);
   app.use("/api/tags", requireAuth, tagsRouter);
   app.use("/api/attachments", requireAuth, attachmentsRouter);
   app.use("/api/search", requireAuth, searchRouter);

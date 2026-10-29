@@ -1,6 +1,7 @@
 // Farm Records: record types, the API, and an offline outbox so records (with their
 // photos) captured without signal are kept on the device and uploaded later.
 import type { AreaGeometry } from "@shared/geo";
+import { MONTHLY_CHECK_ITEMS, SEASON_MONTHS } from "@shared/dairy-diary";
 
 export type RecordType =
   | "spray" | "fertiliser" | "feed_in" | "feed_out" | "baleage" | "effluent" | "monthly_check"
@@ -28,17 +29,7 @@ export interface RecordTypeDef {
   titleFrom?: string;
 }
 
-export const MONTHLY_CHECK_ITEMS = [
-  { key: "plantCheck", label: "Plant check" },
-  { key: "milkCooling", label: "Milk cooling" },
-  { key: "extendedMilkCooling", label: "Extended milk cooling" },
-  { key: "cleanliness", label: "General cleanliness" },
-  { key: "drugExpiry", label: "Drug expiry check" },
-  { key: "chemicalUse", label: "Chemical use" },
-  { key: "washWater", label: "Wash programme and water quality" },
-  { key: "treatmentManagement", label: "Management of animal treatments" },
-  { key: "milkHygiene", label: "Milk health and hygiene" },
-];
+export { MONTHLY_CHECK_ITEMS, SEASON_MONTHS };
 
 export const RECORD_TYPES: RecordTypeDef[] = [
   {
@@ -121,9 +112,7 @@ export const RECORD_TYPES: RecordTypeDef[] = [
     titleFrom: "month",
     // Fonterra Dairy Diary monthly checks
     fields: [
-      { key: "month", label: "Month checked", kind: "select", required: true, options: [
-        "June", "July", "August", "September", "October", "November", "December", "January", "February", "March", "April", "May",
-      ] },
+      { key: "month", label: "Month checked", kind: "select", required: true, options: SEASON_MONTHS },
       ...MONTHLY_CHECK_ITEMS.map(item => ({ key: item.key, label: item.label, kind: "select" as const, options: ["Pass", "Fail", "N/A"] })),
     ],
   },
@@ -286,6 +275,24 @@ export const fetchSeasonSummary = (season?: string) =>
 export const fetchRecords = (params: URLSearchParams) => apiJson<FarmRecord[]>(`/api/records?${params}`);
 export const fetchTags = () => apiJson<(RecordTag & { isDefault: boolean })[]>("/api/tags");
 export const deleteRecord = (id: string) => apiJson(`/api/records/${id}`, { method: "DELETE" });
+export const fetchRecord = (id: string) => apiJson<FarmRecord>(`/api/records/${id}`);
+
+/**
+ * Save changes to a record, then add any new evidence. Needs a connection.
+ */
+export async function updateRecord(id: string, draft: RecordDraft, files: File[]): Promise<FarmRecord> {
+  const record = await apiJson<FarmRecord>(`/api/records/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(draft),
+  });
+  if (files.length > 0) {
+    const form = new FormData();
+    files.forEach(file => form.append("files", file));
+    await apiJson(`/api/records/${id}/attachments`, { method: "POST", body: form });
+  }
+  return record;
+}
 
 function recordForm(draft: RecordDraft, clientId: string, files: File[] | Blob[]): FormData {
   const form = new FormData();

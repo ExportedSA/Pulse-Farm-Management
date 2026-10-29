@@ -1,681 +1,429 @@
-import { useState, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
-import { Textarea } from '@/components/ui/textarea';
-import { toast } from 'sonner';
-import { 
-  Beef, 
-  TrendingUp, 
-  TrendingDown, 
-  ArrowRightLeft, 
-  Skull, 
-  ShoppingCart,
-  Plus,
-  FileText,
-  Calendar,
-  RefreshCw,
-  Download,
-  Filter,
-  BarChart3,
-  AlertTriangle,
-  CheckCircle2
-} from 'lucide-react';
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { format } from "date-fns";
+import { Camera, ClipboardCheck, Paperclip, Plus, Trash2, X } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
+import {
+  ASD_TYPES, STOCK_CLASSES, STOCK_IN_TYPES, STOCK_MOVEMENT_LABELS, STOCK_MOVEMENT_TYPES, type StockMovementType,
+} from "@shared/stock";
 
-interface StockSummary {
-  totalAnimals: number;
-  byStatus: {
-    active: number;
-    sold: number;
-    deceased: number;
-  };
-  byHerd: Record<string, number>;
-  byBreed: Record<string, number>;
-  bySex: {
-    male: number;
-    female: number;
-  };
+interface ClassTally {
+  stockClass: string; counted: { count: number; countedAt: string } | null; in: number; out: number; tally: number;
+}
+interface Movement {
+  id: string; type: StockMovementType; date: string; asdNumber: string | null; otherParty: string | null;
+  otherPartyNait: string | null; notes: string | null;
+  lines: { stockClass: string | null; quantity: number }[];
+  attachments: { id: string; kind: string; url: string; fileName: string | null }[];
+}
+interface Reconciliation { classes: ClassTally[]; totalTally: number; registerActive: number; movements: Movement[] }
+
+async function api<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, { credentials: "include", ...init });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error ?? `Request failed (${res.status})`);
+  return body as T;
 }
 
-interface StockTransaction {
-  id: string;
-  type: 'purchase' | 'sale' | 'death' | 'transfer_in' | 'transfer_out' | 'birth';
-  date: string;
-  quantity: number;
-  animalIds?: string[];
-  description: string;
-  reference?: string;
-  fromLocation?: string;
-  toLocation?: string;
-  pricePerHead?: number;
-  totalValue?: number;
-  createdBy: string;
-  createdAt: string;
-}
+const today = () => format(new Date(), "yyyy-MM-dd");
+const isIn = (type: StockMovementType) => (STOCK_IN_TYPES as readonly string[]).includes(type);
+const QUERY_KEY = ["/api/stock-recon"];
 
-export default function StockReconciliationPage() {
+const selectClass = "h-9 w-full rounded-md border bg-background px-2 text-sm";
+
+/**
+ * Photograph the ASD, then enter what it says while looking at the photo
+ */
+function MovementDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState('overview');
-  const [isTransactionDialogOpen, setIsTransactionDialogOpen] = useState(false);
-  const [transactionType, setTransactionType] = useState<string>('');
-  const [transactionForm, setTransactionForm] = useState({
-    date: new Date().toISOString().split('T')[0],
-    quantity: 1,
-    description: '',
-    reference: '',
-    fromLocation: '',
-    toLocation: '',
-    pricePerHead: 0,
-  });
+  const [files, setFiles] = useState<File[]>([]);
+  const [type, setType] = useState<StockMovementType>("purchase");
+  const [date, setDate] = useState(today);
+  const [asdNumber, setAsdNumber] = useState("");
+  const [otherParty, setOtherParty] = useState("");
+  const [otherPartyNait, setOtherPartyNait] = useState("");
+  const [notes, setNotes] = useState("");
+  const [lines, setLines] = useState([{ stockClass: STOCK_CLASSES[0], quantity: "" as number | "" }]);
 
-  // Fetch stock summary
-  const { data: stockSummary, isLoading: summaryLoading, refetch: refetchSummary } = useQuery<StockSummary>({
-    queryKey: ['/api/stock/summary'],
-    queryFn: async () => {
-      const response = await fetch('/api/stock/summary');
-      if (!response.ok) {
-        // Return default values if endpoint doesn't exist yet
-        return {
-          totalAnimals: 0,
-          byStatus: { active: 0, sold: 0, deceased: 0 },
-          byHerd: {},
-          byBreed: {},
-          bySex: { male: 0, female: 0 }
-        };
-      }
-      return response.json();
-    },
-  });
+  useEffect(() => {
+    if (!open) return;
+    setFiles([]); setType("purchase"); setDate(today()); setAsdNumber(""); setOtherParty(""); setOtherPartyNait(""); setNotes("");
+    setLines([{ stockClass: STOCK_CLASSES[0], quantity: "" }]);
+  }, [open]);
 
-  // Fetch recent transactions
-  const { data: transactions = [], isLoading: transactionsLoading } = useQuery<StockTransaction[]>({
-    queryKey: ['/api/stock/transactions'],
-    queryFn: async () => {
-      const response = await fetch('/api/stock/transactions');
-      if (!response.ok) return [];
-      return response.json();
-    },
-  });
+  const preview = useMemo(() => {
+    const image = files.find(f => f.type.startsWith("image/"));
+    return image ? URL.createObjectURL(image) : null;
+  }, [files]);
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
 
-  // Fetch animals for real counts
-  const { data: animals = [] } = useQuery<any[]>({
-    queryKey: ['/api/animals'],
-  });
-
-  // Calculate real stock summary from animals
-  const realStockSummary: StockSummary = {
-    totalAnimals: animals.filter(a => a.status === 'active').length,
-    byStatus: {
-      active: animals.filter(a => a.status === 'active').length,
-      sold: animals.filter(a => a.status === 'sold').length,
-      deceased: animals.filter(a => a.status === 'deceased').length,
-    },
-    byHerd: animals.reduce((acc, a) => {
-      if (a.herd && a.status === 'active') {
-        acc[a.herd] = (acc[a.herd] || 0) + 1;
-      }
-      return acc;
-    }, {} as Record<string, number>),
-    byBreed: animals.reduce((acc, a) => {
-      if (a.breed && a.status === 'active') {
-        acc[a.breed] = (acc[a.breed] || 0) + 1;
-      }
-      return acc;
-    }, {} as Record<string, number>),
-    bySex: {
-      male: animals.filter(a => a.sex === 'male' && a.status === 'active').length,
-      female: animals.filter(a => a.sex === 'female' && a.status === 'active').length,
-    },
-  };
-
-  // Create transaction mutation
-  const createTransactionMutation = useMutation({
-    mutationFn: async (data: any) => {
-      const response = await fetch('/api/stock/transactions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      if (!response.ok) throw new Error('Failed to create transaction');
-      return response.json();
+  const needsAsd = ASD_TYPES.includes(type);
+  const save = useMutation({
+    mutationFn: async () => {
+      const filled = lines.filter(l => l.quantity !== "");
+      if (filled.length === 0) throw new Error("Enter the number of head for at least one class");
+      if (needsAsd && files.length === 0 && !asdNumber.trim()) throw new Error("Add a photo of the ASD, or its number");
+      const form = new FormData();
+      form.append("data", JSON.stringify({
+        type, date, asdNumber: asdNumber.trim() || null, otherParty: otherParty.trim() || null,
+        otherPartyNait: otherPartyNait.trim() || null, notes: notes.trim() || null,
+        lines: filled.map(l => ({ stockClass: l.stockClass, quantity: Number(l.quantity) })),
+      }));
+      files.forEach(f => form.append("files", f));
+      return api("/api/stock-recon/movements", { method: "POST", body: form });
     },
     onSuccess: () => {
-      toast.success(`${transactionType} transaction recorded`);
-      queryClient.invalidateQueries({ queryKey: ['/api/stock'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/animals'] });
-      setIsTransactionDialogOpen(false);
-      setTransactionForm({
-        date: new Date().toISOString().split('T')[0],
-        quantity: 1,
-        description: '',
-        reference: '',
-        fromLocation: '',
-        toLocation: '',
-        pricePerHead: 0,
-      });
-      setTransactionType('');
+      toast.success("Stock movement saved and tallies updated");
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: ["/api/compliance"] });
+      onOpenChange(false);
     },
-    onError: () => {
-      toast.error('Failed to record transaction');
-    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
-  const handleTransactionSubmit = async () => {
-    if (!transactionType) {
-      toast.error('Please select a transaction type');
-      return;
-    }
-    
-    createTransactionMutation.mutate({
-      type: transactionType,
-      date: transactionForm.date,
-      quantity: transactionForm.quantity,
-      description: transactionForm.description || `${transactionType} transaction`,
-      reference: transactionForm.reference || null,
-      fromLocation: transactionForm.fromLocation || null,
-      toLocation: transactionForm.toLocation || null,
-      pricePerHead: transactionForm.pricePerHead ? transactionForm.pricePerHead * 100 : null, // Convert to cents
-      totalValue: transactionForm.pricePerHead ? transactionForm.pricePerHead * transactionForm.quantity * 100 : null,
-    });
-  };
-
-  const getTransactionIcon = (type: string) => {
-    switch (type) {
-      case 'purchase': return <ShoppingCart className="h-4 w-4 text-green-600" />;
-      case 'sale': return <TrendingUp className="h-4 w-4 text-blue-600" />;
-      case 'death': return <Skull className="h-4 w-4 text-red-600" />;
-      case 'transfer_in': return <TrendingDown className="h-4 w-4 text-purple-600" />;
-      case 'transfer_out': return <ArrowRightLeft className="h-4 w-4 text-orange-600" />;
-      case 'birth': return <Plus className="h-4 w-4 text-pink-600" />;
-      default: return <FileText className="h-4 w-4" />;
-    }
-  };
-
-  const getTransactionBadgeColor = (type: string) => {
-    switch (type) {
-      case 'purchase': return 'bg-green-100 text-green-800';
-      case 'sale': return 'bg-blue-100 text-blue-800';
-      case 'death': return 'bg-red-100 text-red-800';
-      case 'transfer_in': return 'bg-purple-100 text-purple-800';
-      case 'transfer_out': return 'bg-orange-100 text-orange-800';
-      case 'birth': return 'bg-pink-100 text-pink-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  };
+  const addFiles = (list: FileList | null) => setFiles(f => [...f, ...Array.from(list ?? [])].slice(0, 8));
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
-            <Beef className="h-8 w-8 text-primary" />
-            Stock Reconciliation
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Real-time stock tracking and reconciliation
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => refetchSummary()}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
-          <Button variant="outline">
-            <Download className="h-4 w-4 mr-2" />
-            Export Report
-          </Button>
-          <Dialog open={isTransactionDialogOpen} onOpenChange={setIsTransactionDialogOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="h-4 w-4 mr-2" />
-                Record Transaction
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-md">
-              <DialogHeader>
-                <DialogTitle>Record Stock Transaction</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label>Transaction Type</Label>
-                  <Select value={transactionType} onValueChange={setTransactionType}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select type..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="purchase">Purchase (Animals In)</SelectItem>
-                      <SelectItem value="sale">Sale (Animals Out)</SelectItem>
-                      <SelectItem value="death">Death/Casualty</SelectItem>
-                      <SelectItem value="transfer_in">Transfer In</SelectItem>
-                      <SelectItem value="transfer_out">Transfer Out</SelectItem>
-                      <SelectItem value="birth">Birth/Calving</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Date</Label>
-                    <Input
-                      type="date"
-                      value={transactionForm.date}
-                      onChange={(e) => setTransactionForm({ ...transactionForm, date: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Quantity</Label>
-                    <Input
-                      type="number"
-                      min="1"
-                      value={transactionForm.quantity}
-                      onChange={(e) => setTransactionForm({ ...transactionForm, quantity: parseInt(e.target.value) || 1 })}
-                    />
-                  </div>
-                </div>
-
-                {(transactionType === 'purchase' || transactionType === 'sale') && (
-                  <div className="space-y-2">
-                    <Label>Price per Head ($)</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={transactionForm.pricePerHead}
-                      onChange={(e) => setTransactionForm({ ...transactionForm, pricePerHead: parseFloat(e.target.value) || 0 })}
-                    />
-                    {transactionForm.pricePerHead > 0 && (
-                      <p className="text-sm text-muted-foreground">
-                        Total: ${(transactionForm.pricePerHead * transactionForm.quantity).toFixed(2)}
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {(transactionType === 'transfer_in' || transactionType === 'transfer_out') && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>From Location</Label>
-                      <Input
-                        value={transactionForm.fromLocation}
-                        onChange={(e) => setTransactionForm({ ...transactionForm, fromLocation: e.target.value })}
-                        placeholder="Source..."
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>To Location</Label>
-                      <Input
-                        value={transactionForm.toLocation}
-                        onChange={(e) => setTransactionForm({ ...transactionForm, toLocation: e.target.value })}
-                        placeholder="Destination..."
-                      />
-                    </div>
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <Label>Reference/Invoice #</Label>
-                  <Input
-                    value={transactionForm.reference}
-                    onChange={(e) => setTransactionForm({ ...transactionForm, reference: e.target.value })}
-                    placeholder="Optional reference..."
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Description/Notes</Label>
-                  <Textarea
-                    value={transactionForm.description}
-                    onChange={(e) => setTransactionForm({ ...transactionForm, description: e.target.value })}
-                    placeholder="Add details..."
-                    rows={3}
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsTransactionDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button 
-                  onClick={handleTransactionSubmit} 
-                  disabled={!transactionType || createTransactionMutation.isPending}
-                >
-                  {createTransactionMutation.isPending ? 'Recording...' : 'Record Transaction'}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
-      </div>
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Active Stock</p>
-                <p className="text-3xl font-bold text-primary">{realStockSummary.totalAnimals}</p>
-              </div>
-              <Beef className="h-10 w-10 text-primary/20" />
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Stock movement</DialogTitle>
+          <DialogDescription>Take a photo of the ASD, then fill in the numbers from it. The photo is kept as your evidence.</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-5 md:grid-cols-2">
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-2">
+              <label className="inline-flex items-center gap-1 px-3 py-2 rounded-md border text-sm cursor-pointer bg-pulse-forest text-white">
+                <Camera className="h-4 w-4" />Photograph ASD
+                <input type="file" accept="image/*" capture="environment" className="sr-only"
+                  onChange={e => { addFiles(e.target.files); e.target.value = ""; }} />
+              </label>
+              <label className="inline-flex items-center gap-1 px-3 py-2 rounded-md border text-sm cursor-pointer hover:bg-muted">
+                <Paperclip className="h-4 w-4" />Attach file
+                <input type="file" multiple accept="image/*,application/pdf" className="sr-only"
+                  onChange={e => { addFiles(e.target.files); e.target.value = ""; }} />
+              </label>
             </div>
-            <div className="mt-2 flex items-center text-sm">
-              <CheckCircle2 className="h-4 w-4 text-green-500 mr-1" />
-              <span className="text-green-600">Reconciled</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Males</p>
-                <p className="text-3xl font-bold text-blue-600">{realStockSummary.bySex.male}</p>
+            {preview ? (
+              <a href={preview} target="_blank" rel="noreferrer">
+                <img src={preview} alt="ASD photo" className="w-full max-h-[55vh] object-contain rounded-md border bg-muted" />
+              </a>
+            ) : (
+              <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
+                The ASD photo shows here so you can read it while you fill in the form.
               </div>
-              <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                <span className="text-blue-600 font-bold">♂</span>
-              </div>
-            </div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {realStockSummary.totalAnimals > 0 
-                ? `${((realStockSummary.bySex.male / realStockSummary.totalAnimals) * 100).toFixed(1)}% of herd`
-                : 'No animals'}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Females</p>
-                <p className="text-3xl font-bold text-pink-600">{realStockSummary.bySex.female}</p>
-              </div>
-              <div className="h-10 w-10 rounded-full bg-pink-100 flex items-center justify-center">
-                <span className="text-pink-600 font-bold">♀</span>
-              </div>
-            </div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {realStockSummary.totalAnimals > 0 
-                ? `${((realStockSummary.bySex.female / realStockSummary.totalAnimals) * 100).toFixed(1)}% of herd`
-                : 'No animals'}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Sold/Deceased</p>
-                <p className="text-3xl font-bold text-gray-600">
-                  {realStockSummary.byStatus.sold + realStockSummary.byStatus.deceased}
-                </p>
-              </div>
-              <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center">
-                <TrendingDown className="h-5 w-5 text-gray-600" />
-              </div>
-            </div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {realStockSummary.byStatus.sold} sold, {realStockSummary.byStatus.deceased} deceased
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="transactions">Transactions</TabsTrigger>
-          <TabsTrigger value="by-herd">By Herd</TabsTrigger>
-          <TabsTrigger value="by-breed">By Breed</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="overview" className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Stock by Herd */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Stock by Herd</CardTitle>
-                <CardDescription>Current distribution across herds</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {Object.keys(realStockSummary.byHerd).length > 0 ? (
-                  <div className="space-y-3">
-                    {Object.entries(realStockSummary.byHerd).map(([herd, count]) => (
-                      <div key={herd} className="flex items-center justify-between">
-                        <span className="font-medium">{herd}</span>
-                        <div className="flex items-center gap-2">
-                          <div className="w-32 h-2 bg-gray-100 rounded-full overflow-hidden">
-                            <div 
-                              className="h-full bg-primary rounded-full"
-                              style={{ width: `${(count / realStockSummary.totalAnimals) * 100}%` }}
-                            />
-                          </div>
-                          <span className="text-sm font-medium w-12 text-right">{count}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-muted-foreground text-center py-8">
-                    No herd data available. Add animals with herd assignments.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Stock by Breed */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Stock by Breed</CardTitle>
-                <CardDescription>Current distribution by breed</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {Object.keys(realStockSummary.byBreed).length > 0 ? (
-                  <div className="space-y-3">
-                    {Object.entries(realStockSummary.byBreed).map(([breed, count]) => (
-                      <div key={breed} className="flex items-center justify-between">
-                        <span className="font-medium">{breed}</span>
-                        <div className="flex items-center gap-2">
-                          <div className="w-32 h-2 bg-gray-100 rounded-full overflow-hidden">
-                            <div 
-                              className="h-full bg-green-500 rounded-full"
-                              style={{ width: `${(count / realStockSummary.totalAnimals) * 100}%` }}
-                            />
-                          </div>
-                          <span className="text-sm font-medium w-12 text-right">{count}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-muted-foreground text-center py-8">
-                    No breed data available. Add animals with breed information.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
+            )}
+            {files.length > 0 && (
+              <ul className="space-y-1 text-sm">
+                {files.map((f, i) => (
+                  <li key={`${f.name}-${i}`} className="flex items-center gap-2">
+                    <span className="truncate flex-1">{f.name}</span>
+                    <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles(l => l.filter((_, j) => j !== i))}>
+                      <X className="h-4 w-4" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
-          {/* Quick Actions */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Quick Actions</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                <Button 
-                  variant="outline" 
-                  className="h-20 flex-col gap-2"
-                  onClick={() => { setTransactionType('purchase'); setIsTransactionDialogOpen(true); }}
-                >
-                  <ShoppingCart className="h-5 w-5 text-green-600" />
-                  <span className="text-xs">Purchase</span>
-                </Button>
-                <Button 
-                  variant="outline" 
-                  className="h-20 flex-col gap-2"
-                  onClick={() => { setTransactionType('sale'); setIsTransactionDialogOpen(true); }}
-                >
-                  <TrendingUp className="h-5 w-5 text-blue-600" />
-                  <span className="text-xs">Sale</span>
-                </Button>
-                <Button 
-                  variant="outline" 
-                  className="h-20 flex-col gap-2"
-                  onClick={() => { setTransactionType('death'); setIsTransactionDialogOpen(true); }}
-                >
-                  <Skull className="h-5 w-5 text-red-600" />
-                  <span className="text-xs">Death</span>
-                </Button>
-                <Button 
-                  variant="outline" 
-                  className="h-20 flex-col gap-2"
-                  onClick={() => { setTransactionType('transfer_in'); setIsTransactionDialogOpen(true); }}
-                >
-                  <TrendingDown className="h-5 w-5 text-purple-600" />
-                  <span className="text-xs">Transfer In</span>
-                </Button>
-                <Button 
-                  variant="outline" 
-                  className="h-20 flex-col gap-2"
-                  onClick={() => { setTransactionType('transfer_out'); setIsTransactionDialogOpen(true); }}
-                >
-                  <ArrowRightLeft className="h-5 w-5 text-orange-600" />
-                  <span className="text-xs">Transfer Out</span>
-                </Button>
-                <Button 
-                  variant="outline" 
-                  className="h-20 flex-col gap-2"
-                  onClick={() => { setTransactionType('birth'); setIsTransactionDialogOpen(true); }}
-                >
-                  <Plus className="h-5 w-5 text-pink-600" />
-                  <span className="text-xs">Birth</span>
-                </Button>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="move-type">Movement</Label>
+                <select id="move-type" className={selectClass} value={type} onChange={e => setType(e.target.value as StockMovementType)}>
+                  {STOCK_MOVEMENT_TYPES.map(t => <option key={t} value={t}>{STOCK_MOVEMENT_LABELS[t]}</option>)}
+                </select>
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+              <div className="space-y-1">
+                <Label htmlFor="move-date">Date moved</Label>
+                <Input id="move-date" type="date" max={today()} value={date} onChange={e => setDate(e.target.value)} />
+              </div>
+            </div>
+            {needsAsd && (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="move-asd">ASD number</Label>
+                    <Input id="move-asd" value={asdNumber} onChange={e => setAsdNumber(e.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="move-nait">{isIn(type) ? "From" : "To"} NAIT number</Label>
+                    <Input id="move-nait" inputMode="numeric" value={otherPartyNait} onChange={e => setOtherPartyNait(e.target.value)} />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="move-party">{isIn(type) ? "From (farm or seller)" : "To (farm, buyer or works)"}</Label>
+                  <Input id="move-party" value={otherParty} onChange={e => setOtherParty(e.target.value)} />
+                </div>
+              </>
+            )}
+            <div className="space-y-2">
+              <Label>Stock {type === "adjustment" && "(use a minus number to take stock off)"}</Label>
+              {lines.map((line, i) => (
+                <div key={i} className="flex gap-2">
+                  <select aria-label="Stock class" className={selectClass} value={line.stockClass}
+                    onChange={e => setLines(ls => ls.map((l, j) => (j === i ? { ...l, stockClass: e.target.value } : l)))}>
+                    {STOCK_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <Input aria-label="Head" type="number" inputMode="numeric" className="w-24" placeholder="Head"
+                    value={line.quantity}
+                    onChange={e => setLines(ls => ls.map((l, j) => (j === i ? { ...l, quantity: e.target.value === "" ? "" : Number(e.target.value) } : l)))} />
+                  {lines.length > 1 && (
+                    <Button variant="ghost" size="icon" aria-label="Remove line" onClick={() => setLines(ls => ls.filter((_, j) => j !== i))}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+              <Button variant="outline" size="sm" onClick={() => setLines(ls => [...ls, { stockClass: STOCK_CLASSES[0], quantity: "" }])}>
+                <Plus className="h-4 w-4 mr-1" />Another class
+              </Button>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="move-notes">Notes</Label>
+              <Textarea id="move-notes" rows={2} value={notes} onChange={e => setNotes(e.target.value)} />
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button className="bg-pulse-forest hover:bg-pulse-forest-dark" onClick={() => save.mutate()} disabled={save.isPending}>
+            {save.isPending ? "Saving…" : "Save movement"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
-        <TabsContent value="transactions">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Recent Transactions</CardTitle>
-              <CardDescription>Stock movements and changes</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {transactions.length > 0 ? (
-                <div className="space-y-3">
-                  {transactions.map((tx) => (
-                    <div key={tx.id} className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="flex items-center gap-3">
-                        {getTransactionIcon(tx.type)}
-                        <div>
-                          <p className="font-medium">{tx.description || tx.type}</p>
-                          <p className="text-sm text-muted-foreground">{tx.date}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <Badge className={getTransactionBadgeColor(tx.type)}>
-                          {tx.type === 'purchase' || tx.type === 'transfer_in' || tx.type === 'birth' ? '+' : '-'}
-                          {tx.quantity}
-                        </Badge>
-                        {tx.totalValue && (
-                          <span className="text-sm font-medium">${tx.totalValue.toFixed(2)}</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-12">
-                  <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-muted-foreground">No transactions recorded yet</p>
-                  <Button 
-                    className="mt-4" 
-                    onClick={() => setIsTransactionDialogOpen(true)}
-                  >
-                    Record First Transaction
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+function CountDialog({ open, onOpenChange, initialClass }: { open: boolean; onOpenChange: (v: boolean) => void; initialClass?: string }) {
+  const queryClient = useQueryClient();
+  const [stockClass, setStockClass] = useState(STOCK_CLASSES[0]);
+  const [count, setCount] = useState<number | "">("");
+  const [countedAt, setCountedAt] = useState(today);
+  const [notes, setNotes] = useState("");
+  useEffect(() => {
+    if (!open) return;
+    setStockClass(initialClass ?? STOCK_CLASSES[0]); setCount(""); setCountedAt(today()); setNotes("");
+  }, [open, initialClass]);
+  const save = useMutation({
+    mutationFn: () => {
+      if (count === "") throw new Error("Enter how many were counted");
+      return api("/api/stock-recon/counts", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stockClass, count, countedAt, notes: notes || null }),
+      });
+    },
+    onSuccess: () => {
+      toast.success("Stocktake saved");
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+      onOpenChange(false);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Stocktake</DialogTitle>
+          <DialogDescription>How many were counted on farm. The tally starts again from this count.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <Label htmlFor="count-class">Stock class</Label>
+            <select id="count-class" className={selectClass} value={stockClass} onChange={e => setStockClass(e.target.value)}>
+              {Array.from(new Set([...STOCK_CLASSES, stockClass])).map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="count-head">Head counted</Label>
+              <Input id="count-head" type="number" inputMode="numeric" min={0} value={count}
+                onChange={e => setCount(e.target.value === "" ? "" : Number(e.target.value))} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="count-date">Date</Label>
+              <Input id="count-date" type="date" max={today()} value={countedAt} onChange={e => setCountedAt(e.target.value)} />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="count-notes">Notes</Label>
+            <Textarea id="count-notes" rows={2} value={notes} onChange={e => setNotes(e.target.value)} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button className="bg-pulse-forest hover:bg-pulse-forest-dark" onClick={() => save.mutate()} disabled={save.isPending}>Save count</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
-        <TabsContent value="by-herd">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Stock by Herd</CardTitle>
-              <CardDescription>Detailed breakdown by herd assignment</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {Object.keys(realStockSummary.byHerd).length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {Object.entries(realStockSummary.byHerd).map(([herd, count]) => (
-                    <Card key={herd} className="bg-muted/50">
-                      <CardContent className="p-4">
-                        <div className="flex items-center justify-between">
-                          <h3 className="font-semibold">{herd}</h3>
-                          <Badge variant="secondary">{count} head</Badge>
-                        </div>
-                        <p className="text-sm text-muted-foreground mt-2">
-                          {((count / realStockSummary.totalAnimals) * 100).toFixed(1)}% of total stock
-                        </p>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-muted-foreground text-center py-8">
-                  No herd assignments found. Assign animals to herds to see breakdown.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+function MovementRow({ m, onDelete }: { m: Movement; onDelete: (id: string) => void }) {
+  const [confirming, setConfirming] = useState(false);
+  const sign = m.type === "adjustment" ? "" : isIn(m.type) ? "+" : "−";
+  return (
+    <li className="flex flex-wrap items-start gap-3 px-3 py-3">
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">
+          <span className={cn(m.type !== "adjustment" && (isIn(m.type) ? "text-green-700" : "text-red-700"))}>
+            {STOCK_MOVEMENT_LABELS[m.type] ?? m.type}
+          </span>
+          {" · "}{m.lines.map(l => `${sign}${l.quantity} ${l.stockClass ?? "unclassified"}`).join(", ")}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {format(new Date(m.date), "d MMM yyyy")}
+          {m.otherParty && ` · ${isIn(m.type) ? "from" : "to"} ${m.otherParty}`}
+          {m.otherPartyNait && ` (NAIT ${m.otherPartyNait})`}
+          {m.asdNumber && ` · ASD ${m.asdNumber}`}
+          {ASD_TYPES.includes(m.type) && !m.asdNumber && m.attachments.length === 0 && (
+            <span className="text-amber-700 font-medium"> · no ASD</span>
+          )}
+        </p>
+        {m.notes && <p className="text-xs mt-0.5">{m.notes}</p>}
+      </div>
+      <div className="flex items-center gap-2">
+        {m.attachments.map(a => (
+          <a key={a.id} href={a.url} target="_blank" rel="noreferrer" title={a.fileName ?? "ASD"}>
+            {a.kind === "photo"
+              ? <img src={a.url} alt="ASD photo" className="h-12 w-12 rounded object-cover border" loading="lazy" />
+              : <span className="text-xs underline">{a.fileName ?? "ASD"}</span>}
+          </a>
+        ))}
+        {confirming ? (
+          <>
+            <Button variant="destructive" size="sm" onClick={() => onDelete(m.id)}>Delete</Button>
+            <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>Keep</Button>
+          </>
+        ) : (
+          <Button variant="ghost" size="icon" aria-label="Delete movement" onClick={() => setConfirming(true)}>
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
+    </li>
+  );
+}
 
-        <TabsContent value="by-breed">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Stock by Breed</CardTitle>
-              <CardDescription>Detailed breakdown by breed</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {Object.keys(realStockSummary.byBreed).length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {Object.entries(realStockSummary.byBreed).map(([breed, count]) => (
-                    <Card key={breed} className="bg-muted/50">
-                      <CardContent className="p-4">
-                        <div className="flex items-center justify-between">
-                          <h3 className="font-semibold">{breed}</h3>
-                          <Badge variant="secondary">{count} head</Badge>
-                        </div>
-                        <p className="text-sm text-muted-foreground mt-2">
-                          {((count / realStockSummary.totalAnimals) * 100).toFixed(1)}% of total stock
-                        </p>
-                      </CardContent>
-                    </Card>
+/**
+ * Stock tallies by class: last stocktake plus every movement since, each backed by its ASD
+ */
+export default function StockReconciliationPage() {
+  const queryClient = useQueryClient();
+  const [moving, setMoving] = useState(false);
+  const [counting, setCounting] = useState<{ open: boolean; stockClass?: string }>({ open: false });
+  const { data, isLoading, error } = useQuery({ queryKey: QUERY_KEY, queryFn: () => api<Reconciliation>("/api/stock-recon") });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api(`/api/stock-recon/movements/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      toast.success("Movement removed");
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const difference = data ? data.totalTally - data.registerActive : 0;
+
+  return (
+    <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-5">
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-pulse-forest">Stock reconciliation</h1>
+          <p className="text-sm text-muted-foreground">Photograph each ASD as stock comes and goes; the tallies update straight away.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setCounting({ open: true })}>
+            <ClipboardCheck className="h-4 w-4 mr-1" />Stocktake
+          </Button>
+          <Button className="bg-pulse-forest hover:bg-pulse-forest-dark" onClick={() => setMoving(true)}>
+            <Camera className="h-4 w-4 mr-1" />Record movement
+          </Button>
+        </div>
+      </header>
+
+      {isLoading && <p className="text-sm text-muted-foreground">Adding up the stock…</p>}
+      {error && <p className="text-sm text-red-700">{(error as Error).message}</p>}
+
+      {data && (
+        <>
+          <section className="rounded-lg border bg-card overflow-x-auto" aria-labelledby="tally-heading">
+            <h2 id="tally-heading" className="sr-only">Tallies</h2>
+            {data.classes.length === 0 ? (
+              <p className="p-4 text-sm text-muted-foreground">
+                No stock recorded yet. Start with a stocktake of each class, then record movements as they happen.
+              </p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-left">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">Class</th>
+                    <th className="px-3 py-2 font-medium">Last stocktake</th>
+                    <th className="px-3 py-2 font-medium text-right">In</th>
+                    <th className="px-3 py-2 font-medium text-right">Out</th>
+                    <th className="px-3 py-2 font-medium text-right">On farm now</th>
+                    <th className="px-3 py-2" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {data.classes.map(c => (
+                    <tr key={c.stockClass}>
+                      <td className="px-3 py-2 font-medium">{c.stockClass}</td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {c.counted ? `${c.counted.count} on ${format(new Date(c.counted.countedAt), "d MMM yyyy")}` : "Not counted"}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-green-700">{c.in ? `+${c.in}` : "0"}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-red-700">{c.out ? `−${c.out}` : "0"}</td>
+                      <td className={cn("px-3 py-2 text-right tabular-nums font-semibold", c.tally < 0 && "text-red-700")}>{c.tally}</td>
+                      <td className="px-3 py-2 text-right">
+                        <Button size="sm" variant="ghost" onClick={() => setCounting({ open: true, stockClass: c.stockClass })}>Count</Button>
+                      </td>
+                    </tr>
                   ))}
-                </div>
-              ) : (
-                <p className="text-muted-foreground text-center py-8">
-                  No breed information found. Add breed data to animals to see breakdown.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+                </tbody>
+                <tfoot className="border-t font-semibold">
+                  <tr>
+                    <td className="px-3 py-2" colSpan={4}>Total on farm</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{data.totalTally}</td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+          </section>
+
+          {data.classes.length > 0 && (
+            <p className={cn("text-sm", difference !== 0 ? "text-amber-800 dark:text-amber-300" : "text-muted-foreground")}>
+              The animal register has {data.registerActive} active animal{data.registerActive === 1 ? "" : "s"}
+              {difference === 0
+                ? ", matching the tally."
+                : `: ${Math.abs(difference)} ${difference > 0 ? "fewer than" : "more than"} the tally. Check for animals not yet in the register, or ones still listed after leaving.`}
+            </p>
+          )}
+
+          <section className="space-y-2" aria-labelledby="movements-heading">
+            <h2 id="movements-heading" className="font-semibold">Movements</h2>
+            {data.movements.length === 0 ? (
+              <p className="text-sm text-muted-foreground">None recorded yet.</p>
+            ) : (
+              <ul className="divide-y rounded-lg border bg-card">
+                {data.movements.map(m => <MovementRow key={m.id} m={m} onDelete={id => remove.mutate(id)} />)}
+              </ul>
+            )}
+          </section>
+        </>
+      )}
+
+      <MovementDialog open={moving} onOpenChange={setMoving} />
+      <CountDialog open={counting.open} initialClass={counting.stockClass} onOpenChange={open => setCounting(c => ({ ...c, open }))} />
     </div>
   );
 }

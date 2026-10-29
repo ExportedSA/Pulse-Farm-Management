@@ -25,11 +25,9 @@ import type { Alert } from "@shared/schema";
 import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import Dashboard from "@/pages/dashboard";
-import LandingDashboard from "@/pages/landing-dashboard";
 import DashboardOverview from "@/components/dashboard/DashboardOverview";
 import ChatPage from "@/pages/chat-page";
 import CompliancePage from "@/pages/compliance-page";
-import FarmCompliancePage from "@/pages/farm-compliance-page";
 import Home from "@/pages/home";
 import AnimalsList from "@/pages/animals-list";
 import GroupsManagement from "@/pages/groups-management";
@@ -86,29 +84,19 @@ import AnimalDetailPage from "@/pages/AnimalDetailPage";
 import TaskListPage from "@/pages/TaskListPage";
 import EquipmentListPage from "@/pages/EquipmentListPage";
 import EquipmentDetailPage from "@/pages/EquipmentDetailPage";
-import ComplianceDashboard from "@/pages/ComplianceDashboard";
+import CompliancePackPage from "@/pages/compliance-pack-page";
 import TimesheetReportPage from "@/pages/TimesheetReportPage";
 import SafetyReportPage from "@/pages/SafetyReportPage";
 import AnimalReportPage from "@/pages/AnimalReportPage";
 import HerdReportsPage from "@/pages/herd-reports-page";
 import PastureWalkPage from "@/pages/pasture-walk-page";
 import RosterSchedulingPage from "@/pages/roster-scheduling-page";
-import HealthSafetyPage from "@/pages/health-safety-page";
-import AssetRegistryPage from "@/pages/asset-registry-page";
-import FarmFinancePage from "@/pages/farm-finance-page";
 import QRCodeManagementPage from "@/pages/qr-code-management-page";
 import FinancialAnalyticsPage from "@/pages/financial-analytics-page";
-import PerformanceBenchmarkingPage from "@/pages/performance-benchmarking-page";
 import AnimalPerformancePage from "@/pages/animal-performance-page";
-import FreshwaterFarmPlanPage from "@/pages/freshwater-farm-plan-page";
-import EnvironmentalCompliancePage from "@/pages/environmental-compliance-page";
 import ReportsExportPage from "@/pages/reports-export-page";
 import WeatherIntegrationPage from "@/pages/weather-integration-page";
-import MilkAnalyticsPage from "@/pages/milk-analytics-page";
-import GISMappingPage from "@/pages/gis-mapping-page";
 import GeneticMeritPage from "@/pages/genetic-merit-page";
-import FeedPlanningPage from "@/pages/feed-planning-page";
-import IoTDashboardPage from "@/pages/iot-dashboard-page";
 import MultiFarmPage from "@/pages/multi-farm-page";
 import CSVImportPage from "@/pages/csv-import-page";
 import MobileScanner from "@/pages/mobile-scanner";
@@ -155,20 +143,13 @@ function Router() {
         <Route path="/app/operations/staff" component={StaffManagementPage} />
         <Route path="/app/operations/contractors" component={ContractorManagementPage} />
         <Route path="/app/operations/roster" component={RosterSchedulingPage} />
-        <Route path="/app/health-safety" component={HealthSafetyPage} />
         <Route path="/app/safety" component={CompliancePage} />
         <Route path="/app/people" component={StaffManagementPage} />
-        <Route path="/app/asset-registry" component={AssetRegistryPage} />
-        <Route path="/app/farm-finance" component={FarmFinancePage} />
         <Route path="/app/financial-analytics" component={FinancialAnalyticsPage} />
-        <Route path="/app/performance-benchmarking" component={PerformanceBenchmarkingPage} />
         <Route path="/app/animal-performance" component={AnimalPerformancePage} />
-        <Route path="/app/freshwater-farm-plan" component={FreshwaterFarmPlanPage} />
-        <Route path="/app/environmental-compliance" component={EnvironmentalCompliancePage} />
         <Route path="/app/reports" component={ReportsExportPage} />
         <Route path="/app/weather" component={WeatherIntegrationPage} />
-        <Route path="/app/milk-analytics" component={MilkAnalyticsPage} />
-        <Route path="/app/farm-compliance" component={FarmCompliancePage} />
+        <Route path="/app/farm-compliance" component={CompliancePackPage} />
         <Route path="/app/nait" component={NaitCompliancePage} />
         <Route path="/app/treatments/:section?" component={Home} />
         <Route path="/app/batch-treatment" component={BatchTreatmentPage} />
@@ -203,7 +184,7 @@ function Router() {
         <Route path="/app/records" component={RecordsPage} />
         <Route path="/app/equipment" component={EquipmentListPage} />
         <Route path="/app/equipment/:id" component={EquipmentDetailPage} />
-        <Route path="/app/compliance-overview" component={ComplianceDashboard} />
+        <Route path="/app/compliance-overview" component={CompliancePackPage} />
         <Route path="/app/reports/timesheets" component={TimesheetReportPage} />
         <Route path="/app/reports/safety" component={SafetyReportPage} />
         <Route path="/app/reports/animals" component={AnimalReportPage} />
@@ -215,10 +196,7 @@ function Router() {
         <Route path="/app/shed" component={ShedPage} />
         <Route path="/app/settings" component={SettingsPage} />
         <Route path="/app/alerts" component={AlertsPage} />
-        <Route path="/app/gis-mapping" component={GISMappingPage} />
         <Route path="/app/genetic-merit" component={GeneticMeritPage} />
-        <Route path="/app/feed-planning" component={FeedPlanningPage} />
-        <Route path="/app/iot" component={IoTDashboardPage} />
         <Route path="/app/multi-farm" component={MultiFarmPage} />
         {/* Phase overlay routes */}
         <Route path="/app/health/medicines" component={MedicinesInventory} />

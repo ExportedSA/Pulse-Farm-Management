@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { format, subDays, subMonths } from "date-fns";
-import { FileText, ImageIcon, Map as MapIcon, List, Mic, Plus, Search, Trash2, CloudUpload } from "lucide-react";
+import { FileText, ImageIcon, Map as MapIcon, List, Mic, Plus, Search, Pencil, Trash2, CloudUpload } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { RecordsMap, type MapFeature } from "@/components/records/RecordsMap";
-import { NEW_RECORD_EVENT } from "@/components/records/RecordFab";
+import { NEW_RECORD_EVENT, openEditRecord } from "@/components/records/RecordFab";
 import { SeasonPanel } from "@/components/records/SeasonPanel";
 import {
   RECORD_TYPES,
@@ -84,9 +84,14 @@ function RecordCard({ record, onDelete }: { record: FarmRecord; onDelete: (r: Fa
             <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>Keep</Button>
           </div>
         ) : (
-          <Button variant="ghost" size="icon" aria-label="Delete record" onClick={() => setConfirming(true)}>
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          <div className="flex">
+            <Button variant="ghost" size="icon" aria-label="Edit record" onClick={() => openEditRecord(record.id)}>
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="icon" aria-label="Delete record" onClick={() => setConfirming(true)}>
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
         )}
       </div>
       {(record.tags.length > 0 || photos.length > 0 || others.length > 0) && (
