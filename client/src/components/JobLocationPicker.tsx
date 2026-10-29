@@ -1,305 +1,131 @@
 import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { MapPin, Crosshair } from 'lucide-react';
+import { Crosshair, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-
-// Fix for default markers in Leaflet with React
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
+import { SATELLITE_TILES, SATELLITE_ATTRIBUTION, DEFAULT_CENTER } from '@/components/records/AreaDrawer';
 
 interface JobLocationPickerProps {
-  latitude?: number;
-  longitude?: number;
-  onLocationChange: (lat: number, lng: number) => void;
+  latitude?: number | null;
+  longitude?: number | null;
+  onLocationChange: (lat: number | null, lng: number | null) => void;
+  // Where to look when the job has no pin yet, e.g. the middle of the farm's other jobs
+  center?: [number, number];
+  readOnly?: boolean;
   className?: string;
 }
 
-interface LocationState {
-  latitude: number;
-  longitude: number;
-  isUserLocation: boolean;
-  isLoading: boolean;
-  error: string | null;
-}
+const pinIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:22px;height:22px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#e8590c;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.5)"></div>',
+  iconSize: [22, 22],
+  iconAnchor: [11, 22],
+});
 
-// Cache location in localStorage to avoid repeated geolocation requests
-const CACHE_KEY = 'pulse_user_location';
-const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
+/**
+ * Satellite map to pin where a job is: tap the map, drag the pin, or use the phone's location
+ */
+export function JobLocationPicker({ latitude, longitude, onLocationChange, center, readOnly = false, className = '' }: JobLocationPickerProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const markerRef = useRef<L.Marker | null>(null);
+  const changeRef = useRef(onLocationChange);
+  changeRef.current = onLocationChange;
+  const [locating, setLocating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-function getCachedLocation(): { lat: number; lng: number } | null {
-  try {
-    const cached = localStorage.getItem(CACHE_KEY);
-    if (!cached) return null;
-    
-    const { timestamp, location } = JSON.parse(cached);
-    if (Date.now() - timestamp > CACHE_DURATION) {
-      localStorage.removeItem(CACHE_KEY);
-      return null;
+  const hasPin = latitude != null && longitude != null;
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const start: [number, number] = hasPin ? [latitude!, longitude!] : center ?? DEFAULT_CENTER;
+    const map = L.map(containerRef.current, { zoomControl: !readOnly, dragging: !readOnly, scrollWheelZoom: !readOnly })
+      .setView(start, hasPin ? 17 : 15);
+    L.tileLayer(SATELLITE_TILES, { attribution: SATELLITE_ATTRIBUTION, maxZoom: 19 }).addTo(map);
+    if (!readOnly) {
+      map.on('click', (e: L.LeafletMouseEvent) => changeRef.current(Number(e.latlng.lat.toFixed(7)), Number(e.latlng.lng.toFixed(7))));
     }
-    
-    return location;
-  } catch {
-    return null;
-  }
-}
+    mapRef.current = map;
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      markerRef.current = null;
+    };
+    // The map is created once; the pin follows the props below
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readOnly]);
 
-function setCachedLocation(lat: number, lng: number) {
-  try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({
-      timestamp: Date.now(),
-      location: { lat, lng }
-    }));
-  } catch {
-    // Ignore cache errors
-  }
-}
-
-async function getUserLocation(): Promise<{ lat: number; lng: number }> {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error('Geolocation is not supported by this browser'));
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!hasPin) {
+      markerRef.current?.remove();
+      markerRef.current = null;
       return;
     }
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-        setCachedLocation(latitude, longitude);
-        resolve({ lat: latitude, lng: longitude });
-      },
-      (error) => {
-        let message = 'Unable to get your location';
-        switch (error.code) {
-          case error.PERMISSION_DENIED:
-            message = 'Location permission denied. Please enable location access or click on the map to set location manually.';
-            break;
-          case error.POSITION_UNAVAILABLE:
-            message = 'Location information is unavailable. Please click on the map to set location manually.';
-            break;
-          case error.TIMEOUT:
-            message = 'Location request timed out. Please try again or click on the map to set location manually.';
-            break;
-        }
-        reject(new Error(message));
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: CACHE_DURATION
-      }
-    );
-  });
-}
-
-export function JobLocationPicker({ 
-  latitude = -40.9006, // Default to New Zealand dairy region
-  longitude = 175.6466,
-  onLocationChange,
-  className = ""
-}: JobLocationPickerProps) {
-  const mapRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<L.Map | null>(null);
-  const markerRef = useRef<L.Marker | null>(null);
-  const [locationState, setLocationState] = useState<LocationState>({
-    latitude,
-    longitude,
-    isUserLocation: false,
-    isLoading: false,
-    error: null
-  });
-
-  // Initialize location on component mount
-  useEffect(() => {
-    const initializeLocation = async () => {
-      // Check cache first
-      const cachedLocation = getCachedLocation();
-      if (cachedLocation) {
-        setLocationState({
-          latitude: cachedLocation.lat,
-          longitude: cachedLocation.lng,
-          isUserLocation: true,
-          isLoading: false,
-          error: null
-        });
-        onLocationChange(cachedLocation.lat, cachedLocation.lng);
-        return;
-      }
-
-      // Try to get user location
-      setLocationState(prev => ({ ...prev, isLoading: true, error: null }));
-      
-      try {
-        const userLocation = await getUserLocation();
-        setLocationState({
-          latitude: userLocation.lat,
-          longitude: userLocation.lng,
-          isUserLocation: true,
-          isLoading: false,
-          error: null
-        });
-        onLocationChange(userLocation.lat, userLocation.lng);
-      } catch (error) {
-        // Fall back to default location
-        setLocationState({
-          latitude,
-          longitude,
-          isUserLocation: false,
-          isLoading: false,
-          error: error instanceof Error ? error.message : 'Failed to get location'
-        });
-        onLocationChange(latitude, longitude);
-      }
-    };
-
-    initializeLocation();
-  }, []); // Remove dependencies to prevent infinite re-renders
-
-  const handleUseMyLocation = async () => {
-    setLocationState(prev => ({ ...prev, isLoading: true, error: null }));
-    
-    try {
-      const userLocation = await getUserLocation();
-      setLocationState({
-        latitude: userLocation.lat,
-        longitude: userLocation.lng,
-        isUserLocation: true,
-        isLoading: false,
-        error: null
+    const at: [number, number] = [latitude!, longitude!];
+    if (markerRef.current) {
+      markerRef.current.setLatLng(at);
+    } else {
+      const marker = L.marker(at, { icon: pinIcon, draggable: !readOnly }).addTo(map);
+      marker.on('dragend', () => {
+        const p = marker.getLatLng();
+        changeRef.current(Number(p.lat.toFixed(7)), Number(p.lng.toFixed(7)));
       });
-      onLocationChange(userLocation.lat, userLocation.lng);
-    } catch (error) {
-      setLocationState(prev => ({
-        ...prev,
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Failed to get location'
-      }));
+      markerRef.current = marker;
+      map.setView(at, Math.max(map.getZoom(), 16));
     }
+  }, [hasPin, latitude, longitude, readOnly]);
+
+  // Centre on the farm once its location is known, if nothing is pinned yet
+  useEffect(() => {
+    if (!hasPin && center) mapRef.current?.setView(center, 15);
+  }, [center?.[0], center?.[1]]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const useMyLocation = () => {
+    if (!navigator.geolocation) {
+      setError("This device can't share its location. Tap the map instead.");
+      return;
+    }
+    setLocating(true);
+    setError(null);
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        setLocating(false);
+        const lat = Number(pos.coords.latitude.toFixed(7));
+        const lng = Number(pos.coords.longitude.toFixed(7));
+        changeRef.current(lat, lng);
+        mapRef.current?.setView([lat, lng], 17);
+      },
+      () => {
+        setLocating(false);
+        setError("Couldn't get your location. Tap the map instead.");
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
   };
 
-  useEffect(() => {
-    if (!mapRef.current) return;
-
-    // Initialize map with initial coordinates
-    const map = L.map(mapRef.current).setView([locationState.latitude, locationState.longitude], 13);
-
-    // Add OpenStreetMap tiles
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors',
-      maxZoom: 19,
-    }).addTo(map);
-
-    // Add initial marker if coordinates exist
-    if (locationState.latitude && locationState.longitude) {
-      const marker = L.marker([locationState.latitude, locationState.longitude]).addTo(map);
-      markerRef.current = marker;
-    }
-
-    // Handle map clicks to set location
-    map.on('click', (e: L.LeafletMouseEvent) => {
-      const { lat, lng } = e.latlng;
-      
-      // Remove existing marker
-      if (markerRef.current) {
-        map.removeLayer(markerRef.current);
-      }
-      
-      // Add new marker
-      const marker = L.marker([lat, lng]).addTo(map);
-      markerRef.current = marker;
-      
-      // Update location state and parent
-      setLocationState(prev => ({
-        ...prev,
-        latitude: lat,
-        longitude: lng,
-        isUserLocation: false,
-        error: null
-      }));
-      onLocationChange(lat, lng);
-    });
-
-    mapInstanceRef.current = map;
-
-    return () => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
-      }
-    };
-  }, []); // Only initialize once
-
-  // Update map view and marker when location changes (but not for manual clicks)
-  useEffect(() => {
-    if (mapInstanceRef.current && locationState.latitude && locationState.longitude) {
-      // Only update if it's not a manual click (user location or initial load)
-      if (locationState.isUserLocation || !locationState.error) {
-        mapInstanceRef.current.setView([locationState.latitude, locationState.longitude], 13);
-        
-        if (markerRef.current) {
-          markerRef.current.setLatLng([locationState.latitude, locationState.longitude]);
-        } else {
-          const marker = L.marker([locationState.latitude, locationState.longitude]).addTo(mapInstanceRef.current);
-          markerRef.current = marker;
-        }
-      }
-    }
-  }, [locationState.latitude, locationState.longitude, locationState.isUserLocation, locationState.error]);
-
   return (
-    <div className={`relative ${className}`}>
-      <div className="absolute top-2 right-2 z-10 bg-white rounded-lg shadow-md p-3 text-xs max-w-xs">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <MapPin className="h-3 w-3 text-pulse-forest" />
-            <p className="text-gray-600 font-medium">
-              {locationState.isUserLocation ? 'Your Location' : 'Click to set location'}
-            </p>
-          </div>
-          {!locationState.isUserLocation && !locationState.isLoading && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleUseMyLocation}
-              className="h-6 px-2 text-xs border-pulse-300 text-pulse-forest hover:bg-pulse-50"
-            >
-              <Crosshair className="h-3 w-3 mr-1" />
-              Use My Location
-            </Button>
+    <div className={`space-y-2 ${className}`}>
+      <div ref={containerRef} className={readOnly ? 'h-full min-h-[12rem] w-full' : 'h-64 w-full rounded-md border'} />
+      {!readOnly && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <Button type="button" size="sm" variant="outline" onClick={useMyLocation} disabled={locating}>
+            <Crosshair className="h-4 w-4 mr-1" />{locating ? 'Finding you…' : 'Use my location'}
+          </Button>
+          {hasPin ? (
+            <>
+              <span className="text-muted-foreground tabular-nums">{latitude!.toFixed(5)}, {longitude!.toFixed(5)}</span>
+              <Button type="button" size="sm" variant="ghost" onClick={() => onLocationChange(null, null)}>
+                <X className="h-4 w-4 mr-1" />Clear pin
+              </Button>
+            </>
+          ) : (
+            <span className="text-muted-foreground">Tap the map where the job is.</span>
           )}
-        </div>
-        
-        {locationState.isLoading && (
-          <p className="text-blue-600">Getting your location...</p>
-        )}
-        
-        {locationState.error && (
-          <p className="text-red-600 text-xs">{locationState.error}</p>
-        )}
-        
-        {locationState.latitude && locationState.longitude && !locationState.isLoading && (
-          <p className="text-gray-800 font-medium">
-            {locationState.latitude.toFixed(6)}, {locationState.longitude.toFixed(6)}
-          </p>
-        )}
-      </div>
-      
-      {locationState.isLoading && (
-        <div className="absolute inset-0 bg-white bg-opacity-75 rounded-lg border border-gray-300 flex items-center justify-center z-20">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pulse-forest mx-auto mb-2"></div>
-            <p className="text-sm text-gray-600">Getting location...</p>
-          </div>
+          {error && <span className="text-red-700 w-full">{error}</span>}
         </div>
       )}
-      
-      <div 
-        ref={mapRef} 
-        className="w-full h-64 rounded-lg border border-gray-300"
-      />
     </div>
   );
 }

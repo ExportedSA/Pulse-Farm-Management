@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { pulseGet, pulsePost, pulsePatch } from '@/lib/pulseApi';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,11 +13,11 @@ import { Progress } from '@/components/ui/progress';
 import { Checkbox } from '@/components/ui/checkbox';
 import { JobPhotoUpload } from '@/components/JobPhotoUpload';
 import { JobLocationPicker } from '@/components/JobLocationPicker';
+import { JobsMap, JOB_STATUS_COLORS, initials, type MapJob } from '@/components/jobs/JobsMap';
+import { useAuth } from '@/lib/auth-context';
 import { ChecklistManager, CompactChecklist, type ChecklistItem } from '@/components/ChecklistManager';
 import { toast } from 'sonner';
 
-// Lazy load map components to avoid SSR issues
-const FarmMap = lazy(() => import('@/components/FarmMap'));
 import { 
   Calendar, 
   Clock, 
@@ -51,12 +51,14 @@ interface Job {
   title: string;
   description: string;
   location: string;
-  latitude?: number;
-  longitude?: number;
+  latitude?: number | null;
+  longitude?: number | null;
+  pastureId?: string | null;
+  paddockName?: string | null;
   photoUrls?: string[];
   assignedTo: string[];
   assignedToNames?: string[];
-  status: 'pending' | 'in-progress' | 'completed' | 'cancelled';
+  status: 'pending' | 'in-progress' | 'blocked' | 'completed' | 'cancelled';
   priority: 'low' | 'medium' | 'high' | 'urgent';
   startDate: string;
   endDate?: string;
@@ -80,12 +82,6 @@ interface User {
 interface Paddock {
   id: string;
   name: string;
-  boundaries: [number, number][]; // [[lat, lng], [lat, lng], ...]
-  area: number; // in hectares
-  pastureType: string;
-  status: string;
-  lastGrazed?: string;
-  nextInspection?: string;
 }
 
 interface TaskTemplate {
@@ -100,16 +96,17 @@ interface TaskTemplate {
   suggestedRecurrence: string | null;
 }
 
-interface AutoAssignRule {
-  id: string;
-  name: string;
-  category: string;
-  assignToRole?: string;
-  assignToUsers: string[];
-  isActive: boolean;
-}
+const todayString = () => new Date().toISOString().split('T')[0];
+
+// Not done, and its finish (or start) date has passed
+const isOverdue = (job: Job) =>
+  (job.status === 'pending' || job.status === 'in-progress' || job.status === 'blocked') &&
+  (job.endDate || job.startDate) < todayString();
+
+const hasPin = (job: Job) => job.latitude != null && job.longitude != null;
 
 export default function JobsPage() {
+  const { user } = useAuth();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('all');
@@ -119,13 +116,15 @@ export default function JobsPage() {
   const [filterPriority, setFilterPriority] = useState<string>('all');
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
+  const [editingPin, setEditingPin] = useState(false);
 
   // Map view state
   const [mapView, setMapView] = useState<'list' | 'map'>('list');
-  const [showPaddocks, setShowPaddocks] = useState(true);
-  const [selectedMapJob, setSelectedMapJob] = useState<Job | null>(null);
-  const [mapFilterStatus, setMapFilterStatus] = useState<string>('all');
-  const [mapFilterPriority, setMapFilterPriority] = useState<string>('all');
+  const [selectedMapJobId, setSelectedMapJobId] = useState<string | null>(null);
+  // 'open' = not completed or cancelled
+  const [mapFilterStatus, setMapFilterStatus] = useState<string>('open');
+  const [mapFilterPerson, setMapFilterPerson] = useState<string>('all');
+  const [mapFilterDue, setMapFilterDue] = useState<string>('all');
   const [paddocks, setPaddocks] = useState<Paddock[]>([]);
 
   // Template and recurring state
@@ -136,15 +135,15 @@ export default function JobsPage() {
   const [recurrenceType, setRecurrenceType] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
   const [recurrenceInterval, setRecurrenceInterval] = useState(1);
   const [recurrenceDays, setRecurrenceDays] = useState<number[]>([1]); // Monday by default
-  const [autoAssignRules, setAutoAssignRules] = useState<AutoAssignRule[]>([]);
 
   // Form states
   const [newJob, setNewJob] = useState({
     title: '',
     description: '',
     location: '',
-    latitude: -40.9006 as number | undefined,
-    longitude: 175.6466 as number | undefined,
+    latitude: undefined as number | undefined,
+    longitude: undefined as number | undefined,
+    pastureId: '',
     photos: [] as File[],
     assignedTo: [] as string[],
     priority: 'medium' as const,
@@ -167,9 +166,8 @@ export default function JobsPage() {
   useEffect(() => {
     loadJobs();
     loadUsers();
-    loadMapData();
+    loadPaddocks();
     loadTemplates();
-    loadAutoAssignRules();
   }, []);
 
   // Load task templates
@@ -241,21 +239,6 @@ export default function JobsPage() {
     }
   }
 
-  // Load auto-assignment rules
-  async function loadAutoAssignRules() {
-    try {
-      // Mock rules - would come from API in production
-      const mockRules: AutoAssignRule[] = [
-        { id: 'rule-1', name: 'Feeding Tasks', category: 'feeding', assignToRole: 'Stock Handler', assignToUsers: ['user-2', 'user-3'], isActive: true },
-        { id: 'rule-2', name: 'Maintenance Tasks', category: 'maintenance', assignToRole: 'Farm Manager', assignToUsers: ['user-1'], isActive: true },
-        { id: 'rule-3', name: 'Health Checks', category: 'health', assignToRole: 'Veterinarian', assignToUsers: ['user-4'], isActive: true },
-      ];
-      setAutoAssignRules(mockRules);
-    } catch (err) {
-      console.error('Failed to load auto-assign rules:', err);
-    }
-  }
-
   // Apply template to new job form
   const applyTemplate = (template: TaskTemplate) => {
     setNewJob({
@@ -283,67 +266,14 @@ export default function JobsPage() {
     toast.success(`Template "${template.name}" applied`);
   };
 
-  // Apply auto-assignment based on category
-  const applyAutoAssignment = (category: string) => {
-    const rule = autoAssignRules.find(r => r.category === category && r.isActive);
-    if (rule) {
-      setNewJob(prev => ({ ...prev, assignedTo: rule.assignToUsers }));
-      toast.info(`Auto-assigned to ${rule.name}`);
-    }
-  };
-
-  // Load map data (paddocks)
-  async function loadMapData() {
+  // The farm's paddocks, to say which one a job is in
+  async function loadPaddocks() {
     try {
-      // Mock paddocks data - would come from API in production
-      const mockPaddocks: Paddock[] = [
-        {
-          id: 'paddock-1',
-          name: 'Front Paddock',
-          boundaries: [
-            [-40.8995, 175.6455],
-            [-40.8995, 175.6475],
-            [-40.9015, 175.6475],
-            [-40.9015, 175.6455],
-          ],
-          area: 25,
-          pastureType: 'Ryegrass',
-          status: 'active',
-          lastGrazed: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-        },
-        {
-          id: 'paddock-2',
-          name: 'Back Paddock',
-          boundaries: [
-            [-40.9015, 175.6455],
-            [-40.9015, 175.6475],
-            [-40.9035, 175.6475],
-            [-40.9035, 175.6455],
-          ],
-          area: 30,
-          pastureType: 'Clover Mix',
-          status: 'resting',
-          lastGrazed: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
-        },
-        {
-          id: 'paddock-3',
-          name: 'Side Paddock',
-          boundaries: [
-            [-40.9015, 175.6475],
-            [-40.9015, 175.6495],
-            [-40.9035, 175.6495],
-            [-40.9035, 175.6475],
-          ],
-          area: 20,
-          pastureType: 'Mixed Pasture',
-          status: 'active',
-          lastGrazed: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-        },
-      ];
-
-      setPaddocks(mockPaddocks);
+      const res = await fetch('/api/pastures', { credentials: 'include' });
+      const body = res.ok ? await res.json() : [];
+      setPaddocks((Array.isArray(body) ? body : body.pastures ?? []).map((p: any) => ({ id: p.id, name: p.name })));
     } catch (err) {
-      console.error('Failed to load map data:', err);
+      console.error('Failed to load paddocks:', err);
     }
   }
 
@@ -351,6 +281,14 @@ export default function JobsPage() {
     try {
       const data = await pulseGet<Job[]>('/jobs');
       setJobs(data);
+      // Opened from a "New job for you" notification
+      const linked = new URLSearchParams(window.location.search).get('job');
+      const job = linked ? data.find(j => j.id === linked) : undefined;
+      if (job) {
+        setSelectedJob(job);
+        setIsDetailDialogOpen(true);
+        window.history.replaceState(null, '', window.location.pathname);
+      }
     } catch (err) {
       console.error('Failed to load jobs:', err);
     } finally {
@@ -368,8 +306,12 @@ export default function JobsPage() {
   }
 
   const handleCreateJob = async () => {
-    if (!newJob.title || !newJob.description || !newJob.location || newJob.assignedTo.length === 0) {
-      alert('Please fill in all required fields and assign at least one person');
+    if (!newJob.title || !newJob.description || newJob.assignedTo.length === 0) {
+      toast.error('Give the job a title and description, and assign at least one person');
+      return;
+    }
+    if (!newJob.location && !newJob.pastureId && newJob.latitude === undefined) {
+      toast.error('Say where the job is: a paddock, a description, or a pin on the map');
       return;
     }
 
@@ -416,7 +358,8 @@ export default function JobsPage() {
       const formData = new FormData();
       formData.append('title', newJob.title);
       formData.append('description', newJob.description);
-      formData.append('location', newJob.location);
+      formData.append('location', newJob.location || paddocks.find(p => p.id === newJob.pastureId)?.name || '');
+      if (newJob.pastureId) formData.append('pastureId', newJob.pastureId);
       if (newJob.latitude !== undefined) formData.append('latitude', newJob.latitude.toString());
       if (newJob.longitude !== undefined) formData.append('longitude', newJob.longitude.toString());
       
@@ -451,7 +394,7 @@ export default function JobsPage() {
       toast.success('Job created successfully');
     } catch (error) {
       console.error('Failed to create job:', error);
-      alert('Failed to create job. Please try again.');
+      toast.error('Failed to create job. Please try again.');
     }
   };
 
@@ -460,8 +403,9 @@ export default function JobsPage() {
       title: '',
       description: '',
       location: '',
-      latitude: -40.9006,
-      longitude: 175.6466,
+      latitude: undefined,
+      longitude: undefined,
+      pastureId: '',
       photos: [],
       assignedTo: [],
       priority: 'medium',
@@ -492,6 +436,18 @@ export default function JobsPage() {
     } catch (err) {
       console.error('Failed to update job status:', err);
       toast.error('Failed to update job status');
+    }
+  }
+
+  // Add, move or clear a job's pin
+  async function updateJobPin(jobId: string, latitude: number | null, longitude: number | null) {
+    try {
+      await pulsePatch(`/jobs/${jobId}`, { latitude, longitude });
+      setJobs(prev => prev.map(j => (j.id === jobId ? { ...j, latitude, longitude } : j)));
+      setSelectedJob(prev => (prev?.id === jobId ? { ...prev, latitude, longitude } : prev));
+    } catch (err) {
+      console.error('Failed to update job location:', err);
+      toast.error('Failed to save the location');
     }
   }
 
@@ -534,6 +490,7 @@ export default function JobsPage() {
   // Open job detail dialog
   const openJobDetail = (job: Job) => {
     setSelectedJob(job);
+    setEditingPin(false);
     setIsDetailDialogOpen(true);
   };
 
@@ -551,50 +508,48 @@ export default function JobsPage() {
     const matchesStatus = filterStatus === 'all' || job.status === filterStatus;
     const matchesPriority = filterPriority === 'all' || job.priority === filterPriority;
     const matchesTab = activeTab === 'all' || 
-                       (activeTab === 'my-jobs' && job.assignedTo.includes('demo-user')) ||
-                       (activeTab === 'today' && job.startDate === new Date().toISOString().split('T')[0]);
+                       (activeTab === 'my-jobs' && !!user && job.assignedTo.includes(user.id)) ||
+                       (activeTab === 'today' && job.startDate === todayString());
     
     return matchesSearch && matchesStatus && matchesPriority && matchesTab;
   });
 
-  // Filter jobs for map view
-  const filteredMapJobs = jobs.filter(job => {
-    const hasLocation = job.latitude !== undefined && job.longitude !== undefined;
-    const matchesStatus = mapFilterStatus === 'all' || job.status === mapFilterStatus;
-    const matchesPriority = mapFilterPriority === 'all' || job.priority === mapFilterPriority;
-    const matchesTab = activeTab === 'all' || 
-                       (activeTab === 'my-jobs' && job.assignedTo.includes('demo-user')) ||
-                       (activeTab === 'today' && job.startDate === new Date().toISOString().split('T')[0]);
-    
-    return hasLocation && matchesStatus && matchesPriority && matchesTab;
+  // Jobs on the map: filtered by status, person and when they're due
+  const mapJobs = jobs.filter(job => {
+    const matchesStatus = mapFilterStatus === 'all' ||
+      (mapFilterStatus === 'open' ? job.status !== 'completed' && job.status !== 'cancelled' : job.status === mapFilterStatus);
+    const matchesPerson = mapFilterPerson === 'all' ||
+      (mapFilterPerson === 'unassigned' ? job.assignedTo.length === 0 :
+        job.assignedTo.includes(mapFilterPerson === 'mine' ? user?.id ?? '' : mapFilterPerson));
+    const today = todayString();
+    const weekAhead = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+    const matchesDue = mapFilterDue === 'all' ||
+      (mapFilterDue === 'overdue' && isOverdue(job)) ||
+      (mapFilterDue === 'today' && job.startDate <= today && (job.endDate || job.startDate) >= today) ||
+      (mapFilterDue === 'week' && job.startDate <= weekAhead);
+    const q = searchQuery.toLowerCase();
+    const matchesSearch = !q || job.title.toLowerCase().includes(q) || job.location.toLowerCase().includes(q);
+    return matchesStatus && matchesPerson && matchesDue && matchesSearch;
   });
+  const pinnedMapJobs = mapJobs.filter(hasPin);
+  const unpinnedMapJobs = mapJobs.filter(j => !hasPin(j));
+  const selectedMapJob = jobs.find(j => j.id === selectedMapJobId) ?? null;
+  const pinKey = pinnedMapJobs.map(j => `${j.id}:${j.status}:${j.latitude}:${j.longitude}:${j.assignedTo.join()}`).join('|');
+  const mapPins: MapJob[] = useMemo(() => pinnedMapJobs.map(j => ({
+    id: j.id, title: j.title, status: j.status, priority: j.priority,
+    latitude: j.latitude!, longitude: j.longitude!, assignedToNames: j.assignedToNames, overdue: isOverdue(j),
+  })), [pinKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const selectMapJob = useCallback((id: string) => setSelectedMapJobId(id), []);
 
-  // Get job marker color based on status and priority
-  const getJobMarkerColor = (job: Job) => {
-    if (job.status === 'completed') return '#10b981'; // green
-    if (job.status === 'in-progress') return '#3b82f6'; // blue
-    if (job.status === 'cancelled') return '#ef4444'; // red
-    
-    // For pending jobs, use priority color
-    switch (job.priority) {
-      case 'urgent': return '#dc2626'; // red
-      case 'high': return '#ea580c'; // orange
-      case 'medium': return '#ca8a04'; // yellow
-      case 'low': return '#16a34a'; // green
-      default: return '#6b7280'; // gray
-    }
-  };
-
-  // Handle job click on map
-  const handleMapJobClick = (job: Job) => {
-    setSelectedMapJob(job);
-    setIsDetailDialogOpen(true);
-  };
-
-  // Handle paddock click on map
-  const handlePaddockClick = (paddock: Paddock) => {
-    toast.info(`Paddock: ${paddock.name} - ${paddock.pastureType} (${paddock.area}ha)`);
-  };
+  // Where to start the location picker when a new job has no pin: the middle of the pinned jobs
+  const farmCenter = useMemo<[number, number] | undefined>(() => {
+    const pinned = jobs.filter(hasPin);
+    if (pinned.length === 0) return undefined;
+    return [
+      pinned.reduce((sum, j) => sum + j.latitude!, 0) / pinned.length,
+      pinned.reduce((sum, j) => sum + j.longitude!, 0) / pinned.length,
+    ];
+  }, [jobs]);
 
   const getStatusIcon = (status: Job['status']) => {
     switch (status) {
@@ -761,41 +716,27 @@ export default function JobsPage() {
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="text-sm font-medium mb-2 block">Location *</label>
-                      <div className="flex gap-2">
-                        <Input
-                          value={newJob.location}
-                          onChange={(e) => setNewJob({ ...newJob, location: e.target.value })}
-                          placeholder="e.g., Paddock A"
-                          className="flex-1"
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          onClick={() => {
-                            const mapSection = document.getElementById('job-map-picker');
-                            mapSection?.scrollIntoView({ behavior: 'smooth' });
-                          }}
-                          title="Pin location on map"
-                        >
-                          <MapPin className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      {newJob.latitude && newJob.longitude && (
-                        <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                          <MapPin className="h-3 w-3" />
-                          GPS: {newJob.latitude.toFixed(5)}, {newJob.longitude.toFixed(5)}
-                        </p>
-                      )}
+                      <label className="text-sm font-medium mb-2 block">Paddock</label>
+                      <Select value={newJob.pastureId || 'none'} onValueChange={(value) => setNewJob({ ...newJob, pastureId: value === 'none' ? '' : value })}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Choose a paddock" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Not in a paddock</SelectItem>
+                          {paddocks.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        value={newJob.location}
+                        onChange={(e) => setNewJob({ ...newJob, location: e.target.value })}
+                        placeholder="Or describe it, e.g. cow shed, race by gate 4"
+                        className="mt-2"
+                      />
                     </div>
 
                     <div>
                       <label className="text-sm font-medium mb-2 block">Category</label>
-                      <Select value={newJob.category} onValueChange={(value) => {
-                        setNewJob({ ...newJob, category: value });
-                        applyAutoAssignment(value);
-                      }}>
+                      <Select value={newJob.category} onValueChange={(value) => setNewJob({ ...newJob, category: value })}>
                         <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
@@ -808,12 +749,6 @@ export default function JobsPage() {
                           <SelectItem value="milking">Milking</SelectItem>
                         </SelectContent>
                       </Select>
-                      {autoAssignRules.find(r => r.category === newJob.category && r.isActive) && (
-                        <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
-                          <Zap className="h-3 w-3" />
-                          Auto-assignment rule active for this category
-                        </p>
-                      )}
                     </div>
                   </div>
 
@@ -1106,18 +1041,19 @@ export default function JobsPage() {
                       <MapPin className="h-4 w-4 text-primary" />
                       Pin Location on Map
                     </label>
-                    <p className="text-xs text-muted-foreground mb-3">Click on the map to set the exact GPS location. The assigned person can view this on their device.</p>
+                    <p className="text-xs text-muted-foreground mb-3">Tap the map to drop a pin where the job is. Whoever it's assigned to sees it on the jobs map.</p>
                     <JobLocationPicker
                       latitude={newJob.latitude}
                       longitude={newJob.longitude}
-                      onLocationChange={(lat, lng) => setNewJob({ ...newJob, latitude: lat, longitude: lng })}
+                      center={farmCenter}
+                      onLocationChange={(lat, lng) => setNewJob(prev => ({ ...prev, latitude: lat ?? undefined, longitude: lng ?? undefined }))}
                     />
                   </div>
 
                   <div className="flex gap-2 pt-4">
                     <Button
                       onClick={handleCreateJob}
-                      disabled={!newJob.title || !newJob.description || !newJob.location || !newJob.startDate || !newJob.startTime || newJob.assignedTo.length === 0}
+                      disabled={!newJob.title || !newJob.description || !newJob.startDate || !newJob.startTime || newJob.assignedTo.length === 0}
                       className="flex-1 bg-pulse-forest hover:bg-pulse-forest-dark text-white"
                     >
                       {isRecurring ? (
@@ -1219,45 +1155,42 @@ export default function JobsPage() {
             ) : (
               <>
                 {/* Map Filters */}
+                <Select value={mapFilterPerson} onValueChange={setMapFilterPerson}>
+                  <SelectTrigger className="w-[170px]" aria-label="Assigned to">
+                    <SelectValue placeholder="Person" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Everyone</SelectItem>
+                    <SelectItem value="mine">My jobs</SelectItem>
+                    <SelectItem value="unassigned">Unassigned</SelectItem>
+                    {availableUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+
                 <Select value={mapFilterStatus} onValueChange={setMapFilterStatus}>
-                  <SelectTrigger className="w-[150px]">
+                  <SelectTrigger className="w-[150px]" aria-label="Status">
                     <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="open">Not done</SelectItem>
                     <SelectItem value="pending">Pending</SelectItem>
                     <SelectItem value="in-progress">In Progress</SelectItem>
                     <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="cancelled">Cancelled</SelectItem>
+                    <SelectItem value="all">All</SelectItem>
                   </SelectContent>
                 </Select>
 
-                <Select value={mapFilterPriority} onValueChange={setMapFilterPriority}>
-                  <SelectTrigger className="w-[150px]">
-                    <SelectValue placeholder="Priority" />
+                <Select value={mapFilterDue} onValueChange={setMapFilterDue}>
+                  <SelectTrigger className="w-[150px]" aria-label="Due">
+                    <SelectValue placeholder="Due" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Priority</SelectItem>
-                    <SelectItem value="urgent">Urgent</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="low">Low</SelectItem>
+                    <SelectItem value="all">Any time</SelectItem>
+                    <SelectItem value="overdue">Overdue</SelectItem>
+                    <SelectItem value="today">Today</SelectItem>
+                    <SelectItem value="week">Next 7 days</SelectItem>
                   </SelectContent>
                 </Select>
-
-                {/* Map Layer Controls */}
-                <div className="flex items-center gap-2 border rounded-lg px-3 py-2">
-                  <Layers className="h-4 w-4 text-gray-500" />
-                  <div className="flex items-center gap-2">
-                    <label className="flex items-center gap-1 text-sm">
-                      <Checkbox
-                        checked={showPaddocks}
-                        onCheckedChange={(checked) => setShowPaddocks(checked as boolean)}
-                      />
-                      Show Paddocks
-                    </label>
-                  </div>
-                </div>
               </>
             )}
           </div>
@@ -1401,164 +1334,105 @@ export default function JobsPage() {
           </div>
         ) : (
           /* Map View */
-          <Suspense fallback={
-            <Card>
-              <CardContent className="py-12 text-center">
-                <Map className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-500">Loading map...</p>
+          <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+            <Card className="h-[65vh] min-h-[420px] overflow-hidden">
+              <CardContent className="p-0 h-full relative">
+                <JobsMap jobs={mapPins} selectedId={selectedMapJobId} onSelect={selectMapJob} />
+                {pinnedMapJobs.length === 0 && (
+                  <div className="absolute inset-x-4 top-4 z-[500] rounded-md bg-white/95 p-3 text-sm shadow">
+                    No jobs with a pin match these filters. Pin a job when you create it, or open one and tap Add pin.
+                  </div>
+                )}
               </CardContent>
             </Card>
-          }>
-            <div className="space-y-4">
-              {/* Map Statistics */}
-              <div className="grid grid-cols-4 gap-4 mb-4">
-                <Card>
-                  <CardContent className="p-4 text-center">
-                    <div className="text-2xl font-bold text-blue-600">{filteredMapJobs.length}</div>
-                    <div className="text-sm text-gray-600">Jobs on Map</div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-4 text-center">
-                    <div className="text-2xl font-bold text-orange-600">{filteredMapJobs.filter(j => j.priority === 'urgent' || j.priority === 'high').length}</div>
-                    <div className="text-sm text-gray-600">High Priority</div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-4 text-center">
-                    <div className="text-2xl font-bold text-green-600">{filteredMapJobs.filter(j => j.status === 'completed').length}</div>
-                    <div className="text-sm text-gray-600">Completed</div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-4 text-center">
-                    <div className="text-2xl font-bold text-purple-600">{filteredMapJobs.filter(j => j.status === 'in-progress').length}</div>
-                    <div className="text-sm text-gray-600">In Progress</div>
-                  </CardContent>
-                </Card>
-              </div>
 
-              {/* Farm Map */}
-              <Card className="h-[600px]">
-                <CardContent className="p-0 h-full">
-                  <FarmMap
-                    taskPins={filteredMapJobs.map(job => ({
-                      id: job.id,
-                      title: job.title,
-                      description: job.description,
-                      latitude: job.latitude?.toString() || '0',
-                      longitude: job.longitude?.toString() || '0',
-                      status: job.status === 'in-progress' ? 'in_progress' : job.status as 'pending' | 'completed' | 'cancelled',
-                      priority: job.priority,
-                      category: job.category,
-                      dueDate: job.startDate,
-                      assignedTo: job.assignedTo.join(','),
-                      pastureId: null,
-                      notes: job.notes || null,
-                      completedAt: job.status === 'completed' ? new Date().toISOString() : null,
-                      createdAt: job.createdAt,
-                    }))}
-                    paddocks={showPaddocks ? paddocks.map(p => ({
-                      id: p.id,
-                      name: p.name,
-                      coordinates: p.boundaries,
-                      color: p.status === 'active' ? '#22c55e' : '#eab308',
-                      status: p.status,
-                    })) : []}
-                    center={[-40.9006, 175.6466]}
-                    zoom={14}
-                    onPinClick={(pin) => {
-                      const job = filteredMapJobs.find(j => j.id === pin.id);
-                      if (job) handleMapJobClick(job);
-                    }}
-                    showPaddocks={showPaddocks}
-                    selectedPinId={selectedMapJob?.id}
-                  />
-                </CardContent>
-              </Card>
-
-              {/* Map Legend */}
-              <Card>
-                <CardContent className="p-4">
-                  <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                    <Layers className="h-4 w-4" />
-                    Map Legend
-                  </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-xs">
-                    <div className="space-y-2">
-                      <div className="font-medium text-gray-700">Job Status</div>
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full bg-green-500"></div>
-                          <span>Completed</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-                          <span>In Progress</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
-                          <span>Pending</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full bg-red-500"></div>
-                          <span>Cancelled</span>
-                        </div>
-                      </div>
+            <div className="space-y-3">
+              {selectedMapJob && (
+                <Card className="border-2" style={{ borderColor: JOB_STATUS_COLORS[selectedMapJob.status] }}>
+                  <CardContent className="p-4 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="font-semibold">{selectedMapJob.title}</h3>
+                      <Badge className={getPriorityColor(selectedMapJob.priority)}>{selectedMapJob.priority}</Badge>
                     </div>
-                    <div className="space-y-2">
-                      <div className="font-medium text-gray-700">Priority</div>
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full bg-red-600"></div>
-                          <span>Urgent</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full bg-orange-600"></div>
-                          <span>High</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full bg-yellow-600"></div>
-                          <span>Medium</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full bg-green-600"></div>
-                          <span>Low</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="font-medium text-gray-700">Map Features</div>
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded bg-green-200 border border-green-400"></div>
-                          <span>Active Paddocks</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded bg-yellow-200 border border-yellow-400"></div>
-                          <span>Resting Paddocks</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 transform rotate-45 bg-purple-500 border-2 border-white"></div>
-                          <span>Task Pins</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full bg-gray-400"></div>
-                          <span>Completed Tasks</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-4 pt-4 border-t">
-                    <p className="text-xs text-gray-500">
-                      <strong>Tip:</strong> Click on any task pin to view job details and update status. 
-                      Toggle paddocks on/off using the layer controls above.
+                    <p className="text-sm text-gray-600">
+                      {selectedMapJob.status.replace('-', ' ')}
+                      {isOverdue(selectedMapJob) && <span className="text-red-700 font-medium"> · overdue</span>}
                     </p>
+                    <p className="text-sm flex items-center gap-1"><Users className="h-4 w-4 text-gray-400" />{selectedMapJob.assignedToNames?.join(', ') || 'Unassigned'}</p>
+                    <p className="text-sm flex items-center gap-1"><Calendar className="h-4 w-4 text-gray-400" />
+                      {new Date(selectedMapJob.startDate).toLocaleDateString()}{selectedMapJob.startTime && ` ${selectedMapJob.startTime}`}
+                    </p>
+                    {(selectedMapJob.paddockName || selectedMapJob.location) && (
+                      <p className="text-sm flex items-center gap-1"><MapPin className="h-4 w-4 text-gray-400" />{selectedMapJob.paddockName || selectedMapJob.location}</p>
+                    )}
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {selectedMapJob.status === 'pending' && (
+                        <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={() => updateJobStatus(selectedMapJob.id, 'in-progress')}>Start</Button>
+                      )}
+                      {selectedMapJob.status === 'in-progress' && (
+                        <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => openJobDetail(selectedMapJob)}>Complete</Button>
+                      )}
+                      <Button size="sm" variant="outline" onClick={() => openJobDetail(selectedMapJob)}>
+                        <Eye className="h-4 w-4 mr-1" />Details
+                      </Button>
+                      {hasPin(selectedMapJob) && (
+                        <Button size="sm" variant="outline" asChild>
+                          <a href={`https://www.google.com/maps/dir/?api=1&destination=${selectedMapJob.latitude},${selectedMapJob.longitude}`} target="_blank" rel="noopener noreferrer">
+                            <Navigation className="h-4 w-4 mr-1" />Directions
+                          </a>
+                        </Button>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              <Card>
+                <CardContent className="p-0">
+                  <div className="px-4 py-2 border-b text-sm font-medium flex justify-between">
+                    <span>{mapJobs.length} job{mapJobs.length === 1 ? '' : 's'}</span>
+                    {mapJobs.filter(isOverdue).length > 0 && <span className="text-red-700">{mapJobs.filter(isOverdue).length} overdue</span>}
                   </div>
+                  <ul className="max-h-[48vh] overflow-y-auto divide-y">
+                    {mapJobs.map(job => (
+                      <li key={job.id}>
+                        <button
+                          type="button"
+                          onClick={() => (hasPin(job) ? setSelectedMapJobId(job.id) : openJobDetail(job))}
+                          className={`w-full text-left px-4 py-2 hover:bg-muted ${job.id === selectedMapJobId ? 'bg-muted' : ''}`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: JOB_STATUS_COLORS[job.status] }} />
+                            <span className="text-sm font-medium truncate flex-1">{job.title}</span>
+                            <span className="text-xs text-gray-500">{(job.assignedToNames ?? []).map(initials).join(' ')}</span>
+                          </div>
+                          <div className="text-xs text-gray-500 pl-4">
+                            {job.startDate}{isOverdue(job) && <span className="text-red-700"> · overdue</span>}
+                            {!hasPin(job) && ' · no pin'}
+                          </div>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  {unpinnedMapJobs.length > 0 && (
+                    <p className="px-4 py-2 border-t text-xs text-gray-500">
+                      {unpinnedMapJobs.length} of these {unpinnedMapJobs.length === 1 ? "doesn't have" : "don't have"} a pin yet. Open one and tap Add pin.
+                    </p>
+                  )}
                 </CardContent>
               </Card>
+
+              <div className="flex flex-wrap gap-3 text-xs text-gray-600 px-1">
+                {[['pending', 'Pending'], ['in-progress', 'In progress'], ['blocked', 'Blocked'], ['completed', 'Completed']].map(([k, label]) => (
+                  <span key={k} className="flex items-center gap-1">
+                    <span className="h-3 w-3 rounded-full" style={{ backgroundColor: JOB_STATUS_COLORS[k] }} />{label}
+                  </span>
+                ))}
+                <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-full border-2 border-red-600" />Overdue</span>
+                <span>Pins show who it's assigned to.</span>
+              </div>
             </div>
-          </Suspense>
+          </div>
         )}
       </div>
 
@@ -1605,39 +1479,56 @@ export default function JobsPage() {
                   </div>
                 </div>
 
-                {/* Location Map - Show if GPS coordinates exist */}
-                {selectedJob.latitude && selectedJob.longitude && (
-                  <div className="border rounded-lg overflow-hidden">
-                    <div className="bg-muted/50 px-4 py-2 border-b flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <MapPin className="h-4 w-4 text-primary" />
-                        <span className="text-sm font-medium">Pinned Location</span>
-                      </div>
-                      <a
-                        href={`https://www.google.com/maps?q=${selectedJob.latitude},${selectedJob.longitude}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-primary hover:underline flex items-center gap-1"
-                      >
-                        <Navigation className="h-3 w-3" />
-                        Open in Google Maps
-                      </a>
+                {/* Where the job is: view the pin, or add/move it */}
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="bg-muted/50 px-4 py-2 border-b flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <MapPin className="h-4 w-4 text-primary" />
+                      <span className="text-sm font-medium">{selectedJob.paddockName || selectedJob.location || 'Location'}</span>
                     </div>
-                    <div className="h-48">
-                      <Suspense fallback={<div className="h-full flex items-center justify-center bg-muted"><MapPin className="h-8 w-8 text-muted-foreground animate-pulse" /></div>}>
-                        <JobLocationPicker
-                          latitude={selectedJob.latitude}
-                          longitude={selectedJob.longitude}
-                          onLocationChange={() => {}}
-                          className="pointer-events-none"
-                        />
-                      </Suspense>
-                    </div>
-                    <div className="bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
-                      GPS: {selectedJob.latitude.toFixed(6)}, {selectedJob.longitude.toFixed(6)}
+                    <div className="flex items-center gap-3">
+                      {hasPin(selectedJob) && !editingPin && (
+                        <a
+                          href={`https://www.google.com/maps/dir/?api=1&destination=${selectedJob.latitude},${selectedJob.longitude}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-primary hover:underline flex items-center gap-1"
+                        >
+                          <Navigation className="h-3 w-3" />
+                          Directions
+                        </a>
+                      )}
+                      {selectedJob.status !== 'completed' && (
+                        <button type="button" className="text-xs underline" onClick={() => setEditingPin(v => !v)}>
+                          {editingPin ? 'Done' : hasPin(selectedJob) ? 'Move pin' : 'Add pin'}
+                        </button>
+                      )}
                     </div>
                   </div>
-                )}
+                  {editingPin ? (
+                    <div className="p-3">
+                      <JobLocationPicker
+                        latitude={selectedJob.latitude}
+                        longitude={selectedJob.longitude}
+                        center={farmCenter}
+                        onLocationChange={(lat, lng) => updateJobPin(selectedJob.id, lat, lng)}
+                      />
+                    </div>
+                  ) : hasPin(selectedJob) ? (
+                    <div className="h-48">
+                      <JobLocationPicker
+                        key={`${selectedJob.latitude},${selectedJob.longitude}`}
+                        latitude={selectedJob.latitude}
+                        longitude={selectedJob.longitude}
+                        onLocationChange={() => {}}
+                        readOnly
+                        className="h-full"
+                      />
+                    </div>
+                  ) : (
+                    <p className="px-4 py-3 text-sm text-muted-foreground">No pin yet. Add one so it shows on the jobs map.</p>
+                  )}
+                </div>
 
                 {/* Checklist Section */}
                 {selectedJob.checklistItems && selectedJob.checklistItems.length > 0 ? (
@@ -1650,8 +1541,8 @@ export default function JobsPage() {
                       allowReorder={false}
                       allowAddItems={selectedJob.status !== 'completed'}
                       readOnly={selectedJob.status === 'completed'}
-                      currentUserId="demo-user"
-                      currentUserName="Current User"
+                      currentUserId={user?.id ?? ''}
+                      currentUserName={user?.name ?? 'Me'}
                       title="Task Checklist"
                     />
                   </div>
