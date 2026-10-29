@@ -15,6 +15,7 @@ import { JobPhotoUpload } from '@/components/JobPhotoUpload';
 import { JobLocationPicker } from '@/components/JobLocationPicker';
 import { JobsMap, JOB_STATUS_COLORS, initials, type MapJob } from '@/components/jobs/JobsMap';
 import { useAuth } from '@/lib/auth-context';
+import { PhonePushPrompt } from '@/components/PhonePushToggle';
 import { ChecklistManager, CompactChecklist, type ChecklistItem } from '@/components/ChecklistManager';
 import { toast } from 'sonner';
 
@@ -1199,6 +1200,7 @@ export default function JobsPage() {
 
       {/* Jobs Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <PhonePushPrompt className="mb-4" />
         {mapView === 'list' ? (
           /* Jobs List */
           <div className="grid gap-4">

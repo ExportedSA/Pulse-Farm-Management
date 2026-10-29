@@ -1301,6 +1301,18 @@ export const notifications = pgTable('notifications', {
 
 export type InAppNotification = typeof notifications.$inferSelect;
 
+// Phone push: one row per device a person has turned notifications on for
+export const pushSubscriptions = pgTable('push_subscriptions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  endpoint: text('endpoint').notNull().unique(),
+  p256dh: text('p256dh').notNull(),
+  auth: text('auth').notNull(),
+  userAgent: varchar('user_agent', { length: 255 }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  lastUsedAt: timestamp('last_used_at'),
+});
+
 // ===== FARM RECORDS, TAGS & ATTACHMENTS =====
 
 // What a farm record is about; drives the capture form and compliance reports

@@ -3,6 +3,7 @@ import { notifications, type InAppNotification } from '@shared/schema';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { chatWebSocket } from '../websocket';
 import logger from '../config/logger';
+import { sendPush } from './push';
 
 export type NotificationPriority = 'low' | 'normal' | 'high' | 'urgent';
 
@@ -63,6 +64,14 @@ export async function notifyUsers(userIds: string[], notification: NewNotificati
       logger.warn({ err: error, userId: row.userId }, 'Failed to push notification over WebSocket');
     }
   }
+  // Phones get it too, even with Pulse closed (not awaited: saving the notification shouldn't wait on it)
+  sendPush(recipients, {
+    title: notification.title,
+    body: notification.message,
+    link: notification.link,
+    tag: notification.metadata?.jobId ? `job-${notification.metadata.jobId}` : undefined,
+    urgent: notification.priority === 'high' || notification.priority === 'urgent',
+  }).catch(error => logger.warn({ err: error }, 'Phone push failed'));
   return rows;
 }
 

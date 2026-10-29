@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { deliverNotification } from '../services/notifications';
 import { getUserId, getFarmId } from '../middleware/auth';
 import { isFarmMember } from '../domain/farms';
+import { countDevices, isPushConfigured, pushPublicKey, removeSubscription, saveSubscription } from '../domain/push';
 import {
   notifyUsers,
   listNotifications,
@@ -254,26 +255,41 @@ router.patch('/preferences', (req, res) => {
 // PUSH SUBSCRIPTION
 // ============================================
 
-// Store for push subscriptions (would be database in production)
-const pushSubscriptions: Map<string, any> = new Map();
-
-// Subscribe to push notifications
-router.post('/push/subscribe', (req, res) => {
-  const userId = getUserId(req)!;
-  const subscription = req.body;
-  
-  pushSubscriptions.set(userId, subscription);
-  
-  res.json({ success: true, message: 'Push subscription saved' });
+const subscriptionSchema = z.object({
+  endpoint: z.string().url().max(2000),
+  keys: z.object({ p256dh: z.string().min(1).max(500), auth: z.string().min(1).max(500) }),
 });
 
-// Unsubscribe from push notifications
-router.post('/push/unsubscribe', (req, res) => {
-  const userId = getUserId(req)!;
-  
-  pushSubscriptions.delete(userId);
-  
-  res.json({ success: true, message: 'Push subscription removed' });
+// The server's public key the phone needs to subscribe; null when push isn't set up
+router.get('/push/public-key', async (req, res) => {
+  res.json({ publicKey: pushPublicKey(), devices: await countDevices(getUserId(req)!) });
+});
+
+// Turn on phone notifications for this device
+router.post('/push/subscribe', async (req, res) => {
+  try {
+    if (!isPushConfigured()) return res.status(503).json({ error: 'Phone notifications are not set up on this server' });
+    const subscription = subscriptionSchema.parse(req.body?.subscription ?? req.body);
+    await saveSubscription(getUserId(req)!, subscription, req.get('user-agent'));
+    res.json({ success: true });
+  } catch (error) {
+    if (error instanceof z.ZodError) return res.status(400).json({ error: 'Invalid subscription', details: error.errors });
+    console.error('Failed to save push subscription:', error);
+    res.status(500).json({ error: 'Failed to save push subscription' });
+  }
+});
+
+// Turn off phone notifications for this device
+router.post('/push/unsubscribe', async (req, res) => {
+  try {
+    const { endpoint } = z.object({ endpoint: z.string().url() }).parse(req.body);
+    await removeSubscription(getUserId(req)!, endpoint);
+    res.json({ success: true });
+  } catch (error) {
+    if (error instanceof z.ZodError) return res.status(400).json({ error: 'Invalid request', details: error.errors });
+    console.error('Failed to remove push subscription:', error);
+    res.status(500).json({ error: 'Failed to remove push subscription' });
+  }
 });
 
 // Test notification: stores one for the signed-in user and tries email/SMS delivery
