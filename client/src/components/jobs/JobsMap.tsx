@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { SATELLITE_TILES, SATELLITE_ATTRIBUTION, DEFAULT_CENTER } from "@/components/records/AreaDrawer";
+import { paddockLayer, type PaddockFeature } from "@/lib/paddock-map";
 
 export interface MapJob {
   id: string;
@@ -29,7 +30,7 @@ export const initials = (name: string) =>
 const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
-function pin(job: MapJob, selected: boolean): L.DivIcon {
+export function jobPinIcon(job: MapJob, selected = false): L.DivIcon {
   const color = JOB_STATUS_COLORS[job.status] ?? "#868e96";
   const who = (job.assignedToNames ?? []).map(initials);
   const label = who.length === 0 ? "?" : who.length > 2 ? `${who[0]}+${who.length - 1}` : who.join(" ");
@@ -47,12 +48,15 @@ function pin(job: MapJob, selected: boolean): L.DivIcon {
 /**
  * Satellite map with a pin for every job that has a location, labelled with who it's assigned to
  */
-export function JobsMap({ jobs, selectedId, onSelect }: { jobs: MapJob[]; selectedId?: string | null; onSelect: (id: string) => void }) {
+export function JobsMap({ jobs, selectedId, onSelect, paddocks = [] }: {
+  jobs: MapJob[]; selectedId?: string | null; onSelect: (id: string) => void; paddocks?: PaddockFeature[];
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const layerRef = useRef<L.LayerGroup | null>(null);
   const fittedRef = useRef<string>("");
   const boundsRef = useRef<L.LatLngBounds | null>(null);
+  const paddocksRef = useRef<L.GeoJSON | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -72,6 +76,19 @@ export function JobsMap({ jobs, selectedId, onSelect }: { jobs: MapJob[]; select
     };
   }, []);
 
+  // Paddock outlines under the pins; frame the farm when there are no pins yet
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    paddocksRef.current?.remove();
+    paddocksRef.current = paddocks.length > 0 ? paddockLayer(paddocks).addTo(map) : null;
+    paddocksRef.current?.bringToBack();
+    if (paddocksRef.current && !boundsRef.current) {
+      boundsRef.current = paddocksRef.current.getBounds();
+      map.fitBounds(boundsRef.current, { padding: [24, 24], maxZoom: 17 });
+    }
+  }, [paddocks]);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -79,7 +96,7 @@ export function JobsMap({ jobs, selectedId, onSelect }: { jobs: MapJob[]; select
     const layer = L.layerGroup();
     for (const job of jobs) {
       const marker = L.marker([job.latitude, job.longitude], {
-        icon: pin(job, job.id === selectedId),
+        icon: jobPinIcon(job, job.id === selectedId),
         title: job.title,
         zIndexOffset: job.id === selectedId ? 1000 : 0,
       });

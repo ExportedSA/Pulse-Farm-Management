@@ -44,7 +44,6 @@ import VisitorPortalPage from "@/pages/visitor-portal";
 import OperationsPage from "@/pages/operations-page";
 import VehicleRegistryPage from "@/pages/vehicle-registry-page";
 import StockReconciliationPage from "@/pages/stock-reconciliation-page";
-import MapTasksPage from "@/pages/map-tasks-page";
 import FinancialPage from "@/pages/financial-page";
 import MilkProductionPage from "@/pages/milk-production-page";
 import NZFAPCompliancePage from "@/pages/nzfap-compliance-page";
@@ -155,7 +154,6 @@ function Router() {
         <Route path="/app/batch-treatment" component={BatchTreatmentPage} />
         <Route path="/app/import" component={CSVImportPage} />
         <Route path="/app/stock-reconciliation" component={StockReconciliationPage} />
-        <Route path="/app/map-tasks" component={MapTasksPage} />
         <Route path="/app/groups" component={GroupsManagement} />
         <Route path="/app/pastures" component={PasturesList} />
         <Route path="/app/pasture-rotation" component={PastureRotationPlanner} />

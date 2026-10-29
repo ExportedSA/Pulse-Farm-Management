@@ -10,6 +10,8 @@ import { cn } from "@/lib/utils";
 import { RecordsMap, type MapFeature } from "@/components/records/RecordsMap";
 import { NEW_RECORD_EVENT, openEditRecord } from "@/components/records/RecordFab";
 import { SeasonPanel } from "@/components/records/SeasonPanel";
+import { fetchPaddockMap, PADDOCK_MAP_KEY } from "@/lib/paddock-map";
+import type { MapJob } from "@/components/jobs/JobsMap";
 import {
   RECORD_TYPES,
   recordTypeDef,
@@ -125,6 +127,8 @@ export default function RecordsPage() {
   const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [range, setRange] = useState("season");
   const [layers, setLayers] = useState<string[]>(MAPPED_TYPES.map(t => t.type));
+  const [showPaddocks, setShowPaddocks] = useState(true);
+  const [showJobs, setShowJobs] = useState(true);
   const [pending, setPending] = useState<Awaited<ReturnType<typeof listOutbox>>>([]);
 
   const current = TABS.find(t => t.key === tab)!;
@@ -174,6 +178,24 @@ export default function RecordsPage() {
       return res.json();
     },
     enabled: view === "map" && layers.length > 0,
+  });
+
+  const { data: paddockMap } = useQuery({ queryKey: PADDOCK_MAP_KEY, queryFn: fetchPaddockMap, enabled: view === "map" });
+  // Jobs not yet done that have a pin
+  const { data: openJobs = [] } = useQuery<MapJob[]>({
+    queryKey: ["/api/jobs", "map-layer"],
+    queryFn: async () => {
+      const res = await fetch("/api/jobs", { credentials: "include" });
+      if (!res.ok) return [];
+      const today = new Date().toISOString().slice(0, 10);
+      return (await res.json())
+        .filter((j: any) => j.latitude != null && j.longitude != null && j.status !== "completed" && j.status !== "cancelled")
+        .map((j: any) => ({
+          id: j.id, title: j.title, status: j.status, priority: j.priority, latitude: j.latitude, longitude: j.longitude,
+          assignedToNames: j.assignedToNames, overdue: (j.endDate || j.startDate) < today,
+        }));
+    },
+    enabled: view === "map" && showJobs,
   });
 
   const remove = useMutation({
@@ -276,6 +298,20 @@ export default function RecordsPage() {
                 </button>
               );
             })}
+            <button
+              onClick={() => setShowPaddocks(v => !v)}
+              aria-pressed={showPaddocks}
+              className={cn("text-sm px-3 py-1 rounded-full border flex items-center gap-1.5", !showPaddocks && "opacity-50")}
+            >
+              <span className="h-2.5 w-2.5 rounded-sm border border-gray-500" />Paddocks
+            </button>
+            <button
+              onClick={() => setShowJobs(v => !v)}
+              aria-pressed={showJobs}
+              className={cn("text-sm px-3 py-1 rounded-full border flex items-center gap-1.5", !showJobs && "opacity-50")}
+            >
+              <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />Open jobs
+            </button>
             <select
               id="records-map-range"
               className="ml-auto h-9 rounded-md border bg-background px-2 text-sm"
@@ -291,10 +327,15 @@ export default function RecordsPage() {
               {activeWithholding.length} sprayed area{activeWithholding.length === 1 ? " is" : "s are"} still in grazing withholding (red dashed outline).
             </p>
           )}
-          <RecordsMap features={mapData?.features ?? []} />
+          <RecordsMap
+            features={mapData?.features ?? []}
+            paddocks={showPaddocks ? paddockMap?.features ?? [] : []}
+            jobs={showJobs ? openJobs : []}
+          />
           <p className="text-xs text-muted-foreground">
             {mapData ? `${mapData.features.length} mapped record${mapData.features.length === 1 ? "" : "s"}. ` : ""}
-            Tap an area for its date, product and rate. Records without a drawn area appear in the list only.
+            Tap an area for its date, product and rate, or a pin for its job. Records without a drawn area appear in the list only.
+            {paddockMap && paddockMap.unmapped.length > 0 && ` ${paddockMap.unmapped.length} paddock${paddockMap.unmapped.length === 1 ? " isn't" : "s aren't"} drawn yet (Pastures → Draw on map).`}
           </p>
         </section>
       ) : (

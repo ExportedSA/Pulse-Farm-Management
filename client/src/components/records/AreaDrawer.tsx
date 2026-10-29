@@ -15,16 +15,20 @@ interface AreaDrawerProps {
   onChange: (area: AreaGeometry | null) => void;
   color?: string;
   center?: [number, number] | null;
+  // Paddock outlines already drawn, shown faintly with their names to trace along
+  background?: { geometry: AreaGeometry; label: string }[];
 }
 
 /**
  * Tap the map to outline the area worked; the shape closes itself after three points
  */
-export function AreaDrawer({ value, onChange, color = "#2c6a3f", center }: AreaDrawerProps) {
+export function AreaDrawer({ value, onChange, color = "#2c6a3f", center, background }: AreaDrawerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const shapeRef = useRef<L.Polygon | L.Polyline | null>(null);
   const markersRef = useRef<L.CircleMarker[]>([]);
+  const backgroundRef = useRef<L.GeoJSON | null>(null);
+  const fittedRef = useRef(false);
   const [points, setPoints] = useState<Position[]>(() =>
     value?.type === "Polygon" ? value.coordinates[0].slice(0, -1) : []);
   const [locating, setLocating] = useState(false);
@@ -51,6 +55,41 @@ export function AreaDrawer({ value, onChange, color = "#2c6a3f", center }: AreaD
   useEffect(() => {
     if (center && mapRef.current && points.length === 0) mapRef.current.setView(center, 16);
   }, [center, points.length]);
+
+  // Other paddocks, faint, with their names; start the view on them (or on this outline)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    backgroundRef.current?.remove();
+    backgroundRef.current = null;
+    if (background && background.length > 0) {
+      const layer = L.geoJSON({
+        type: "FeatureCollection",
+        features: background.map(b => ({ type: "Feature", geometry: b.geometry, properties: { label: b.label } })),
+      } as any, {
+        style: { color: "#ffffff", weight: 1.5, dashArray: "4 4", fillOpacity: 0.05, interactive: false },
+        onEachFeature: (feature, l) => l.bindTooltip(String(feature.properties.label), { permanent: true, direction: "center", className: "paddock-label" }),
+      }).addTo(map);
+      backgroundRef.current = layer;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (!fittedRef.current) {
+      const own = points.length >= 3 ? L.latLngBounds(points.map(([lng, lat]) => L.latLng(lat, lng))) : null;
+      const bounds = own ?? backgroundRef.current?.getBounds();
+      if (bounds?.isValid()) {
+        // After the dialog has finished opening, and only if this map is still the live one
+        timer = setTimeout(() => {
+          if (mapRef.current !== map) return;
+          fittedRef.current = true;
+          map.invalidateSize();
+          map.fitBounds(bounds, { padding: [24, 24], maxZoom: 17 });
+        }, 300);
+      }
+    }
+    return () => clearTimeout(timer);
+    // Only re-run when the outlines change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [background]);
 
   // Redraw the outline and report the closed polygon
   useEffect(() => {

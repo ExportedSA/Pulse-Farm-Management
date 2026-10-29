@@ -119,6 +119,18 @@ async function validPasture(farmId: string, pastureId: string | null | undefined
 }
 
 /**
+ * Middle of a paddock's drawn outline, for jobs placed by paddock without a pin
+ */
+async function paddockCenter(pastureId: string | null | undefined): Promise<{ latitude: string; longitude: string } | null> {
+  if (!pastureId) return null;
+  const [row] = await db
+    .select({ lat: pastures.centerLatitude, lng: pastures.centerLongitude })
+    .from(pastures)
+    .where(eq(pastures.id, pastureId));
+  return row?.lat != null && row?.lng != null ? { latitude: String(row.lat), longitude: String(row.lng) } : null;
+}
+
+/**
  * Replace a job's assignees; returns the people newly added
  */
 async function setAssignees(jobId: string, userIds: string[]): Promise<string[]> {
@@ -254,6 +266,11 @@ router.post("/", uploadMultiplePhotos, async (req, res) => {
 
     let assignees = await validAssignees(farmId, data.assignedTo);
     if (assignees.length === 0) assignees = [userId];
+    const pastureId = await validPasture(farmId, data.pastureId);
+    // No pin but a mapped paddock: pin it in the middle of the paddock
+    const pin = data.latitude != null && data.longitude != null
+      ? { latitude: data.latitude.toString(), longitude: data.longitude.toString() }
+      : await paddockCenter(pastureId);
 
     const [job] = await db.insert(jobs).values({
       farmId,
@@ -261,9 +278,9 @@ router.post("/", uploadMultiplePhotos, async (req, res) => {
       title: data.title,
       description: data.description,
       location: data.location,
-      latitude: data.latitude?.toString(),
-      longitude: data.longitude?.toString(),
-      pastureId: await validPasture(farmId, data.pastureId),
+      latitude: pin?.latitude,
+      longitude: pin?.longitude,
+      pastureId,
       status: data.status ?? "open",
       priority: data.priority ?? "medium",
       startDate: data.startDate ? new Date(data.startDate) : new Date(),
@@ -300,7 +317,13 @@ async function updateJob(req: Request, body: unknown) {
   if (endDate !== undefined) updates.endDate = endDate ? new Date(endDate) : null;
   if (latitude !== undefined) updates.latitude = latitude?.toString() ?? null;
   if (longitude !== undefined) updates.longitude = longitude?.toString() ?? null;
-  if (pastureId !== undefined) updates.pastureId = await validPasture(farmId, pastureId);
+  if (pastureId !== undefined) {
+    updates.pastureId = await validPasture(farmId, pastureId);
+    // Moved to a mapped paddock and not pinned: pin it there
+    const pinned = (latitude !== undefined ? latitude : job.latitude) != null;
+    const center = !pinned ? await paddockCenter(updates.pastureId) : null;
+    if (center) Object.assign(updates, center);
+  }
   if (status !== undefined) {
     updates.status = status;
     updates.completedAt = status === "completed" ? (job.completedAt ?? new Date()) : null;

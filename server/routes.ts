@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { pool } from "./db";
 import passport from "passport";
 import { sanitizeUser, sanitizeUsers } from "./auth-utils";
-import { requireAuth, optionalAuth } from "./middleware/auth";
+import { requireAuth, optionalAuth, getFarmId } from "./middleware/auth";
 import { uploadsMiddleware } from "./middleware/serveUploads";
 import { httpLogger, addRequestContext, logError } from "./middleware/logging";
 import logger from "./config/logger";
@@ -69,6 +69,7 @@ import multiFarmRouter from "./routes/multi-farm";
 import farmsRouter from "./routes/farms";
 import recordsRouter from "./routes/records";
 import stockReconRouter from "./routes/stock-recon";
+import paddockMapRouter from "./routes/paddock-map";
 import { tagsRouter, attachmentsRouter, searchRouter } from "./routes/farm-data";
 import animalTagsRouter from "./routes/animal-tags";
 // Phase overlay routes
@@ -176,6 +177,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ===== FARM RECORDS, TAGS, ATTACHMENTS & SEARCH =====
   app.use("/api/records", requireAuth, recordsRouter);
   app.use("/api/stock-recon", requireAuth, stockReconRouter);
+  app.use("/api/paddock-map", requireAuth, paddockMapRouter);
   app.use("/api/tags", requireAuth, tagsRouter);
   app.use("/api/attachments", requireAuth, attachmentsRouter);
   app.use("/api/search", requireAuth, searchRouter);
@@ -902,9 +904,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ===== PASTURES =====
 
-  app.get("/api/pastures", async (req, res) => {
+  app.get("/api/pastures", requireAuth, async (req, res) => {
     try {
-      const pastures = await storage.getPastures();
+      // Only the signed-in farm's paddocks
+      const farmId = getFarmId(req);
+      const pastures = (await storage.getPastures()).filter(p => p.farmId === farmId);
       res.json(pastures);
     } catch (error) {
       console.error("Failed to fetch pastures:", error);

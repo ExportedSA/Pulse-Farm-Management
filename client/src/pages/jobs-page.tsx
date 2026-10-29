@@ -16,6 +16,8 @@ import { JobLocationPicker } from '@/components/JobLocationPicker';
 import { JobsMap, JOB_STATUS_COLORS, initials, type MapJob } from '@/components/jobs/JobsMap';
 import { useAuth } from '@/lib/auth-context';
 import { PhonePushPrompt } from '@/components/PhonePushToggle';
+import { useQuery } from '@tanstack/react-query';
+import { fetchPaddockMap, PADDOCK_MAP_KEY } from '@/lib/paddock-map';
 import { ChecklistManager, CompactChecklist, type ChecklistItem } from '@/components/ChecklistManager';
 import { toast } from 'sonner';
 
@@ -108,6 +110,8 @@ const hasPin = (job: Job) => job.latitude != null && job.longitude != null;
 
 export default function JobsPage() {
   const { user } = useAuth();
+  const { data: paddockMap } = useQuery({ queryKey: PADDOCK_MAP_KEY, queryFn: fetchPaddockMap });
+  const paddockOutlines = paddockMap?.features ?? [];
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('all');
@@ -1047,6 +1051,7 @@ export default function JobsPage() {
                       latitude={newJob.latitude}
                       longitude={newJob.longitude}
                       center={farmCenter}
+                      paddocks={paddockOutlines}
                       onLocationChange={(lat, lng) => setNewJob(prev => ({ ...prev, latitude: lat ?? undefined, longitude: lng ?? undefined }))}
                     />
                   </div>
@@ -1339,7 +1344,7 @@ export default function JobsPage() {
           <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
             <Card className="h-[65vh] min-h-[420px] overflow-hidden">
               <CardContent className="p-0 h-full relative">
-                <JobsMap jobs={mapPins} selectedId={selectedMapJobId} onSelect={selectMapJob} />
+                <JobsMap jobs={mapPins} selectedId={selectedMapJobId} onSelect={selectMapJob} paddocks={paddockOutlines} />
                 {pinnedMapJobs.length === 0 && (
                   <div className="absolute inset-x-4 top-4 z-[500] rounded-md bg-white/95 p-3 text-sm shadow">
                     No jobs with a pin match these filters. Pin a job when you create it, or open one and tap Add pin.
@@ -1513,6 +1518,7 @@ export default function JobsPage() {
                         latitude={selectedJob.latitude}
                         longitude={selectedJob.longitude}
                         center={farmCenter}
+                        paddocks={paddockOutlines}
                         onLocationChange={(lat, lng) => updateJobPin(selectedJob.id, lat, lng)}
                       />
                     </div>

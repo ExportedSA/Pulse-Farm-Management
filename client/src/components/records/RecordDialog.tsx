@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import type { AreaGeometry } from "@shared/geo";
 import { AreaDrawer } from "./AreaDrawer";
+import { fetchPaddockMap, PADDOCK_MAP_KEY } from "@/lib/paddock-map";
 import { TankMixEditor, ProductPicker, type SprayProduct } from "./RecordInputs";
 import {
   RECORD_TYPES,
@@ -142,6 +143,11 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray", preset
     enabled: open,
   });
   const { data: farmTags = [] } = useQuery({ queryKey: ["/api/tags"], queryFn: fetchTags, enabled: open });
+  const { data: paddockMap } = useQuery({ queryKey: PADDOCK_MAP_KEY, queryFn: fetchPaddockMap, enabled: open && showMap });
+  const paddockOutlines = useMemo(
+    () => (paddockMap?.features ?? []).map(f => ({ geometry: f.geometry, label: f.properties.name })),
+    [paddockMap],
+  );
 
   // Start each new record clean, with the type's usual tags (plus any preset)
   useEffect(() => {
@@ -365,7 +371,7 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray", preset
                 </div>
               )}
               {showMap ? (
-                <AreaDrawer value={area} onChange={setArea} color={def.color} />
+                <AreaDrawer value={area} onChange={setArea} color={def.color} background={paddockOutlines} />
               ) : (
                 <Button type="button" variant="outline" size="sm" onClick={() => setShowMap(true)}>
                   <MapPin className="h-4 w-4 mr-1" />Draw the area on the map

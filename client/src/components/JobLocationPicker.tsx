@@ -4,6 +4,7 @@ import 'leaflet/dist/leaflet.css';
 import { Crosshair, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SATELLITE_TILES, SATELLITE_ATTRIBUTION, DEFAULT_CENTER } from '@/components/records/AreaDrawer';
+import { paddockLayer, type PaddockFeature } from '@/lib/paddock-map';
 
 interface JobLocationPickerProps {
   latitude?: number | null;
@@ -13,6 +14,8 @@ interface JobLocationPickerProps {
   center?: [number, number];
   readOnly?: boolean;
   className?: string;
+  // Paddock outlines to show for reference
+  paddocks?: PaddockFeature[];
 }
 
 const pinIcon = L.divIcon({
@@ -25,7 +28,7 @@ const pinIcon = L.divIcon({
 /**
  * Satellite map to pin where a job is: tap the map, drag the pin, or use the phone's location
  */
-export function JobLocationPicker({ latitude, longitude, onLocationChange, center, readOnly = false, className = '' }: JobLocationPickerProps) {
+export function JobLocationPicker({ latitude, longitude, onLocationChange, center, readOnly = false, className = '', paddocks }: JobLocationPickerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markerRef = useRef<L.Marker | null>(null);
@@ -76,6 +79,16 @@ export function JobLocationPicker({ latitude, longitude, onLocationChange, cente
       map.setView(at, Math.max(map.getZoom(), 16));
     }
   }, [hasPin, latitude, longitude, readOnly]);
+
+  // Paddock outlines for reference; with no pin and no other centre, frame the farm by them
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !paddocks || paddocks.length === 0) return;
+    const layer = paddockLayer(paddocks).addTo(map);
+    layer.bringToBack();
+    if (!hasPin && !center) map.fitBounds(layer.getBounds(), { padding: [16, 16], maxZoom: 17 });
+    return () => { layer.remove(); };
+  }, [paddocks]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Centre on the farm once its location is known, if nothing is pinned yet
   useEffect(() => {

@@ -413,3 +413,17 @@
   position: relative;
   z-index: 1;
 }
+
+/* Paddock names on the satellite maps */
+.leaflet-tooltip.paddock-label {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: #fff;
+  font-weight: 600;
+  font-size: 11px;
+  text-shadow: 0 0 3px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.7);
+}
+.leaflet-tooltip.paddock-label::before {
+  display: none;
+}
