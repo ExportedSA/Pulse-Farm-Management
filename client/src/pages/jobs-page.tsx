@@ -18,6 +18,10 @@ import { useAuth } from '@/lib/auth-context';
 import { PhonePushPrompt } from '@/components/PhonePushToggle';
 import { useQuery } from '@tanstack/react-query';
 import { fetchPaddockMap, PADDOCK_MAP_KEY } from '@/lib/paddock-map';
+import { useFarm } from '@/lib/farm-context';
+import { CompleteJobDialog } from '@/components/jobs/CompleteJobDialog';
+import { EditJobDialog } from '@/components/jobs/EditJobDialog';
+import { cacheJobs, cachedJobs, drainJobOutbox, listJobOutbox, onJobOutboxChange, sendJobAction } from '@/lib/job-outbox';
 import { ChecklistManager, CompactChecklist, type ChecklistItem } from '@/components/ChecklistManager';
 import { toast } from 'sonner';
 
@@ -73,6 +77,10 @@ interface Job {
   notes?: string;
   checklistItems?: ChecklistItem[];
   estimatedDuration?: number;
+  completedAt?: string | null;
+  completedByName?: string | null;
+  completionNote?: string | null;
+  completionRecordId?: string | null;
 }
 
 interface User {
@@ -99,7 +107,9 @@ interface TaskTemplate {
   suggestedRecurrence: string | null;
 }
 
-const todayString = () => new Date().toISOString().split('T')[0];
+// A date as the phone sees it (not UTC, which in NZ mornings is still yesterday)
+const localDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const todayString = () => localDay();
 
 // Not done, and its finish (or start) date has passed
 const isOverdue = (job: Job) =>
@@ -110,6 +120,11 @@ const hasPin = (job: Job) => job.latitude != null && job.longitude != null;
 
 export default function JobsPage() {
   const { user } = useAuth();
+  const { currentFarm } = useFarm();
+  const role = currentFarm?.role;
+  // Owners and managers run the board; workers report jobs for themselves and work their own
+  const canManage = role === 'owner' || role === 'manager';
+  const canWorkOn = (job: Job) => canManage || (role === 'worker' && !!user && job.assignedTo.includes(user.id));
   const { data: paddockMap } = useQuery({ queryKey: PADDOCK_MAP_KEY, queryFn: fetchPaddockMap });
   const paddockOutlines = paddockMap?.features ?? [];
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -122,6 +137,10 @@ export default function JobsPage() {
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
   const [editingPin, setEditingPin] = useState(false);
+  const [completing, setCompleting] = useState<Job | null>(null);
+  const [editingJob, setEditingJob] = useState<Job | null>(null);
+  const [waitingToSend, setWaitingToSend] = useState(0);
+  const [offlineSince, setOfflineSince] = useState<string | null>(null);
 
   // Map view state
   const [mapView, setMapView] = useState<'list' | 'map'>('list');
@@ -153,7 +172,7 @@ export default function JobsPage() {
     assignedTo: [] as string[],
     priority: 'medium' as const,
     status: 'pending' as const,
-    startDate: new Date().toISOString().split('T')[0],
+    startDate: localDay(),
     startTime: '09:00',
     endDate: '',
     endTime: '',
@@ -284,7 +303,24 @@ export default function JobsPage() {
 
   async function loadJobs() {
     try {
-      const data = await pulseGet<Job[]>('/jobs');
+      let data: Job[];
+      try {
+        data = await pulseGet<Job[]>('/jobs');
+        cacheJobs(data);
+        setOfflineSince(null);
+      } catch (err) {
+        // No signal: show the jobs as they were last seen on this phone
+        const cached = cachedJobs<Job>();
+        if (!cached) throw err;
+        data = cached.jobs;
+        setOfflineSince(cached.savedAt);
+      }
+      // Starts and completions still waiting to send show as done here
+      for (const item of await listJobOutbox().catch(() => [])) {
+        data = data.map(j => (j.id === item.action.jobId
+          ? { ...j, status: item.action.kind === 'start' ? 'in-progress' : 'completed' }
+          : j));
+      }
       setJobs(data);
       // Opened from a "New job for you" notification
       const linked = new URLSearchParams(window.location.search).get('job');
@@ -415,7 +451,7 @@ export default function JobsPage() {
       assignedTo: [],
       priority: 'medium',
       status: 'pending',
-      startDate: new Date().toISOString().split('T')[0],
+      startDate: localDay(),
       startTime: '09:00',
       endDate: '',
       endTime: '',
@@ -433,16 +469,49 @@ export default function JobsPage() {
     setIsCreateJobOpen(false);
   };
 
-  async function updateJobStatus(jobId: string, status: Job['status']) {
+  // Start a job (works without signal); completing goes through the Complete dialog
+  async function startJob(jobId: string) {
     try {
-      await pulsePatch(`/jobs/${jobId}`, { status });
-      await loadJobs();
-      toast.success(`Job ${status === 'completed' ? 'completed' : 'updated'}`);
-    } catch (err) {
-      console.error('Failed to update job status:', err);
-      toast.error('Failed to update job status');
+      const result = await sendJobAction({ kind: 'start', jobId });
+      if (result.queued) {
+        setJobs(prev => prev.map(j => (j.id === jobId ? { ...j, status: 'in-progress' } : j)));
+        toast.success("No signal: started on this phone. It will send when you're back online.");
+      } else {
+        await loadJobs();
+        toast.success('Job started');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to start the job');
     }
   }
+
+  const finishJob = (job: Job) => setCompleting(job);
+
+  // Send anything saved offline when the page opens or signal comes back
+  useEffect(() => {
+    const refresh = () => listJobOutbox().then(items => setWaitingToSend(items.length)).catch(() => {});
+    const upload = async () => {
+      const { sent, refused } = await drainJobOutbox();
+      refused.forEach(r => toast.error(`A saved job update couldn't be sent: ${r.error}`));
+      if (sent > 0 || refused.length > 0) {
+        if (sent > 0) toast.success(`Sent ${sent} job update${sent === 1 ? '' : 's'} saved while offline`);
+        loadJobs();
+      }
+    };
+    refresh();
+    upload();
+    const stop = onJobOutboxChange(refresh);
+    window.addEventListener('online', upload);
+    return () => {
+      stop();
+      window.removeEventListener('online', upload);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Workers start on their own jobs
+  useEffect(() => {
+    if (role === 'worker') setActiveTab('my-jobs');
+  }, [role]);
 
   // Add, move or clear a job's pin
   async function updateJobPin(jobId: string, latitude: number | null, longitude: number | null) {
@@ -527,7 +596,7 @@ export default function JobsPage() {
       (mapFilterPerson === 'unassigned' ? job.assignedTo.length === 0 :
         job.assignedTo.includes(mapFilterPerson === 'mine' ? user?.id ?? '' : mapFilterPerson));
     const today = todayString();
-    const weekAhead = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+    const weekAhead = localDay(new Date(Date.now() + 7 * 86400000));
     const matchesDue = mapFilterDue === 'all' ||
       (mapFilterDue === 'overdue' && isOverdue(job)) ||
       (mapFilterDue === 'today' && job.startDate <= today && (job.endDate || job.startDate) >= today) ||
@@ -613,13 +682,18 @@ export default function JobsPage() {
                   Recurring
                 </a>
               </Button>
-              <Dialog open={isCreateJobOpen} onOpenChange={setIsCreateJobOpen}>
+              <Dialog open={isCreateJobOpen} onOpenChange={open => {
+                setIsCreateJobOpen(open);
+                if (open && !canManage && user) setNewJob(prev => ({ ...prev, assignedTo: [user.id] }));
+              }}>
+                {role !== 'viewer' && (
                 <DialogTrigger asChild>
                   <Button className="bg-pulse-forest hover:bg-pulse-forest-dark text-white">
                     <Plus className="h-4 w-4 mr-2" />
-                    Create Job
+                    {canManage ? 'Create Job' : 'Report a job'}
                   </Button>
                 </DialogTrigger>
+                )}
               <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>Create New Job</DialogTitle>
@@ -928,7 +1002,7 @@ export default function JobsPage() {
                   <div>
                     <label className="text-sm font-medium mb-2 block">Assign To *</label>
                     <div className="space-y-2 max-h-48 overflow-y-auto border rounded-lg p-3">
-                      {availableUsers.map(user => (
+                      {(canManage ? availableUsers : availableUsers.filter(u => u.id === user?.id)).map(user => (
                         <label key={user.id} className="flex items-center gap-3 p-2 hover:bg-accent rounded cursor-pointer">
                           <input
                             type="checkbox"
@@ -1206,6 +1280,17 @@ export default function JobsPage() {
       {/* Jobs Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <PhonePushPrompt className="mb-4" />
+        {offlineSince && (
+          <p className="mb-4 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-sm">
+            No signal. Showing jobs as they were at {new Date(offlineSince).toLocaleString()}. You can still start and complete jobs; they'll send when you're back online.
+          </p>
+        )}
+        {waitingToSend > 0 && (
+          <button type="button" onClick={() => drainJobOutbox().then(() => loadJobs())}
+            className="mb-4 rounded-full bg-amber-100 text-amber-900 border border-amber-300 px-3 py-1 text-xs font-medium">
+            {waitingToSend} job update{waitingToSend === 1 ? '' : 's'} waiting to send. Tap to try now.
+          </button>
+        )}
         {mapView === 'list' ? (
           /* Jobs List */
           <div className="grid gap-4">
@@ -1306,19 +1391,19 @@ export default function JobsPage() {
                       </div>
 
                       <div className="flex flex-col gap-2 ml-4">
-                        {job.status === 'pending' && (
+                        {job.status === 'pending' && canWorkOn(job) && (
                           <Button
                             size="sm"
-                            onClick={() => updateJobStatus(job.id, 'in-progress')}
+                            onClick={() => startJob(job.id)}
                             className="bg-blue-600 hover:bg-blue-700 text-white"
                           >
                             Start
                           </Button>
                         )}
-                        {job.status === 'in-progress' && (
+                        {job.status === 'in-progress' && canWorkOn(job) && (
                           <Button
                             size="sm"
-                            onClick={() => updateJobStatus(job.id, 'completed')}
+                            onClick={() => finishJob(job)}
                             className="bg-green-600 hover:bg-green-700 text-white"
                           >
                             Complete
@@ -1373,11 +1458,11 @@ export default function JobsPage() {
                       <p className="text-sm flex items-center gap-1"><MapPin className="h-4 w-4 text-gray-400" />{selectedMapJob.paddockName || selectedMapJob.location}</p>
                     )}
                     <div className="flex flex-wrap gap-2 pt-1">
-                      {selectedMapJob.status === 'pending' && (
-                        <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={() => updateJobStatus(selectedMapJob.id, 'in-progress')}>Start</Button>
+                      {selectedMapJob.status === 'pending' && canWorkOn(selectedMapJob) && (
+                        <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={() => startJob(selectedMapJob.id)}>Start</Button>
                       )}
-                      {selectedMapJob.status === 'in-progress' && (
-                        <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => openJobDetail(selectedMapJob)}>Complete</Button>
+                      {selectedMapJob.status === 'in-progress' && canWorkOn(selectedMapJob) && (
+                        <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => finishJob(selectedMapJob)}>Complete</Button>
                       )}
                       <Button size="sm" variant="outline" onClick={() => openJobDetail(selectedMapJob)}>
                         <Eye className="h-4 w-4 mr-1" />Details
@@ -1442,6 +1527,26 @@ export default function JobsPage() {
           </div>
         )}
       </div>
+
+      <CompleteJobDialog
+        job={completing}
+        onOpenChange={open => { if (!open) setCompleting(null); }}
+        onDone={result => {
+          const id = completing?.id;
+          if (result === 'queued') {
+            setJobs(prev => prev.map(j => (j.id === id ? { ...j, status: 'completed' } : j)));
+          } else {
+            setJobs(prev => prev.map(j => (j.id === result.id ? result : j)));
+          }
+        }}
+      />
+      <EditJobDialog
+        job={editingJob ? { ...editingJob, endDate: editingJob.endDate ?? null } : null}
+        people={availableUsers}
+        paddocks={paddocks}
+        onOpenChange={open => { if (!open) setEditingJob(null); }}
+        onSaved={updated => setJobs(prev => prev.map(j => (j.id === updated.id ? updated : j)))}
+      />
 
       {/* Job Detail Dialog with Full Checklist */}
       <Dialog open={isDetailDialogOpen} onOpenChange={setIsDetailDialogOpen}>
@@ -1561,6 +1666,30 @@ export default function JobsPage() {
                   </div>
                 )}
 
+                {/* Proof of completion */}
+                {selectedJob.status === 'completed' && (
+                  <div className="border rounded-lg p-4 space-y-2 bg-green-50/60 dark:bg-green-950/20">
+                    <h4 className="font-medium text-sm flex items-center gap-1">
+                      <CheckCircle2 className="h-4 w-4 text-green-600" />
+                      Done{selectedJob.completedByName && ` by ${selectedJob.completedByName}`}
+                      {selectedJob.completedAt && ` · ${new Date(selectedJob.completedAt).toLocaleString()}`}
+                    </h4>
+                    {selectedJob.completionNote && <p className="text-sm whitespace-pre-wrap">{selectedJob.completionNote}</p>}
+                    {(selectedJob.photoUrls ?? []).length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {selectedJob.photoUrls!.map(url => (
+                          <a key={url} href={url} target="_blank" rel="noreferrer">
+                            <img src={url} alt="Job photo" className="h-16 w-16 rounded object-cover border" loading="lazy" />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                    {selectedJob.completionRecordId && (
+                      <a href="/app/records#work" className="text-sm underline text-pulse-forest">Saved in Records as a Job done record</a>
+                    )}
+                  </div>
+                )}
+
                 {/* Notes */}
                 {selectedJob.notes && (
                   <div className="border rounded-lg p-4">
@@ -1572,10 +1701,15 @@ export default function JobsPage() {
 
               <DialogFooter>
                 <div className="flex gap-2 w-full">
-                  {selectedJob.status === 'pending' && (
+                  {canManage && selectedJob.status !== 'completed' && (
+                    <Button variant="outline" onClick={() => { setEditingJob(selectedJob); setIsDetailDialogOpen(false); }}>
+                      Edit
+                    </Button>
+                  )}
+                  {selectedJob.status === 'pending' && canWorkOn(selectedJob) && (
                     <Button
                       onClick={() => {
-                        updateJobStatus(selectedJob.id, 'in-progress');
+                        startJob(selectedJob.id);
                         setIsDetailDialogOpen(false);
                       }}
                       className="flex-1 bg-blue-600 hover:bg-blue-700"
@@ -1583,19 +1717,10 @@ export default function JobsPage() {
                       Start Job
                     </Button>
                   )}
-                  {selectedJob.status === 'in-progress' && (
+                  {selectedJob.status === 'in-progress' && canWorkOn(selectedJob) && (
                     <Button
                       onClick={() => {
-                        // Check if all required items are complete
-                        const requiredItems = selectedJob.checklistItems?.filter(i => i.required) || [];
-                        const allRequiredComplete = requiredItems.every(i => i.completed);
-                        
-                        if (requiredItems.length > 0 && !allRequiredComplete) {
-                          toast.error('Please complete all required checklist items before completing the job');
-                          return;
-                        }
-                        
-                        updateJobStatus(selectedJob.id, 'completed');
+                        finishJob(selectedJob);
                         setIsDetailDialogOpen(false);
                       }}
                       className="flex-1 bg-green-600 hover:bg-green-700"

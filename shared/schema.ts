@@ -1,5 +1,5 @@
 // Reference: blueprint:javascript_database
-import { pgTable, uuid, varchar, text, integer, timestamp, boolean, jsonb, pgEnum, numeric, date } from "drizzle-orm/pg-core";
+import { pgTable, uuid, varchar, text, integer, timestamp, boolean, jsonb, pgEnum, numeric, date, primaryKey } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -3940,6 +3940,14 @@ export const jobs = pgTable('jobs', {
     completedAt?: string; completedBy?: string; completedByName?: string; order?: number;
   }[]>().default(sql`'[]'::jsonb`).notNull(),
   estimatedDuration: integer('estimated_duration'), // minutes
+
+  // Proof of completion, and the Job done record it made in Records
+  completedById: uuid('completed_by_id').references(() => users.id),
+  completionNote: text('completion_note'),
+  completionLatitude: numeric('completion_latitude', { precision: 10, scale: 7 }),
+  completionLongitude: numeric('completion_longitude', { precision: 10, scale: 7 }),
+  completionRecordId: uuid('completion_record_id').references(() => farmRecords.id),
+  overdueNotifiedAt: timestamp('overdue_notified_at'),
   
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -3947,6 +3955,16 @@ export const jobs = pgTable('jobs', {
 });
 
 // People assigned to a job (a job can have several)
+// One "your jobs today" message per person per farm per day
+export const jobDigests = pgTable('job_digests', {
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  farmId: uuid('farm_id').references(() => farms.id, { onDelete: 'cascade' }).notNull(),
+  day: date('day').notNull(),
+  sentAt: timestamp('sent_at').defaultNow().notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.farmId, table.day] }),
+}));
+
 export const jobAssignments = pgTable('job_assignments', {
   id: uuid('id').primaryKey().defaultRandom(),
   jobId: uuid('job_id').references(() => jobs.id, { onDelete: 'cascade' }).notNull(),

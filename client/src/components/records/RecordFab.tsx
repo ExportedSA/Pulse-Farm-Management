@@ -4,6 +4,7 @@ import { Plus, CloudUpload } from "lucide-react";
 import { toast } from "sonner";
 import { RecordDialog } from "./RecordDialog";
 import { drainOutbox, listOutbox, onOutboxChange, type RecordType } from "@/lib/records";
+import { drainJobOutbox } from "@/lib/job-outbox";
 
 // Other screens can open the dialog with a type preselected, and optionally prefilled:
 // window.dispatchEvent(new CustomEvent(NEW_RECORD_EVENT, { detail: { type: "monthly_check", details: { month: "July" } } }))
@@ -59,6 +60,10 @@ export function RecordFab() {
         toast.success(`Uploaded ${sent} record${sent === 1 ? "" : "s"} saved while offline`);
         queryClient.invalidateQueries({ queryKey: ["/api/records"] });
       }
+      // Job starts and completions saved without signal go up from any screen too
+      const jobs = await drainJobOutbox();
+      if (jobs.sent > 0) toast.success(`Sent ${jobs.sent} job update${jobs.sent === 1 ? "" : "s"} saved while offline`);
+      jobs.refused.forEach(r => toast.error(`A saved job update couldn't be sent: ${r.error}`));
     };
     refreshCount();
     upload();

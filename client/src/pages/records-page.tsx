@@ -187,7 +187,8 @@ export default function RecordsPage() {
     queryFn: async () => {
       const res = await fetch("/api/jobs", { credentials: "include" });
       if (!res.ok) return [];
-      const today = new Date().toISOString().slice(0, 10);
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
       return (await res.json())
         .filter((j: any) => j.latitude != null && j.longitude != null && j.status !== "completed" && j.status !== "cancelled")
         .map((j: any) => ({

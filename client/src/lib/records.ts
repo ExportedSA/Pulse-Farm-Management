@@ -226,6 +226,11 @@ export function detailSummary(record: Pick<FarmRecord, "type" | "details">): str
       if (has(d.depthMm)) parts.push(`${d.depthMm} mm`);
       if (has(d.volumeM3)) parts.push(`${d.volumeM3} m³`);
       break;
+    case "job_done":
+      if (has(d.completedBy)) parts.push(`Done by ${d.completedBy}`);
+      if (has(d.assignedTo) && d.assignedTo !== d.completedBy) parts.push(`Assigned to ${d.assignedTo}`);
+      if (has(d.checklist)) parts.push(`Checklist ${d.checklist}`);
+      break;
     case "document":
       if (has(d.documentType)) parts.push(d.documentType);
       if (has(d.issuer)) parts.push(d.issuer);

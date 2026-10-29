@@ -6,11 +6,14 @@
 import { Router, type Request } from "express";
 import { z } from "zod";
 import { db } from "../db";
-import { jobs, jobAssignments, users, pastures, type Job } from "@shared/schema";
+import { jobs, jobAssignments, users, pastures, farms, type Job } from "@shared/schema";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { uploadMultiplePhotos } from "../middleware/upload";
 import { getFarmId, getUserId, requireFarm } from "../middleware/auth";
-import { listFarmUserIds } from "../domain/farms";
+import { getFarmRole, listFarmUserIds, type FarmRole } from "../domain/farms";
+import { createRecord } from "../domain/records";
+import { saveAttachments } from "../domain/attachments";
+import { farmClock } from "../domain/job-reminders";
 import { notifyUsers } from "../domain/notifications";
 
 const router = Router();
@@ -118,6 +121,11 @@ async function validPasture(farmId: string, pastureId: string | null | undefined
   return row.id;
 }
 
+async function farmToday(farmId: string): Promise<string> {
+  const [farm] = await db.select({ timezone: farms.timezone }).from(farms).where(eq(farms.id, farmId));
+  return farmClock(farm?.timezone ?? null).day;
+}
+
 /**
  * Middle of a paddock's drawn outline, for jobs placed by paddock without a pin
  */
@@ -173,6 +181,11 @@ async function toApiJobs(rows: Job[]) {
     .select({ id: pastures.id, name: pastures.name })
     .from(pastures)
     .where(inArray(pastures.id, pastureIds))).map(p => [p.id, p.name]));
+  const completerIds = Array.from(new Set(rows.map(r => r.completedById).filter((id): id is string => !!id)));
+  const completers = new Map((completerIds.length === 0 ? [] : await db
+    .select({ id: users.id, name: users.name })
+    .from(users)
+    .where(inArray(users.id, completerIds))).map(u => [u.id, u.name]));
   const assignments = ids.length === 0 ? [] : await db
     .select({ jobId: jobAssignments.jobId, userId: users.id, name: users.name })
     .from(jobAssignments)
@@ -208,6 +221,12 @@ async function toApiJobs(rows: Job[]) {
       createdAt: job.createdAt.toISOString(),
       updatedAt: job.updatedAt.toISOString(),
       completedAt: job.completedAt?.toISOString() ?? null,
+      completedBy: job.completedById,
+      completedByName: job.completedById ? completers.get(job.completedById) ?? null : null,
+      completionNote: job.completionNote,
+      completionLatitude: job.completionLatitude != null ? Number(job.completionLatitude) : null,
+      completionLongitude: job.completionLongitude != null ? Number(job.completionLongitude) : null,
+      completionRecordId: job.completionRecordId,
     };
   });
 }
@@ -218,7 +237,28 @@ async function findFarmJob(farmId: string, id: string): Promise<Job | undefined>
   return job;
 }
 
+// Who may do what: owners and managers run the job board; workers report jobs for
+// themselves and work their own; viewers only look
+class Forbidden extends Error {}
+
+const isManager = (role: FarmRole | undefined) => role === "owner" || role === "manager";
+
+async function roleOf(req: Request): Promise<FarmRole | undefined> {
+  return getFarmRole(getUserId(req)!, getFarmId(req)!);
+}
+
+async function isAssigned(jobId: string, userId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: jobAssignments.id })
+    .from(jobAssignments)
+    .where(and(eq(jobAssignments.jobId, jobId), eq(jobAssignments.userId, userId)));
+  return !!row;
+}
+
 function handleError(res: any, error: unknown, message: string) {
+  if (error instanceof Forbidden) {
+    return res.status(403).json({ error: error.message });
+  }
   if (error instanceof z.ZodError) {
     return res.status(400).json({ error: "Validation failed", details: error.errors });
   }
@@ -262,10 +302,15 @@ router.post("/", uploadMultiplePhotos, async (req, res) => {
     const farmId = getFarmId(req)!;
     const userId = getUserId(req)!;
     const data = jobFieldsSchema.parse(req.body);
-    const photoUrls = await savePhotos(req);
+    const role = await roleOf(req);
+    if (!role || role === "viewer") throw new Forbidden("Viewers can't create jobs");
 
     let assignees = await validAssignees(farmId, data.assignedTo);
     if (assignees.length === 0) assignees = [userId];
+    if (!isManager(role) && assignees.some(id => id !== userId)) {
+      throw new Forbidden("Only owners and managers can give jobs to other people");
+    }
+    const photoUrls = await savePhotos(req);
     const pastureId = await validPasture(farmId, data.pastureId);
     // No pin but a mapped paddock: pin it in the middle of the paddock
     const pin = data.latitude != null && data.longitude != null
@@ -283,7 +328,8 @@ router.post("/", uploadMultiplePhotos, async (req, res) => {
       pastureId,
       status: data.status ?? "open",
       priority: data.priority ?? "medium",
-      startDate: data.startDate ? new Date(data.startDate) : new Date(),
+      // No date given: today on the farm (stored, like picked dates, as that day at midnight UTC)
+      startDate: new Date(data.startDate ?? await farmToday(farmId)),
       endDate: data.endDate ? new Date(data.endDate) : null,
       startTime: data.startTime,
       endTime: data.endTime,
@@ -303,12 +349,32 @@ router.post("/", uploadMultiplePhotos, async (req, res) => {
   }
 });
 
-async function updateJob(req: Request, body: unknown) {
+// What someone assigned to a job (but not running the board) may change on it
+const WORKER_FIELDS = new Set(["status", "checklistItems", "notes"]);
+
+async function updateJob(req: Request, body: unknown): Promise<any> {
   const farmId = getFarmId(req)!;
+  const userId = getUserId(req)!;
   const job = await findFarmJob(farmId, req.params.id);
   if (!job) return null;
 
   const data = jobFieldsSchema.partial().parse(body);
+  const role = await roleOf(req);
+  if (!isManager(role)) {
+    if (role !== "worker" || !(await isAssigned(job.id, userId))) {
+      throw new Forbidden("Only the people on this job, owners and managers can change it");
+    }
+    const other = Object.keys(data).filter(k => (data as any)[k] !== undefined && !WORKER_FIELDS.has(k));
+    if (other.length > 0) throw new Forbidden("Only owners and managers can edit or reassign jobs");
+  }
+  // Completing always goes through the completion steps, so it leaves a Job done record
+  if (data.status === "completed" && job.status !== "completed") {
+    const { status: _status, ...others } = data;
+    if (Object.keys(others).some(k => (others as any)[k] !== undefined)) {
+      await updateJob(req, others);
+    }
+    return completeJob(req, (await findFarmJob(farmId, job.id))!, {});
+  }
   const newPhotos = await savePhotos(req);
   const { assignedTo, existingPhotos, startDate, endDate, latitude, longitude, status, pastureId, ...rest } = data;
 
@@ -326,7 +392,13 @@ async function updateJob(req: Request, body: unknown) {
   }
   if (status !== undefined) {
     updates.status = status;
-    updates.completedAt = status === "completed" ? (job.completedAt ?? new Date()) : null;
+    if (status !== "completed") {
+      // Reopened: it can be completed (and recorded) again
+      Object.assign(updates, {
+        completedAt: null, completedById: null, completionNote: null,
+        completionLatitude: null, completionLongitude: null, completionRecordId: null, overdueNotifiedAt: null,
+      });
+    }
   }
   if (newPhotos.length > 0 || existingPhotos !== undefined) {
     updates.photoUrls = [...(existingPhotos ?? job.photoUrls), ...newPhotos];
@@ -340,6 +412,111 @@ async function updateJob(req: Request, body: unknown) {
   const [apiJob] = await toApiJobs([updated]);
   return apiJob;
 }
+
+interface Completion { note?: string | null; latitude?: number | null; longitude?: number | null }
+
+/**
+ * Mark a job done with its proof (note, photos, where it was finished) and save it to
+ * Records as a "Job done" record. Safe to repeat: a job already done is returned as it is.
+ */
+async function completeJob(req: Request, job: Job, proof: Completion) {
+  const farmId = getFarmId(req)!;
+  const userId = getUserId(req)!;
+  if (job.status === "completed" && job.completionRecordId) {
+    const [apiJob] = await toApiJobs([job]);
+    return apiJob;
+  }
+  const missing = job.checklistItems.filter(i => i.required && !i.completed);
+  if (missing.length > 0) {
+    throw new z.ZodError([{ code: "custom", path: ["checklistItems"], message: `Tick off first: ${missing.map(i => i.text).join(", ")}` }]);
+  }
+
+  const [actor] = await db.select({ name: users.name }).from(users).where(eq(users.id, userId));
+  const people = await db
+    .select({ name: users.name })
+    .from(jobAssignments)
+    .innerJoin(users, eq(jobAssignments.userId, users.id))
+    .where(eq(jobAssignments.jobId, job.id));
+  const lat = proof.latitude ?? (job.latitude != null ? Number(job.latitude) : null);
+  const lng = proof.longitude ?? (job.longitude != null ? Number(job.longitude) : null);
+  const ticked = job.checklistItems.filter(i => i.completed).length;
+
+  // One record per job, so a retried upload doesn't make a second one
+  const { record } = await createRecord(farmId, userId, {
+    type: "job_done",
+    title: job.title.slice(0, 255),
+    notes: proof.note || null,
+    occurredAt: new Date(),
+    pastureIds: job.pastureId ? [job.pastureId] : [],
+    latitude: lat,
+    longitude: lng,
+    details: {
+      jobId: job.id,
+      category: job.category ?? undefined,
+      assignedTo: people.map(p => p.name).join(", ") || undefined,
+      completedBy: actor?.name,
+      location: job.location || undefined,
+      checklist: job.checklistItems.length > 0 ? `${ticked}/${job.checklistItems.length} ticked` : undefined,
+    },
+    tags: ["Job done"],
+  }, `job-done-${job.id}`);
+
+  const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+  const saved = files.length > 0
+    ? await saveAttachments(farmId, "record", record.id, files, userId, {
+      latitude: lat ?? undefined, longitude: lng ?? undefined, takenAt: new Date(),
+    })
+    : [];
+
+  const [updated] = await db.update(jobs).set({
+    status: "completed",
+    completedAt: new Date(),
+    completedById: userId,
+    completionNote: proof.note || null,
+    completionLatitude: proof.latitude != null ? String(proof.latitude) : null,
+    completionLongitude: proof.longitude != null ? String(proof.longitude) : null,
+    completionRecordId: record.id,
+    photoUrls: [...job.photoUrls, ...saved.map(a => a.url)],
+    updatedAt: new Date(),
+  }).where(eq(jobs.id, job.id)).returning();
+
+  // Let whoever set the job, and the people running the board, know it's done
+  const managers = await listFarmUserIds(farmId, ["owner", "manager"]);
+  const recipients = Array.from(new Set([job.createdById, ...managers])).filter(id => id !== userId);
+  if (recipients.length > 0) {
+    await notifyUsers(recipients, {
+      type: "job_completed",
+      title: "Job done",
+      message: `${job.title}${actor?.name ? ` (${actor.name})` : ""}`,
+      farmId,
+      link: `/app/jobs?job=${job.id}`,
+      metadata: { jobId: job.id, recordId: record.id },
+    }).catch(error => console.error("Failed to notify job completion:", error));
+  }
+
+  const [apiJob] = await toApiJobs([updated]);
+  return apiJob;
+}
+
+// POST /api/jobs/:id/complete - finish a job with a note, photos and where it was done
+router.post("/:id/complete", uploadMultiplePhotos, async (req, res) => {
+  try {
+    const job = await findFarmJob(getFarmId(req)!, req.params.id);
+    if (!job) return res.status(404).json({ error: "Job not found" });
+    const role = await roleOf(req);
+    if (!isManager(role) && !(role === "worker" && await isAssigned(job.id, getUserId(req)!))) {
+      throw new Forbidden("Only the people on this job, owners and managers can complete it");
+    }
+    const proof = z.object({
+      note: z.string().max(2000).optional().nullable(),
+      latitude: optionalNumber,
+      longitude: optionalNumber,
+    }).parse(req.body ?? {});
+    res.json(await completeJob(req, job, proof));
+  } catch (error) {
+    handleError(res, error, "Failed to complete job");
+  }
+});
 
 // PATCH /api/jobs/:id/status - Kanban drag between columns
 router.patch("/:id/status", async (req, res) => {
@@ -369,6 +546,7 @@ router.delete("/:id", async (req, res) => {
   try {
     const job = await findFarmJob(getFarmId(req)!, req.params.id);
     if (!job) return res.status(404).json({ error: "Job not found" });
+    if (!isManager(await roleOf(req))) throw new Forbidden("Only owners and managers can delete jobs");
     await db.delete(jobs).where(eq(jobs.id, job.id));
     res.json({ success: true });
   } catch (error) {

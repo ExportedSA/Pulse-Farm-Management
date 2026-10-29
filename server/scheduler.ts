@@ -1,5 +1,6 @@
 import { runComplianceChecks, getComplianceSummary } from './domain/complianceChecks';
 import logger from './config/logger';
+import { runJobReminders } from './domain/job-reminders';
 
 // Schedule intervals (in milliseconds)
 const ONE_HOUR = 60 * 60 * 1000;
@@ -7,6 +8,8 @@ const ONE_DAY = 24 * ONE_HOUR;
 
 // Track scheduled jobs
 let complianceCheckInterval: NodeJS.Timeout | null = null;
+let jobReminderInterval: NodeJS.Timeout | null = null;
+let jobReminderStart: NodeJS.Timeout | null = null;
 let isRunning = false;
 
 /**
@@ -169,6 +172,11 @@ export function initializeScheduler(): void {
   
   startComplianceScheduler(interval, true);
 
+  // Job reminders: check every 15 minutes (each message only ever goes once)
+  const remind = () => runJobReminders().catch(error => logger.error({ error }, 'Job reminders failed'));
+  jobReminderStart = setTimeout(remind, 60 * 1000);
+  jobReminderInterval = setInterval(remind, 15 * 60 * 1000);
+
   logger.info('All scheduled jobs initialized');
 }
 
@@ -179,5 +187,8 @@ export function initializeScheduler(): void {
 export function cleanupScheduler(): void {
   logger.info('Cleaning up scheduled jobs');
   stopComplianceScheduler();
+  if (jobReminderStart) clearTimeout(jobReminderStart);
+  if (jobReminderInterval) clearInterval(jobReminderInterval);
+  jobReminderStart = jobReminderInterval = null;
   logger.info('All scheduled jobs cleaned up');
 }
