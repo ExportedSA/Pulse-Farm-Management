@@ -8,6 +8,10 @@ import {
   splitPaddock, mergePaddocks, paddockHistory, createFeature, updateFeature, deleteFeature, createLayer, updateLayer,
   archiveLayer, saveView, deleteView, exportMap, importShapes,
 } from '../domain/farm-map';
+import { EXCLUSION_ACTIVITIES, createExclusion, updateExclusion, archiveExclusion, listExclusions, paddockAreas } from '../domain/exclusions';
+import {
+  PLAN_ACTIVITIES, RATE_UNITS, createPlan, updatePlan, getPlan, listPlans, addZone, updateZone, deleteZone, approvePlan, copyPlan, cancelPlan,
+} from '../domain/rate-plans';
 
 // /api/farm-map - the farm map: paddock boundaries, layers, drawn features and saved views.
 // Everyone on the farm can see it and save views; owners and managers change the map.
@@ -43,9 +47,137 @@ const route = (fn: (req: Request, res: Response) => Promise<unknown>, message: s
 const ctx = (req: Request) => ({ farmId: getFarmId(req)!, userId: getUserId(req)! });
 
 // GET /api/farm-map - layers, paddocks, features and views
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
+const today = () => new Date().toISOString().slice(0, 10);
+
 router.get('/', route(async (req, res) => {
-  res.json(await mapState(getFarmId(req)!));
+  const farmId = getFarmId(req)!;
+  const [state, exclusions, plans] = await Promise.all([mapState(farmId), listExclusions(farmId, today()), listPlans(farmId)]);
+  res.json({ ...state, exclusions, plans });
 }, 'Failed to load the farm map'));
+
+// GET /api/farm-map/paddocks/:id/areas?activity&date - gross, excluded and net hectares
+router.get('/paddocks/:id/areas', route(async (req, res) => {
+  const q = z.object({ activity: z.enum(EXCLUSION_ACTIVITIES).default('fertiliser'), date: day.optional() }).parse(req.query);
+  res.json(await paddockAreas(getFarmId(req)!, uuid.parse(req.params.id), q.activity, q.date ?? today()));
+}, 'Failed to work out the areas'));
+
+// ----- Exclusions -----
+
+const exclusionInput = z.object({
+  name: name.max(120),
+  reason: z.string().max(1000).optional().nullable(),
+  activities: z.array(z.enum(EXCLUSION_ACTIVITIES)).min(1, 'Choose which activities it applies to'),
+  sourceKind: z.enum(['area', 'around', 'edge']),
+  geometry: geometry.optional().nullable(),
+  featureId: uuid.optional().nullable(),
+  pastureId: uuid.optional().nullable(),
+  bufferM: z.number().min(0).max(5000),
+  permanent: z.boolean(),
+  startsOn: day.optional().nullable(),
+  endsOn: day.optional().nullable(),
+  requirementSource: z.string().max(500).optional().nullable(),
+  confirmedBy: z.string().max(120).optional().nullable(),
+  confirmedOn: day.optional().nullable(),
+});
+
+router.post('/exclusions', route(async (req, res) => {
+  await requireManager(req);
+  const { farmId, userId } = ctx(req);
+  res.status(201).json(await createExclusion(farmId, userId, exclusionInput.parse(req.body)));
+}, 'Failed to save the exclusion'));
+
+router.patch('/exclusions/:id', route(async (req, res) => {
+  await requireManager(req);
+  const input = exclusionInput.omit({ sourceKind: true, featureId: true, pastureId: true }).partial().extend({ version: z.number().int().optional() }).parse(req.body);
+  const { farmId, userId } = ctx(req);
+  await updateExclusion(farmId, userId, uuid.parse(req.params.id), input);
+  res.json({ ok: true });
+}, 'Failed to update the exclusion'));
+
+router.delete('/exclusions/:id', route(async (req, res) => {
+  await requireManager(req);
+  const { farmId, userId } = ctx(req);
+  await archiveExclusion(farmId, userId, uuid.parse(req.params.id));
+  res.json({ ok: true });
+}, 'Failed to remove the exclusion'));
+
+// ----- Variable-rate plans -----
+
+const planInput = z.object({
+  name: name.max(120),
+  activity: z.enum(PLAN_ACTIVITIES),
+  plannedOn: day.optional().nullable(),
+  pastureIds: z.array(uuid).max(200).default([]),
+  notes: z.string().max(2000).optional().nullable(),
+});
+const zoneInput = z.object({
+  geometry: geometry.optional().nullable(),
+  wholePaddockId: uuid.optional().nullable(),
+  name: z.string().trim().max(120).optional().nullable(),
+  productName: z.string().trim().max(160).optional().nullable(),
+  productId: uuid.optional().nullable(),
+  rate: z.number().min(0).max(1000000).optional().nullable(),
+  rateUnit: z.enum(Object.keys(RATE_UNITS) as [string, ...string[]]).optional(),
+});
+
+router.post('/plans', route(async (req, res) => {
+  await requireManager(req);
+  const { farmId, userId } = ctx(req);
+  res.status(201).json(await createPlan(farmId, userId, planInput.parse(req.body)));
+}, 'Failed to start the plan'));
+
+router.get('/plans/:id', route(async (req, res) => {
+  res.json(await getPlan(getFarmId(req)!, uuid.parse(req.params.id)));
+}, 'Failed to load the plan'));
+
+router.patch('/plans/:id', route(async (req, res) => {
+  await requireManager(req);
+  const { farmId, userId } = ctx(req);
+  await updatePlan(farmId, userId, uuid.parse(req.params.id), planInput.partial().parse(req.body));
+  res.json({ ok: true });
+}, 'Failed to update the plan'));
+
+router.post('/plans/:id/zones', route(async (req, res) => {
+  await requireManager(req);
+  const { farmId, userId } = ctx(req);
+  res.status(201).json(await addZone(farmId, userId, uuid.parse(req.params.id), zoneInput.parse(req.body)));
+}, 'Failed to add the zone'));
+
+router.patch('/zones/:id', route(async (req, res) => {
+  await requireManager(req);
+  const { farmId, userId } = ctx(req);
+  await updateZone(farmId, userId, uuid.parse(req.params.id), zoneInput.omit({ wholePaddockId: true }).parse(req.body));
+  res.json({ ok: true });
+}, 'Failed to update the zone'));
+
+router.delete('/zones/:id', route(async (req, res) => {
+  await requireManager(req);
+  const { farmId, userId } = ctx(req);
+  await deleteZone(farmId, userId, uuid.parse(req.params.id));
+  res.json({ ok: true });
+}, 'Failed to delete the zone'));
+
+router.post('/plans/:id/approve', route(async (req, res) => {
+  await requireManager(req);
+  const { acceptGaps } = z.object({ acceptGaps: z.boolean().optional() }).parse(req.body ?? {});
+  const { farmId, userId } = ctx(req);
+  await approvePlan(farmId, userId, uuid.parse(req.params.id), !!acceptGaps);
+  res.json(await getPlan(farmId, uuid.parse(req.params.id)));
+}, 'Failed to approve the plan'));
+
+router.post('/plans/:id/copy', route(async (req, res) => {
+  await requireManager(req);
+  const { farmId, userId } = ctx(req);
+  res.status(201).json(await copyPlan(farmId, userId, uuid.parse(req.params.id)));
+}, 'Failed to copy the plan'));
+
+router.delete('/plans/:id', route(async (req, res) => {
+  await requireManager(req);
+  const { farmId, userId } = ctx(req);
+  await cancelPlan(farmId, userId, uuid.parse(req.params.id));
+  res.json({ ok: true });
+}, 'Failed to cancel the plan'));
 
 // ----- Paddocks -----
 
@@ -197,7 +329,12 @@ router.delete('/views/:id', route(async (req, res) => {
 // ----- Import / export -----
 
 router.get('/export.geojson', route(async (req, res) => {
-  const data = await exportMap(getFarmId(req)!);
+  const q = z.object({ layers: z.string().optional(), paddocks: z.string().optional(), exclusions: z.string().optional() }).parse(req.query);
+  const data = await exportMap(getFarmId(req)!, {
+    layerIds: q.layers !== undefined ? q.layers.split(',').filter(Boolean) : undefined,
+    paddocks: q.paddocks !== '0',
+    exclusions: q.exclusions !== '0',
+  });
   res.setHeader('Content-Type', 'application/geo+json');
   res.setHeader('Content-Disposition', 'attachment; filename="farm-map.geojson"');
   res.send(JSON.stringify(data));

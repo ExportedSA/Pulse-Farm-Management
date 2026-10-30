@@ -9,7 +9,7 @@ export class MapError extends Error {
   constructor(message: string, public status = 400) { super(message); }
 }
 
-type Geo = { type: string; coordinates: any };
+export type Geo = { type: string; coordinates: any };
 
 // The default layers every farm starts with (activity layers show records of that kind)
 export const DEFAULT_LAYERS: { key: string; name: string; color: string; fillOpacity: number; records?: string[] }[] = [
@@ -27,12 +27,12 @@ export const DEFAULT_LAYERS: { key: string; name: string; color: string; fillOpa
   { key: 'features', name: 'Farm features', color: '#ffd43b', fillOpacity: 0.2 },
 ];
 
-const rowsOf = (r: any) => (r?.rows ?? r) as any[];
+export const rowsOf = (r: any) => (r?.rows ?? r) as any[];
 
 // A list of ids as a Postgres uuid[] parameter
-const uuidArray = (ids: string[]) => sql`ARRAY[${sql.join(ids.map(id => sql`${id}`), sql`, `)}]::uuid[]`;
+export const uuidArray = (ids: string[]) => sql`ARRAY[${sql.join(ids.map(id => sql`${id}`), sql`, `)}]::uuid[]`;
 
-async function audit(tx: any, farmId: string, userId: string | null, entityType: string, entityId: string, action: string, before: unknown, after: unknown) {
+export async function audit(tx: any, farmId: string, userId: string | null, entityType: string, entityId: string, action: string, before: unknown, after: unknown) {
   await tx.execute(sql`
     INSERT INTO map_audit (farm_id, entity_type, entity_id, action, before, after, user_id)
     VALUES (${farmId}, ${entityType}, ${entityId}, ${action}, ${before == null ? null : JSON.stringify(before)}::jsonb,
@@ -43,7 +43,7 @@ async function audit(tx: any, farmId: string, userId: string | null, entityType:
  * GeoJSON in, a valid PostGIS geometry expression out. Rejects anything that isn't the
  * expected kind, has no area, or sits outside sensible coordinates.
  */
-function geomSql(geometry: Geo, want: 'area' | 'any') {
+export function geomSql(geometry: Geo, want: 'area' | 'any') {
   if (!geometry || typeof geometry !== 'object' || !geometry.type || !Array.isArray(geometry.coordinates)) {
     throw new MapError('That shape is missing or not valid GeoJSON');
   }
@@ -57,7 +57,7 @@ function geomSql(geometry: Geo, want: 'area' | 'any') {
     : g;
 }
 
-async function checkShape(tx: any, geom: any, want: 'area' | 'any', raw?: Geo) {
+export async function checkShape(tx: any, geom: any, want: 'area' | 'any', raw?: Geo) {
   if (raw) {
     const [valid] = rowsOf(await tx.execute(sql`
       SELECT ST_IsValid(ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(raw)}), 4326)) AS ok,
@@ -437,18 +437,32 @@ export async function deleteView(farmId: string, id: string) {
 /**
  * The farm's own map as GeoJSON: paddocks (current boundaries) and every feature
  */
-export async function exportMap(farmId: string) {
+export async function exportMap(farmId: string, opts: { layerIds?: string[]; paddocks?: boolean; exclusions?: boolean } = {}) {
   const state = await mapState(farmId);
   const layerName = new Map(state.layers.map((l: any) => [l.id, l.name]));
+  const exclusions = opts.exclusions === false ? [] : rowsOf(await db.execute(sql`
+    SELECT id, name, reason, activities, buffer_m::float AS "bufferM", permanent, starts_on::text AS "startsOn", ends_on::text AS "endsOn",
+      requirement_source AS "requirementSource", confirmed_by AS "confirmedBy", ST_AsGeoJSON(geom, 7)::json AS geometry, ST_Area(geom) / 10000 AS ha
+    FROM exclusions WHERE farm_id = ${farmId} AND archived_at IS NULL`));
+  const wanted = (layerId: string) => !opts.layerIds || opts.layerIds.includes(layerId);
   return {
     type: 'FeatureCollection',
     features: [
-      ...state.paddocks.filter((p: any) => p.geometry).map((p: any) => ({
+      ...(opts.paddocks === false ? [] : state.paddocks).filter((p: any) => p.geometry).map((p: any) => ({
         type: 'Feature',
         geometry: p.geometry,
         properties: { pulseType: 'paddock', id: p.id, name: p.name, paddockNumber: p.paddockNumber, areaHa: Number(Number(p.areaHa).toFixed(4)), layer: 'Farm and paddocks' },
       })),
-      ...state.features.map((f: any) => ({
+      ...exclusions.map((e: any) => ({
+        type: 'Feature',
+        geometry: e.geometry,
+        properties: {
+          pulseType: 'exclusion', id: e.id, name: e.name, reason: e.reason, activities: e.activities.join(', '), bufferM: e.bufferM,
+          permanent: e.permanent, startsOn: e.startsOn, endsOn: e.endsOn, requirementSource: e.requirementSource,
+          confirmedBy: e.confirmedBy, areaHa: Number(Number(e.ha).toFixed(4)), layer: 'Exclusion zones',
+        },
+      })),
+      ...state.features.filter((f: any) => wanted(f.layerId)).map((f: any) => ({
         type: 'Feature',
         geometry: f.geometry,
         properties: {

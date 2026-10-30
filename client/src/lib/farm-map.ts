@@ -14,7 +14,47 @@ export interface MapFeature {
   geometry: GeoJSON.Geometry; areaHa: number | null; lengthM: number | null;
 }
 export interface MapView { id: string; name: string; lat: number; lng: number; zoom: number; basemap: string; layers: Record<string, boolean>; createdAt: string }
-export interface MapState { layers: MapLayer[]; paddocks: MapPaddock[]; features: MapFeature[]; views: MapView[] }
+export interface Exclusion {
+  id: string; name: string; reason: string | null; activities: string[]; sourceKind: "area" | "around" | "edge";
+  featureId: string | null; pastureId: string | null; bufferM: number; permanent: boolean; startsOn: string | null; endsOn: string | null;
+  requirementSource: string | null; confirmedBy: string | null; confirmedOn: string | null; version: number;
+  geometry: GeoJSON.MultiPolygon; areaHa: number; status: "active" | "upcoming" | "ended";
+}
+export interface PlanSummary { id: string; name: string; activity: string; status: "draft" | "approved" | "cancelled"; plannedOn: string | null; approvedAt: string | null; zones: number }
+export interface RateZone {
+  id: string; pastureId: string | null; name: string | null; productName: string | null; productId: string | null;
+  rate: number | null; rateUnit: string; grossHa: number | null; excludedHa: number | null; netHa: number | null;
+  quantity: number | null; quantityUnit: string | null; sortOrder: number; geometry: GeoJSON.MultiPolygon;
+}
+export interface RatePlan {
+  id: string; name: string; activity: string; status: PlanSummary["status"]; plannedOn: string | null; pastureIds: string[];
+  notes: string | null; approvedAt: string | null; snapshot: any; zones: RateZone[];
+  totals: { product: string; unit: string; quantity: number; netHa: number }[];
+  check: null | {
+    overlaps: { zones: string[]; names: string; ha: number; geometry: GeoJSON.Geometry }[];
+    gapHa: number; gapGeometry: GeoJSON.Geometry | null; hasGaps: boolean; outsideHa: number; outsideGeometry: GeoJSON.Geometry | null;
+  };
+}
+export interface AreaBreakdown { grossHa: number; excludedHa: number; netHa: number; exclusions: { id: string; name: string; bufferM: number; ha: number }[] }
+export interface MapState { layers: MapLayer[]; paddocks: MapPaddock[]; features: MapFeature[]; views: MapView[]; exclusions: Exclusion[]; plans: PlanSummary[] }
+
+export const EXCLUSION_ACTIVITIES = [
+  { key: "all", label: "Everything" },
+  { key: "fertiliser", label: "Fertiliser" },
+  { key: "effluent", label: "Effluent" },
+  { key: "slurry", label: "Slurry" },
+  { key: "spraying", label: "Spraying" },
+];
+export const PLAN_ACTIVITIES = EXCLUSION_ACTIVITIES.filter(a => a.key !== "all");
+export const RATE_UNITS = ["kg/ha", "t/ha", "g/ha", "L/ha", "mL/ha", "m3/ha"];
+
+export type ExclusionInput = {
+  name: string; reason?: string | null; activities: string[]; sourceKind: Exclusion["sourceKind"];
+  geometry?: GeoJSON.Geometry | null; featureId?: string | null; pastureId?: string | null; bufferM: number;
+  permanent: boolean; startsOn?: string | null; endsOn?: string | null; requirementSource?: string | null;
+  confirmedBy?: string | null; confirmedOn?: string | null;
+};
+export type ZoneInput = { geometry?: GeoJSON.Geometry | null; wholePaddockId?: string | null; name?: string | null; productName?: string | null; productId?: string | null; rate?: number | null; rateUnit?: string };
 export interface BoundaryVersion { id: string; areaHa: number; validFrom: string; validTo: string | null; note: string | null; by: string | null; geometry: GeoJSON.MultiPolygon }
 
 export const FARM_MAP_KEY = ["/api/farm-map"];
@@ -54,7 +94,26 @@ export const farmMap = {
   saveView: (b: Omit<MapView, "id" | "createdAt">) => send<{ id: string }>("POST", "/api/farm-map/views", b),
   deleteView: (id: string) => send("DELETE", `/api/farm-map/views/${id}`),
   importShapes: (b: { as: "paddocks" | "layer"; layerId?: string; items: ImportItem[] }) => send<{ created: number; skipped: { name: string | null; reason: string }[] }>("POST", "/api/farm-map/import", b),
-  exportGeoJSON: () => api<GeoJSON.FeatureCollection>("/api/farm-map/export.geojson"),
+  exportGeoJSON: (opts?: { layers?: string[]; paddocks?: boolean; exclusions?: boolean }) => {
+    const q = new URLSearchParams();
+    if (opts?.layers) q.set("layers", opts.layers.join(","));
+    if (opts?.paddocks === false) q.set("paddocks", "0");
+    if (opts?.exclusions === false) q.set("exclusions", "0");
+    return api<GeoJSON.FeatureCollection>(`/api/farm-map/export.geojson${q.toString() ? `?${q}` : ""}`);
+  },
+  areas: (pastureId: string, activity: string, date?: string) => api<AreaBreakdown>(`/api/farm-map/paddocks/${pastureId}/areas?activity=${activity}${date ? `&date=${date}` : ""}`),
+  createExclusion: (b: ExclusionInput) => send<{ id: string; areaHa: number }>("POST", "/api/farm-map/exclusions", b),
+  updateExclusion: (id: string, b: Partial<ExclusionInput> & { version?: number }) => send("PATCH", `/api/farm-map/exclusions/${id}`, b),
+  deleteExclusion: (id: string) => send("DELETE", `/api/farm-map/exclusions/${id}`),
+  createPlan: (b: { name: string; activity: string; plannedOn?: string | null; pastureIds: string[]; notes?: string | null }) => send<{ id: string }>("POST", "/api/farm-map/plans", b),
+  plan: (id: string) => api<RatePlan>(`/api/farm-map/plans/${id}`),
+  updatePlan: (id: string, b: Partial<{ name: string; activity: string; plannedOn: string | null; pastureIds: string[]; notes: string | null }>) => send("PATCH", `/api/farm-map/plans/${id}`, b),
+  addZone: (planId: string, b: ZoneInput) => send<{ id: string }>("POST", `/api/farm-map/plans/${planId}/zones`, b),
+  updateZone: (id: string, b: ZoneInput) => send("PATCH", `/api/farm-map/zones/${id}`, b),
+  deleteZone: (id: string) => send("DELETE", `/api/farm-map/zones/${id}`),
+  approvePlan: (id: string, acceptGaps: boolean) => send<RatePlan>("POST", `/api/farm-map/plans/${id}/approve`, { acceptGaps }),
+  copyPlan: (id: string) => send<{ id: string }>("POST", `/api/farm-map/plans/${id}/copy`),
+  cancelPlan: (id: string) => send("DELETE", `/api/farm-map/plans/${id}`),
 };
 
 // ===== Basemaps =====

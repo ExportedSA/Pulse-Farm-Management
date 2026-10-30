@@ -7,7 +7,20 @@ import * as turf from "@turf/turf";
 import { BASEMAPS, LAYER_RECORD_TYPES, type MapState, type MapLayer } from "@/lib/farm-map";
 import { DEFAULT_CENTER } from "@/components/records/AreaDrawer";
 
-export type Selection = { type: "paddock" | "feature" | "record"; id: string };
+export type Selection = { type: "paddock" | "feature" | "record" | "exclusion" | "zone"; id: string };
+
+// Extra shapes drawn over the map (exclusions, plan zones, gaps, overlaps); selectable when sel is set
+export interface Overlay {
+  key: string;
+  geometry: GeoJSON.Geometry;
+  style: L.PathOptions;
+  label?: string;
+  pickLabel?: string;
+  sel?: Selection;
+  // Only drawn while this layer is shown (calculations never depend on it)
+  layerId?: string;
+  rank: number;
+}
 export type DrawShape = "Polygon" | "Line" | "Marker" | "Circle" | "Rectangle";
 export type Mode =
   | { kind: "view" }
@@ -36,6 +49,7 @@ interface Props {
   editGeometry: GeoJSON.Geometry | null;
   // A shape just drawn, shown until it's saved or discarded
   pending: Drawn | null;
+  overlays: Overlay[];
   editRadius: number | null;
   editRevision: number;
   focus: Focus | null;
@@ -194,15 +208,26 @@ export function FarmMapCanvas(props: Props) {
     }
 
     // Paddocks
+    const zonesLabelled = props.overlays.some(o => o.key.startsWith("zone-") && o.label);
     const paddockLayer = layerByKey.get("paddocks");
     if (paddockLayer && visible[paddockLayer.id]) {
       for (const p of state.paddocks) {
         if (!p.geometry || (editing?.type === "paddock" && editing.id === p.id)) continue;
         const picked = mode.kind === "merge" && (mode.keepId === p.id || mode.picks.includes(p.id));
         const shape = geometryToLeaflet(p.geometry, styleOf(paddockLayer, isSelected("paddock", p.id) || picked)) as L.Polygon;
-        shape.bindTooltip(esc(`${p.paddockNumber != null ? `${p.paddockNumber} ` : ""}${p.name}`), { permanent: true, direction: "center", className: "paddock-label" });
+        // While a plan's zones are labelled, paddock names would sit on top of them
+        if (!zonesLabelled) shape.bindTooltip(esc(`${p.paddockNumber != null ? `${p.paddockNumber} ` : ""}${p.name}`), { permanent: true, direction: "center", className: "paddock-label" });
         group.addLayer(shape);
       }
+    }
+
+    // Exclusions, plan zones, gaps and overlaps
+    for (const o of props.overlays) {
+      if (o.layerId && !visible[o.layerId]) continue;
+      const selected = !!o.sel && isSelected(o.sel.type, o.sel.id);
+      const shape = geometryToLeaflet(o.geometry, { ...o.style, interactive: false, ...(selected ? { color: HIGHLIGHT, weight: ((o.style.weight as number) ?? 2) + 2 } : {}) });
+      if (o.label) (shape as L.Path).bindTooltip(esc(o.label), { permanent: true, direction: "center", className: "paddock-label" });
+      group.addLayer(shape);
     }
 
     // Just drawn, waiting to be named and saved
@@ -219,7 +244,7 @@ export function FarmMapCanvas(props: Props) {
       if (f.name && f.kind === "point") (shape as L.Path).bindTooltip(esc(f.name), { direction: "top" });
       group.addLayer(shape);
     }
-  }, [props.state, props.visible, props.records, props.selection, props.mode, props.pending]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [props.state, props.visible, props.records, props.selection, props.mode, props.pending, props.overlays]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tap to select; where shapes overlap, offer a list to choose from
   useEffect(() => {
@@ -251,6 +276,10 @@ export function FarmMapCanvas(props: Props) {
             hits.push({ sel: { type: "record", id: r.id }, label: `${r.properties.title} · ${r.properties.occurredAt.slice(0, 10)}`, rank: 3 });
           }
         }
+      }
+      for (const o of p.overlays) {
+        if (!o.sel || (o.layerId && !shown(o.layerId)) || !o.geometry.type.includes("Polygon")) continue;
+        if (turf.booleanPointInPolygon(pt, o.geometry as any)) hits.push({ sel: o.sel, label: o.pickLabel ?? o.label ?? o.key, rank: o.rank });
       }
       const paddockLayer = p.state.layers.find(l => l.key === "paddocks");
       if (paddockLayer && shown(paddockLayer.id)) {

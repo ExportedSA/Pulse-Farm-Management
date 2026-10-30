@@ -21,8 +21,13 @@ import {
   type BoundaryVersion, type ImportItem, type MapLayer, type MapState,
 } from "@/lib/farm-map";
 import {
-  FarmMapCanvas, type DrawShape, type Drawn, type Focus, type Measurement, type Mode, type RecordShape, type Selection,
+  FarmMapCanvas, type DrawShape, type Drawn, type Focus, type Measurement, type Mode, type Overlay, type RecordShape, type Selection,
 } from "@/components/farm-map/FarmMapCanvas";
+import {
+  AreaBreakdownPanel, ExclusionEditor, ExclusionStart, ExclusionsSection, NewPlanForm, PlanEditor, PlansSection,
+  exclusionOverlays, exclusionPreview, planOverlays, type ExclusionDraft,
+} from "@/components/farm-map/PlanningPanels";
+import type { RatePlan } from "@/lib/farm-map";
 
 const DRAFT_KEY = "pulse-farm-map-draft";
 const PREFS_KEY = "pulse-farm-map-prefs";
@@ -78,7 +83,14 @@ export default function FarmMapPage() {
   const [saveState, setSaveState] = useState<SaveState>(navigator.onLine ? "saved" : "offline");
   const [search, setSearch] = useState("");
   const [panel, setPanel] = useState<"left" | "right" | null>(null);
-  const [drawTarget, setDrawTarget] = useState<"paddock" | "feature">("paddock");
+  const [drawTarget, setDrawTarget] = useState<"paddock" | "feature" | "exclusion" | "zone">("paddock");
+  // Exclusions and rate plans
+  const [exclusionStart, setExclusionStart] = useState(false);
+  const [exclusionDraft, setExclusionDraft] = useState<ExclusionDraft | null>(null);
+  const [preview, setPreview] = useState<GeoJSON.Geometry | null>(null);
+  const [planId, setPlanId] = useState<string | null>(null);
+  const [newPlan, setNewPlan] = useState(false);
+  const [openPlan, setOpenPlan] = useState<RatePlan | undefined>();
   const [drawFor, setDrawFor] = useState<string | null>(null);
 
   const dirty = !!pending || (!!edit && edit.index > 0);
@@ -117,6 +129,15 @@ export default function FarmMapPage() {
     },
   });
   const records = useMemo(() => (recordData?.features ?? []).map((f: any) => ({ id: f.id ?? f.properties.id, geometry: f.geometry, properties: f.properties })), [recordData]);
+
+  // Exclusions (on their layer), the open plan's zones, gaps and overlaps, and the exclusion being set up
+  const overlays = useMemo<Overlay[]>(() => {
+    if (!state) return [];
+    const out = [...exclusionOverlays(state), ...planOverlays(openPlan)];
+    const draftShape = exclusionDraft ? (preview ?? exclusionPreview(state, exclusionDraft, 0) ?? exclusionDraft.geometry ?? null) : preview;
+    if (draftShape) out.push({ key: "preview", geometry: draftShape, rank: 9, style: { color: "#e03131", weight: 2, dashArray: "6 4", fillColor: "#e03131", fillOpacity: 0.3 } });
+    return out;
+  }, [state, openPlan, exclusionDraft, preview]);
 
   // Frame the farm the first time the map loads
   const framed = useRef(false);
@@ -159,24 +180,40 @@ export default function FarmMapPage() {
     setPending(null);
     setEdit(null);
     setMeasure(null);
+    setExclusionStart(false);
+    setExclusionDraft(null);
+    setPreview(null);
+    setNewPlan(false);
   };
 
-  const startDraw = (target: "paddock" | "feature", shape: DrawShape, forPaddockId?: string) => {
+  const startDraw = (target: "paddock" | "feature" | "exclusion" | "zone", shape: DrawShape, forPaddockId?: string) => {
     if (!canEdit) return toast.error("Only owners and managers can change the farm map");
     if (target === "paddock" && paddocksLocked) return toast.error("The paddocks layer is locked. Unlock it in Layers first.");
-    cancelAll();
+    if (target !== "zone") cancelAll(); else { setMode({ kind: "view" }); setPending(null); setEdit(null); }
     setDrawTarget(target);
     setDrawFor(forPaddockId ?? null);
-    if (!forPaddockId) setSelection(null);
+    if (!forPaddockId && target !== "zone") setSelection(null);
     setMode({ kind: "draw", shape });
     setPanel("right");
   };
 
-  const onDrawn = useCallback((shape: Drawn) => {
+  const onDrawn = useCallback(async (shape: Drawn) => {
     setMode({ kind: "view" });
-    const target = shape.kind === "polygon" ? drawTarget : "feature";
+    if (drawTarget === "exclusion") {
+      setExclusionStart(false);
+      setExclusionDraft({ sourceKind: shape.kind === "polygon" ? "area" : "around", geometry: shape.geometry });
+      return;
+    }
+    if (drawTarget === "zone" && planId) {
+      if (shape.kind !== "polygon") return toast.error("A zone needs to be a closed area");
+      const last = openPlan?.zones[openPlan.zones.length - 1];
+      await run(() => farmMap.addZone(planId, { geometry: shape.geometry, productName: last?.productName ?? null, productId: last?.productId ?? null, rateUnit: last?.rateUnit }), "Zone added. Set its rate.");
+      await queryClient.invalidateQueries({ queryKey: ["/api/farm-map/plans", planId] });
+      return;
+    }
+    const target = shape.kind === "polygon" && (drawTarget === "paddock" || drawTarget === "feature") ? drawTarget : "feature";
     setPending({ ...shape, target, forPaddockId: target === "paddock" ? drawFor ?? undefined : undefined });
-  }, [drawTarget, drawFor]);
+  }, [drawTarget, drawFor, planId, openPlan]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startEdit = (target: Selection) => {
     if (!state || !canEdit) return;
@@ -341,6 +378,10 @@ export default function FarmMapPage() {
             mapView={mapView} basemap={basemap}
             onApplyView={v => { setBasemap(v.basemap); setVisible(prev => ({ ...prev, ...v.layers })); setFocus({ rev: Date.now(), lat: v.lat, lng: v.lng, zoom: v.zoom }); }}
             run={run}
+            onSelectExclusion={id => { cancelAll(); setPlanId(null); onPick({ type: "exclusion", id }); goTo(state.exclusions.find(e => e.id === id)?.geometry); }}
+            onAddExclusion={() => { if (!canEdit) return; cancelAll(); setPlanId(null); setSelection(null); setExclusionStart(true); setPanel("right"); }}
+            onOpenPlan={id => { cancelAll(); setPlanId(id); setPanel("right"); }}
+            onNewPlan={() => { cancelAll(); setPlanId(null); setNewPlan(true); setPanel("right"); }}
           />
         </aside>
 
@@ -350,6 +391,7 @@ export default function FarmMapPage() {
             state={state} visible={visible} records={records} basemap={basemap} selection={selection} mode={mode}
             editGeometry={edit ? edit.history[edit.index].g : null}
             pending={pending}
+            overlays={overlays}
             editRadius={edit ? edit.history[edit.index].r : null}
             editRevision={editRevision} focus={focus}
             onPick={onPick} onDrawn={onDrawn} onEditChange={onEditChange} onMeasure={setMeasure}
@@ -380,7 +422,8 @@ export default function FarmMapPage() {
           </div>
           {(mode.kind === "draw" || mode.kind === "split") && (
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[500] rounded-md bg-background/95 px-3 py-2 text-sm shadow">
-              {mode.kind === "split" ? "Draw a line across the paddock, from outside one edge to outside the other. Tap the last point again to finish."
+              {mode.kind === "draw" && drawTarget === "zone" ? "Draw the zone. Corners snap to the paddock edge and other zones. Tap the first corner to finish."
+                : mode.kind === "split" ? "Draw a line across the paddock, from outside one edge to outside the other. Tap the last point again to finish."
                 : mode.shape === "Polygon" ? "Tap each corner. Tap the first corner to close the shape. Corners snap to nearby paddocks."
                 : mode.shape === "Line" ? "Tap each point along the line. Tap the last point again to finish."
                 : mode.shape === "Circle" ? "Tap the centre, then drag out the radius."
@@ -395,7 +438,7 @@ export default function FarmMapPage() {
         {/* Right panel: what's selected, being drawn, edited or measured */}
         <aside className={cn("bg-background border-l overflow-y-auto z-[600] p-3 space-y-3",
           "absolute inset-x-0 bottom-0 max-h-[55%] border-t md:static md:max-h-none md:border-t-0",
-          panel === "right" || pending || edit || mode.kind !== "view" ? "block" : "hidden md:block")}>
+          panel === "right" || pending || edit || mode.kind !== "view" || exclusionStart || exclusionDraft || planId || newPlan ? "block" : "hidden md:block")}>
           <button className="md:hidden absolute right-2 top-2" onClick={() => setPanel(null)} aria-label="Close panel"><X className="h-4 w-4" /></button>
 
           {pending ? (
@@ -450,6 +493,25 @@ export default function FarmMapPage() {
                 <Button variant="outline" onClick={cancelAll}>Cancel</Button>
               </div>
             </div>
+          ) : exclusionStart ? (
+            <ExclusionStart state={state} onCancel={cancelAll}
+              onDraw={shape => startDraw("exclusion", shape)}
+              onPick={d => { setExclusionStart(false); setExclusionDraft(d); }} />
+          ) : exclusionDraft ? (
+            <ExclusionEditor key={JSON.stringify(exclusionDraft).slice(0, 80)} state={state} draft={exclusionDraft} canEdit={canEdit} run={run}
+              onPreview={setPreview} onDone={() => { setExclusionDraft(null); setPreview(null); }} />
+          ) : newPlan ? (
+            <NewPlanForm state={state} selectedPaddockId={selectedPaddock?.id} run={run}
+              onCreated={id => { setNewPlan(false); setPlanId(id); }} onCancel={() => setNewPlan(false)} />
+          ) : planId ? (
+            <PlanEditor planId={planId} state={state} canEdit={canEdit} run={run} onPlan={setOpenPlan}
+              selectedZoneId={selection?.type === "zone" ? selection.id : undefined}
+              onDrawZone={() => startDraw("zone", "Polygon")}
+              onClose={() => { setPlanId(null); setOpenPlan(undefined); }}
+              onOpenPlan={id => setPlanId(id)} />
+          ) : selection?.type === "exclusion" && state.exclusions.find(e => e.id === selection.id) ? (
+            <ExclusionEditor key={selection.id} state={state} exclusion={state.exclusions.find(e => e.id === selection.id)} canEdit={canEdit} run={run}
+              onPreview={setPreview} onDone={() => { setSelection(null); setPreview(null); }} />
           ) : selectedPaddock ? (
             <PaddockPanel
               paddock={selectedPaddock} canEdit={canEdit} locked={paddocksLocked} range={range}
@@ -540,7 +602,7 @@ function PendingForm({ pending, layers, canEdit, onSave, onDiscard }: {
   onSave: (v: { name: string; paddockNumber: number | null; layerId?: string; notes?: string }) => void; onDiscard: () => void;
 }) {
   const asPaddock = pending.target === "paddock" && pending.kind === "polygon";
-  const usable = layers.filter(l => l.key !== "paddocks" && !l.locked);
+  const usable = layers.filter(l => !["paddocks", "exclusions", "variable_rate"].includes(l.key) && !l.locked);
   const [name, setName] = useState("");
   const [num, setNum] = useState("");
   const [layerId, setLayerId] = useState(() => usable.find(l => l.key === (pending.kind === "polygon" ? "fertiliser" : "features"))?.id ?? usable[0]?.id ?? "");
@@ -639,6 +701,7 @@ function PaddockPanel({ paddock, canEdit, locked, range, onEdit, onSplit, onMerg
           {canEdit && <Button size="sm" variant="ghost" onClick={() => setRenaming(true)} aria-label="Rename"><Pencil className="h-4 w-4" /></Button>}
         </div>
       )}
+      <AreaBreakdownPanel pastureId={paddock.id} hasBoundary={!!paddock.geometry} />
       <dl className="grid grid-cols-2 gap-1 text-sm">
         <dt className="text-muted-foreground">Mapped area</dt><dd className="font-semibold tabular-nums">{fmtHa(paddock.areaHa)}</dd>
         <dt className="text-muted-foreground">Recorded area</dt><dd className="tabular-nums">{fmtHa(paddock.recordedAreaHa)}</dd>
@@ -744,16 +807,28 @@ function FeaturePanel({ feature, layers, canEdit, onEdit, run, onDeleted }: {
   );
 }
 
-function LeftPanel({ state, canEdit, visible, setVisible, onSelectPaddock, mapView, basemap, onApplyView, run }: {
+function LeftPanel({ state, canEdit, visible, setVisible, onSelectPaddock, mapView, basemap, onApplyView, run, onSelectExclusion, onAddExclusion, onOpenPlan, onNewPlan }: {
   state: MapState; canEdit: boolean; visible: Record<string, boolean>; setVisible: (fn: (v: Record<string, boolean>) => Record<string, boolean>) => void;
   onSelectPaddock: (id: string) => void; mapView: { lat: number; lng: number; zoom: number } | null; basemap: string;
   onApplyView: (v: MapState["views"][number]) => void; run: <T>(w: () => Promise<T>, s?: string) => Promise<T | undefined>;
+  onSelectExclusion: (id: string) => void; onAddExclusion: () => void; onOpenPlan: (id: string) => void; onNewPlan: () => void;
 }) {
   const [styling, setStyling] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [newLayer, setNewLayer] = useState("");
   const [filter, setFilter] = useState("");
   const [importing, setImporting] = useState<ImportItem[] | null>(null);
+  const [shownOnly, setShownOnly] = useState(true);
+  // What goes in an export: everything, or only the layers shown now
+  const exportOpts = () => {
+    if (!shownOnly) return undefined;
+    const byKey = (k: string) => state.layers.find(l => l.key === k);
+    return {
+      layers: state.layers.filter(l => visible[l.id]).map(l => l.id),
+      paddocks: !!visible[byKey("paddocks")?.id ?? ""],
+      exclusions: !!visible[byKey("exclusions")?.id ?? ""],
+    };
+  };
   const fileRef = useRef<HTMLInputElement | null>(null);
   const counts = useMemo(() => {
     const c = new Map<string, number>();
@@ -831,6 +906,10 @@ function LeftPanel({ state, canEdit, visible, setVisible, onSelectPaddock, mapVi
         <p className="text-xs text-muted-foreground">Showing and hiding is just for you. Activity layers show records from the dates above.</p>
       </section>
 
+      <ExclusionsSection exclusions={state.exclusions} canEdit={canEdit} onSelect={onSelectExclusion} onAdd={onAddExclusion} />
+
+      <PlansSection plans={state.plans} canEdit={canEdit} onOpen={onOpenPlan} onNew={onNewPlan} />
+
       <section className="space-y-2">
         <h2 className="text-sm font-semibold">Paddocks</h2>
         <Input className="h-8 text-sm" placeholder="Filter paddocks" value={filter} onChange={e => setFilter(e.target.value)} />
@@ -867,9 +946,9 @@ function LeftPanel({ state, canEdit, visible, setVisible, onSelectPaddock, mapVi
       <section className="space-y-2">
         <h2 className="text-sm font-semibold">Import and export</h2>
         <div className="flex flex-wrap gap-1">
-          <Button size="sm" variant="outline" onClick={async () => download(new Blob([JSON.stringify(await farmMap.exportGeoJSON())], { type: "application/geo+json" }), "farm-map.geojson")}><Download className="h-4 w-4 mr-1" />GeoJSON</Button>
-          <Button size="sm" variant="outline" onClick={async () => download(new Blob([toKml(await farmMap.exportGeoJSON(), "Farm map")], { type: "application/vnd.google-earth.kml+xml" }), "farm-map.kml")}><Download className="h-4 w-4 mr-1" />KML</Button>
-          <Button size="sm" variant="outline" onClick={async () => download(await toKmz(await farmMap.exportGeoJSON(), "Farm map"), "farm-map.kmz")}><Download className="h-4 w-4 mr-1" />KMZ</Button>
+          <Button size="sm" variant="outline" onClick={async () => download(new Blob([JSON.stringify(await farmMap.exportGeoJSON(exportOpts()))], { type: "application/geo+json" }), "farm-map.geojson")}><Download className="h-4 w-4 mr-1" />GeoJSON</Button>
+          <Button size="sm" variant="outline" onClick={async () => download(new Blob([toKml(await farmMap.exportGeoJSON(exportOpts()), "Farm map")], { type: "application/vnd.google-earth.kml+xml" }), "farm-map.kml")}><Download className="h-4 w-4 mr-1" />KML</Button>
+          <Button size="sm" variant="outline" onClick={async () => download(await toKmz(await farmMap.exportGeoJSON(exportOpts()), "Farm map"), "farm-map.kmz")}><Download className="h-4 w-4 mr-1" />KMZ</Button>
           {canEdit && (
             <>
               <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()}><Upload className="h-4 w-4 mr-1" />Import</Button>
@@ -882,7 +961,8 @@ function LeftPanel({ state, canEdit, visible, setVisible, onSelectPaddock, mapVi
             </>
           )}
         </div>
-        <p className="text-xs text-muted-foreground">Exports are your own boundaries and shapes, not the aerial imagery.</p>
+        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={shownOnly} onChange={e => setShownOnly(e.target.checked)} />Only the layers shown now</label>
+        <p className="text-xs text-muted-foreground">Exports are your own boundaries, exclusions and shapes, not the aerial imagery.</p>
         {importing && <ImportPanel items={importing} layers={layers} onDone={() => setImporting(null)} run={run} />}
       </section>
     </div>
