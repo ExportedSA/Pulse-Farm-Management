@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { db } from '../db';
 import { pastures } from '@shared/schema';
 import { and, asc, eq, isNull } from 'drizzle-orm';
-import { requireFarm, getFarmId } from '../middleware/auth';
+import { requireFarm, getFarmId, getUserId } from '../middleware/auth';
+import { getFarmRole } from '../domain/farms';
 import { areaHectares, isAreaGeometry, type AreaGeometry } from '@shared/geo';
 import logger from '../config/logger';
 
@@ -52,6 +53,8 @@ router.get('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     if (!z.string().uuid().safeParse(req.params.id).success) return res.status(404).json({ error: 'Paddock not found' });
+    const role = await getFarmRole(getUserId(req)!, getFarmId(req)!);
+    if (role !== 'owner' && role !== 'manager') return res.status(403).json({ error: 'Only owners and managers can map paddocks' });
     const { area, setArea } = z.object({
       area: z.any().refine(v => v === null || isAreaGeometry(v), 'Draw the paddock with at least 3 points'),
       // Also replace the paddock's recorded hectares with the drawn ones

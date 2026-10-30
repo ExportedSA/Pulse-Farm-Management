@@ -4,7 +4,8 @@ import { storage } from "./storage";
 import { pool } from "./db";
 import passport from "passport";
 import { sanitizeUser, sanitizeUsers } from "./auth-utils";
-import { requireAuth, optionalAuth, getFarmId } from "./middleware/auth";
+import { requireAuth, optionalAuth, getFarmId, getUserId } from "./middleware/auth";
+import { getFarmRole } from "./domain/farms";
 import { uploadsMiddleware } from "./middleware/serveUploads";
 import { httpLogger, addRequestContext, logError } from "./middleware/logging";
 import logger from "./config/logger";
@@ -916,13 +917,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/pastures/search", async (req, res) => {
+  // Paddocks belong to a farm: everyone on it can look and add health readings;
+  // owners and managers add, change and remove paddocks
+  async function farmPasture(req: any, id: string) {
+    if (!z.string().uuid().safeParse(id).success) return undefined;
+    const pasture = await storage.getPasture(id);
+    return pasture && pasture.farmId === getFarmId(req) && !pasture.deletedAt ? pasture : undefined;
+  }
+  async function canManagePastures(req: any): Promise<boolean> {
+    const role = await getFarmRole(getUserId(req)!, getFarmId(req)!);
+    return role === "owner" || role === "manager";
+  }
+  const pastureFields = (body: unknown) => {
+    const { farmId: _farmId, id: _id, deletedAt: _deleted, ...rest } = (body ?? {}) as Record<string, unknown>;
+    return rest;
+  };
+
+  app.get("/api/pastures/search", requireAuth, async (req, res) => {
     try {
       const query = req.query.q as string;
       if (!query) {
         return res.status(400).json({ error: "Search query required" });
       }
-      const pastures = await storage.searchPastures(query);
+      const farmId = getFarmId(req);
+      const pastures = (await storage.searchPastures(query)).filter(p => p.farmId === farmId);
       res.json(pastures);
     } catch (error) {
       console.error("Failed to search pastures:", error);
@@ -930,9 +948,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/pastures/:id", async (req, res) => {
+  app.get("/api/pastures/:id", requireAuth, async (req, res) => {
     try {
-      const pasture = await storage.getPasture(req.params.id);
+      const pasture = await farmPasture(req, req.params.id);
       if (!pasture) {
         return res.status(404).json({ error: "Pasture not found" });
       }
@@ -943,9 +961,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/pastures", async (req, res) => {
+  app.post("/api/pastures", requireAuth, async (req, res) => {
     try {
-      const data = insertPastureSchema.parse(req.body);
+      if (!getFarmId(req)) return res.status(400).json({ error: "Choose a farm first" });
+      if (!(await canManagePastures(req))) {
+        return res.status(403).json({ error: "Only owners and managers can add paddocks" });
+      }
+      // Always on the signed-in farm, whatever the request says
+      const data = insertPastureSchema.parse({ ...pastureFields(req.body), farmId: getFarmId(req) });
       const pasture = await storage.createPasture(data);
       res.status(201).json(pasture);
     } catch (error: any) {
@@ -957,15 +980,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/pastures/:id", async (req, res) => {
-    if (!req.isAuthenticated()) {
-      return res.status(401).json({ error: "Authentication required" });
-    }
-    
+  app.put("/api/pastures/:id", requireAuth, async (req, res) => {
     try {
-      const data = insertPastureSchema.partial().parse(req.body);
-      const userId = (req.user as any).id; // Extract user ID for auto-snapshot
-      const pasture = await storage.updatePasture(req.params.id, data, userId);
+      const existing = await farmPasture(req, req.params.id);
+      if (!existing) {
+        return res.status(404).json({ error: "Pasture not found" });
+      }
+      if (!(await canManagePastures(req))) {
+        return res.status(403).json({ error: "Only owners and managers can change paddocks" });
+      }
+      const data = insertPastureSchema.partial().parse(pastureFields(req.body));
+      const pasture = await storage.updatePasture(existing.id, data, getUserId(req)); // user for the auto health snapshot
       if (!pasture) {
         return res.status(404).json({ error: "Pasture not found" });
       }
@@ -979,13 +1004,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/pastures/:id", async (req, res) => {
+  app.delete("/api/pastures/:id", requireAuth, async (req, res) => {
     try {
-      const existing = await storage.getPasture(req.params.id);
+      const existing = await farmPasture(req, req.params.id);
       if (!existing) {
         return res.status(404).json({ error: "Pasture not found" });
       }
-      await storage.deletePasture(req.params.id);
+      if (!(await canManagePastures(req))) {
+        return res.status(403).json({ error: "Only owners and managers can remove paddocks" });
+      }
+      await storage.deletePasture(existing.id);
       res.status(204).send();
     } catch (error) {
       console.error("Failed to delete pasture:", error);
@@ -995,9 +1023,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ===== PASTURE HEALTH RECORDS (Phase 5.3) =====
 
-  app.get("/api/pastures/:id/health-records", async (req, res) => {
+  app.get("/api/pastures/:id/health-records", requireAuth, async (req, res) => {
     try {
-      const records = await storage.getPastureHealthRecords(req.params.id);
+      const pasture = await farmPasture(req, req.params.id);
+      if (!pasture) {
+        return res.status(404).json({ error: "Pasture not found" });
+      }
+      const records = await storage.getPastureHealthRecords(pasture.id);
       res.json(records);
     } catch (error) {
       console.error("Failed to fetch pasture health records:", error);
@@ -1005,11 +1037,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/pastures/:id/health-records", async (req, res) => {
+  app.post("/api/pastures/:id/health-records", requireAuth, async (req, res) => {
     try {
+      const pasture = await farmPasture(req, req.params.id);
+      if (!pasture) {
+        return res.status(404).json({ error: "Pasture not found" });
+      }
+      const role = await getFarmRole(getUserId(req)!, getFarmId(req)!);
+      if (!role || role === "viewer") {
+        return res.status(403).json({ error: "Viewers can't add health readings" });
+      }
       const data = insertPastureHealthRecordSchema.parse({
         ...req.body,
-        pastureId: req.params.id,
+        pastureId: pasture.id,
+        recordedBy: getUserId(req),
       });
       const record = await storage.createPastureHealthRecord(data);
       res.status(201).json(record);
