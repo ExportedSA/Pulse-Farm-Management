@@ -83,6 +83,8 @@ import AnimalDetailPage from "@/pages/AnimalDetailPage";
 import TaskListPage from "@/pages/TaskListPage";
 import EquipmentListPage from "@/pages/EquipmentListPage";
 import EquipmentDetailPage from "@/pages/EquipmentDetailPage";
+import EquipmentMaintenancePage from "@/pages/EquipmentMaintenancePage";
+import EquipmentServiceHistoryPage from "@/pages/EquipmentServiceHistoryPage";
 import CompliancePackPage from "@/pages/compliance-pack-page";
 import TimesheetReportPage from "@/pages/TimesheetReportPage";
 import SafetyReportPage from "@/pages/SafetyReportPage";
@@ -129,6 +131,7 @@ function Router() {
         <Route path="/app/jobs" component={JobsPage} />
         <Route path="/app/roster" component={RosterSchedulingPage} />
         <Route path="/app/timesheets" component={TimesheetsPage} />
+        <Route path="/app/calendar" component={FarmCalendarPage} />
         <Route path="/app/compliance" component={CompliancePage} />
         <Route path="/app/animals" component={AnimalsList} />
         <Route path="/app/kanban" component={KanbanPage} />
@@ -181,6 +184,8 @@ function Router() {
         <Route path="/app/tasks" component={TaskListPage} />
         <Route path="/app/records" component={RecordsPage} />
         <Route path="/app/equipment" component={EquipmentListPage} />
+        <Route path="/app/equipment/maintenance" component={EquipmentMaintenancePage} />
+        <Route path="/app/equipment/history" component={EquipmentServiceHistoryPage} />
         <Route path="/app/equipment/:id" component={EquipmentDetailPage} />
         <Route path="/app/compliance-overview" component={CompliancePackPage} />
         <Route path="/app/reports/timesheets" component={TimesheetReportPage} />
