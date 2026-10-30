@@ -33,7 +33,7 @@ interface RecordDialogProps {
   onOpenChange: (open: boolean) => void;
   initialType?: RecordType;
   // Starting values for a new record, e.g. the month a missing monthly check is for
-  preset?: { details?: Record<string, any>; title?: string };
+  preset?: { details?: Record<string, any>; title?: string; pastureIds?: string[] };
   // Open an existing record to finish or correct it
   editRecordId?: string | null;
 }
@@ -155,7 +155,7 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray", preset
     setType(initialType);
     setTitle(preset?.title ?? "");
     setOccurredAt(nowLocal());
-    setPastureIds([]);
+    setPastureIds(preset?.pastureIds ?? []);
     setArea(null);
     setShowMap(recordTypeDef(initialType).mapped);
     setDetails({ ...initialDetails(initialType), ...(preset?.details ?? {}) });

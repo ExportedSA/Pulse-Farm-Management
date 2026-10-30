@@ -12,7 +12,7 @@ export const NEW_RECORD_EVENT = "pulse:new-record";
 // ...or open an existing record to finish it: { detail: { id } }
 export const EDIT_RECORD_EVENT = "pulse:edit-record";
 
-export interface NewRecordDetail { type?: RecordType; details?: Record<string, any>; title?: string }
+export interface NewRecordDetail { type?: RecordType; details?: Record<string, any>; title?: string; pastureIds?: string[] }
 
 export const openNewRecord = (detail: NewRecordDetail) =>
   window.dispatchEvent(new CustomEvent(NEW_RECORD_EVENT, { detail }));
@@ -34,7 +34,7 @@ export function RecordFab() {
     const onNew = (e: Event) => {
       const detail = (e as CustomEvent<NewRecordDetail>).detail;
       if (detail?.type) setType(detail.type);
-      setPreset(detail?.details || detail?.title ? detail : undefined);
+      setPreset(detail?.details || detail?.title || detail?.pastureIds?.length ? detail : undefined);
       setEditId(null);
       setOpen(true);
     };

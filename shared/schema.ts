@@ -1339,6 +1339,8 @@ export const farmRecords = pgTable('farm_records', {
   area: jsonb('area').$type<{ type: 'Polygon' | 'MultiPolygon'; coordinates: any }>(),
   areaHa: numeric('area_ha', { precision: 10, scale: 2 }),
   details: jsonb('details').$type<Record<string, any>>().default(sql`'{}'::jsonb`).notNull(),
+  // The paddock areas (and boundary versions) that applied when the record was saved
+  paddockSnapshot: jsonb('paddock_snapshot').$type<Record<string, { name: string; areaHa: number | null; source: string; boundaryId: string | null }>>(),
   recordedBy: uuid('recorded_by').references(() => users.id).notNull(),
   // Set by the device that captured it, so a record queued offline is only saved once
   clientId: varchar('client_id', { length: 64 }),

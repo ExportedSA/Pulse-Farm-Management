@@ -1,4 +1,4 @@
-import { Home, Syringe, Pill, Users, Sprout, Heart, Settings, BarChart3, ChevronDown, MessageSquare, Shield, FileText, Briefcase, Wrench, Scale, ChevronRight, GitFork, Rocket, Stethoscope, Baby, ClipboardList, Clock, Calendar, HardHat } from "lucide-react";
+import { Home, Syringe, Pill, Users, Sprout, Heart, Settings, BarChart3, ChevronDown, MessageSquare, Shield, FileText, Briefcase, Wrench, Scale, ChevronRight, GitFork, Rocket, Stethoscope, Baby, ClipboardList, Clock, Calendar, HardHat, Map as MapIcon } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useState, ComponentProps } from "react";
 import { useChatContext } from "@/contexts/ChatContext";
@@ -31,6 +31,7 @@ import {
 const menuItems = [
   // Primary navigation - always visible
   { title: "Overview", url: "/app", icon: Home },
+  { title: "Farm map", url: "/app/farm-map", icon: MapIcon },
   { title: "Records", url: "/app/records", icon: ClipboardList },
   { title: "Compliance", url: "/app/compliance-overview", icon: Shield },
   

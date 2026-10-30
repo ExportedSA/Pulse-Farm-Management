@@ -4,6 +4,7 @@ import { and, desc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { setTags, tagsFor, entityIdsWithTags } from './tags';
 import { attachmentsFor, toApiAttachment } from './attachments';
 import { areaHectares, type AreaGeometry } from '@shared/geo';
+import { paddockSnapshot } from './farm-map';
 
 export class RecordValidationError extends Error {}
 
@@ -55,6 +56,8 @@ export async function createRecord(
   }
 
   const pastureIds = await checkPastures(farmId, input.pastureIds ?? []);
+  // Keep the paddock areas as they are today, so later boundary changes don't rewrite this record
+  const snapshot = await paddockSnapshot(farmId, pastureIds);
   const [record] = await db
     .insert(farmRecords)
     .values({
@@ -69,6 +72,7 @@ export async function createRecord(
       area: input.area ?? null,
       areaHa: input.area ? areaHectares(input.area).toFixed(2) : null,
       details: input.details ?? {},
+      paddockSnapshot: snapshot,
       recordedBy: userId,
       clientId: clientId ?? null,
     })
@@ -106,7 +110,10 @@ export async function updateRecord(farmId: string, id: string, input: Partial<Re
     updates.area = area;
     updates.areaHa = area ? areaHectares(area).toFixed(2) : null;
   }
-  if (pastureIds !== undefined) updates.pastureIds = await checkPastures(farmId, pastureIds);
+  if (pastureIds !== undefined) {
+    updates.pastureIds = await checkPastures(farmId, pastureIds);
+    updates.paddockSnapshot = await paddockSnapshot(farmId, updates.pastureIds);
+  }
   if (latitude !== undefined) updates.latitude = latitude?.toString() ?? null;
   if (longitude !== undefined) updates.longitude = longitude?.toString() ?? null;
 

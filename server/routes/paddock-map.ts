@@ -7,6 +7,7 @@ import { requireFarm, getFarmId, getUserId } from '../middleware/auth';
 import { getFarmRole } from '../domain/farms';
 import { areaHectares, isAreaGeometry, type AreaGeometry } from '@shared/geo';
 import logger from '../config/logger';
+import { MapError, setPaddockBoundary, clearPaddockBoundary } from '../domain/farm-map';
 
 // /api/paddock-map - paddock outlines drawn on the satellite map, for every map in Pulse
 const router = Router();
@@ -60,22 +61,18 @@ router.put('/:id', async (req, res) => {
       // Also replace the paddock's recorded hectares with the drawn ones
       setArea: z.boolean().optional(),
     }).parse(req.body);
-    const center = area ? outlineCenter(area) : null;
-    const drawnHa = area ? areaHectares(area) : null;
-    const [row] = await db
-      .update(pastures)
-      .set({
-        boundaries: area,
-        centerLatitude: center ? String(center[0]) : null,
-        centerLongitude: center ? String(center[1]) : null,
-        ...(setArea && drawnHa != null ? { area: Math.max(1, Math.round(drawnHa)) } : {}),
-        updatedAt: new Date(),
-      })
-      .where(and(eq(pastures.id, req.params.id), eq(pastures.farmId, getFarmId(req)!), isNull(pastures.deletedAt)))
-      .returning({ id: pastures.id, name: pastures.name, area: pastures.area });
-    if (!row) return res.status(404).json({ error: 'Paddock not found' });
-    res.json({ ...row, drawnHa, center });
+    // Boundaries are versioned (see farm-map): the old outline is kept for history
+    const farmId = getFarmId(req)!;
+    const userId = getUserId(req)!;
+    if (!area) {
+      await clearPaddockBoundary(farmId, userId, req.params.id);
+      return res.json({ id: req.params.id, drawnHa: null, center: null });
+    }
+    const saved = await setPaddockBoundary(farmId, userId, req.params.id, area, 'Drawn on Pastures', { updateRecordedArea: !!setArea });
+    const [row] = await db.select({ id: pastures.id, name: pastures.name, area: pastures.area }).from(pastures).where(eq(pastures.id, req.params.id));
+    res.json({ ...row, drawnHa: Math.round(saved.areaHa * 100) / 100, center: outlineCenter(area) });
   } catch (error) {
+    if (error instanceof MapError) return res.status(error.status).json({ error: error.message });
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0]?.message ?? 'Invalid outline' });
     logger.error({ err: error }, 'Failed to save paddock outline');
     res.status(500).json({ error: 'Failed to save paddock outline' });

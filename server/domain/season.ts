@@ -41,7 +41,8 @@ const toTonnes = (amount: number | undefined, unit: unknown): number | undefined
  */
 function recordHectares(record: FarmRecord, paddockHa: Map<string, number>): number | undefined {
   if (record.areaHa != null) return Number(record.areaHa);
-  const total = record.pastureIds.reduce((sum, id) => sum + (paddockHa.get(id) ?? 0), 0);
+  // The paddock areas saved with the record win over today's (boundaries may have changed since)
+  const total = record.pastureIds.reduce((sum, id) => sum + (record.paddockSnapshot?.[id]?.areaHa ?? paddockHa.get(id) ?? 0), 0);
   return total > 0 ? total : undefined;
 }
 
