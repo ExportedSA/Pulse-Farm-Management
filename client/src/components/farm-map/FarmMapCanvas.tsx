@@ -7,7 +7,7 @@ import * as turf from "@turf/turf";
 import { BASEMAPS, LAYER_RECORD_TYPES, type MapState, type MapLayer } from "@/lib/farm-map";
 import { DEFAULT_CENTER } from "@/components/records/AreaDrawer";
 
-export type Selection = { type: "paddock" | "feature" | "record" | "exclusion" | "zone"; id: string };
+export type Selection = { type: "paddock" | "feature" | "record" | "exclusion" | "zone" | "job"; id: string };
 
 // Extra shapes drawn over the map (exclusions, plan zones, gaps, overlaps); selectable when sel is set
 export interface Overlay {
@@ -28,12 +28,14 @@ export type Mode =
   | { kind: "edit"; target: Selection }
   | { kind: "measure" }
   | { kind: "split"; paddockId: string }
-  | { kind: "merge"; keepId: string; picks: string[] };
+  | { kind: "merge"; keepId: string; picks: string[] }
+  // Tapping picks paddocks only (choosing paddocks for a job)
+  | { kind: "pick" };
 
 export interface RecordShape {
   id: string;
   geometry: GeoJSON.Geometry;
-  properties: { type: string; title: string; label: string; occurredAt: string; withholdingActive: boolean };
+  properties: { type: string; title: string; label: string; occurredAt: string; withholdingActive: boolean; applicationId?: string | null };
 }
 export interface Drawn { geometry: GeoJSON.Geometry; kind: "point" | "line" | "polygon" | "circle"; radiusM?: number }
 export interface Measurement { lengthM: number; areaHa: number | null; points: number }
@@ -252,7 +254,7 @@ export function FarmMapCanvas(props: Props) {
     if (!map) return;
     const onClick = (e: L.LeafletMouseEvent) => {
       const p = propsRef.current;
-      if (p.mode.kind !== "view" && p.mode.kind !== "merge") return;
+      if (p.mode.kind !== "view" && p.mode.kind !== "merge" && p.mode.kind !== "pick") return;
       const pt = turf.point([e.latlng.lng, e.latlng.lat]);
       const tol = tapTolerance(map, e.latlng.lat);
       const hits: { sel: Selection; label: string; rank: number }[] = [];
@@ -288,7 +290,7 @@ export function FarmMapCanvas(props: Props) {
         }
       }
       // In merge mode only paddocks can be picked
-      const pick = p.mode.kind === "merge" ? hits.filter(h => h.sel.type === "paddock") : hits;
+      const pick = p.mode.kind === "merge" || p.mode.kind === "pick" ? hits.filter(h => h.sel.type === "paddock") : hits;
       pick.sort((a, b) => a.rank - b.rank);
       if (pick.length <= 1) {
         p.onPick(pick[0]?.sel ?? null);

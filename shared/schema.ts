@@ -1369,7 +1369,7 @@ export const tags = pgTable('tags', {
 export type Tag = typeof tags.$inferSelect;
 
 // Kinds of thing a tag or attachment can belong to
-export const TAGGABLE_TYPES = ['record', 'job', 'task', 'animal', 'chat_message', 'attachment'] as const;
+export const TAGGABLE_TYPES = ['record', 'job', 'task', 'animal', 'chat_message', 'attachment', 'docket'] as const;
 export type TaggableType = typeof TAGGABLE_TYPES[number];
 
 export const taggings = pgTable('taggings', {

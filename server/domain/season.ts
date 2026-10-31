@@ -1,6 +1,6 @@
 import { db } from '../db';
 import { farms, farmRecords, pastures, inputProducts, type FarmRecord } from '@shared/schema';
-import { and, asc, eq, gte, inArray, isNull, lt, or } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 
 // Synthetic nitrogen cap for pastoral land (kg N/ha/year)
 export const SYNTHETIC_N_CAP = 190;
@@ -124,6 +124,11 @@ export async function seasonSummary(farmId: string, season: string) {
           incomplete.push({ id: r.id, title: r.title, reason: 'needs a rate and paddocks/area, or the amount applied' });
           break;
         }
+        // A product whose analysis isn't verified: its nutrients are unknown, not zero
+        if (d.analysisUnverified) {
+          incomplete.push({ id: r.id, title: r.title, reason: "product analysis isn't verified, so its nutrients aren't counted" });
+          break;
+        }
         const n = kg * nPct / 100;
         if (isEffluent) nutrients.effluentN += n; else nutrients.syntheticN += n;
         nutrients.p += kg * (isEffluent ? pct('pPercent', effluentDefault?.pPercent) : pct('pPercent')) / 100;
@@ -201,21 +206,27 @@ export async function seasonSummary(farmId: string, season: string) {
  * The shared product library plus the farm's own products
  */
 export async function listProducts(farmId: string, kind?: string) {
-  const conditions = [or(isNull(inputProducts.farmId), eq(inputProducts.farmId, farmId))];
-  if (kind) conditions.push(eq(inputProducts.kind, kind));
-  const rows = await db.select().from(inputProducts).where(and(...conditions)).orderBy(asc(inputProducts.name));
+  // The catalogue (verified and the farm's own), without archived products
+  const result: any = await db.execute(sql`
+    SELECT * FROM input_products
+    WHERE (farm_id IS NULL OR farm_id = ${farmId}) AND archived_at IS NULL
+      AND (${kind ?? null}::text IS NULL OR kind = ${kind ?? null})
+    ORDER BY name`);
+  const rows: any[] = result.rows ?? result;
   const pct = (v: string | null) => (v == null ? null : Number(v));
   return rows.map(p => ({
     id: p.id,
     kind: p.kind,
-    name: p.name,
-    shared: p.farmId === null,
-    nPercent: pct(p.nPercent), pPercent: pct(p.pPercent), kPercent: pct(p.kPercent),
-    sPercent: pct(p.sPercent), mgPercent: pct(p.mgPercent), caPercent: pct(p.caPercent),
-    activeIngredient: p.activeIngredient,
-    defaultRate: pct(p.defaultRate),
-    rateUnit: p.rateUnit,
-    withholdingDays: p.withholdingDays,
+    name: p.supplier ? `${p.name}` : p.name,
+    supplier: p.supplier,
+    verification: p.verification,
+    shared: p.farm_id === null,
+    nPercent: pct(p.n_percent), pPercent: pct(p.p_percent), kPercent: pct(p.k_percent),
+    sPercent: pct(p.s_percent), mgPercent: pct(p.mg_percent), caPercent: pct(p.ca_percent),
+    activeIngredient: p.active_ingredient,
+    defaultRate: pct(p.default_rate),
+    rateUnit: p.rate_unit,
+    withholdingDays: p.withholding_days,
     notes: p.notes,
   }));
 }

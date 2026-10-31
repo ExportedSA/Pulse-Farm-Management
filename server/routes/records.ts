@@ -13,6 +13,7 @@ import { saveAttachments, toApiAttachment } from '../domain/attachments';
 import { seasonSummary, seasonOf, listProducts } from '../domain/season';
 import { db } from '../db';
 import { inputProducts } from '@shared/schema';
+import { sql } from 'drizzle-orm';
 import {
   createRecord,
   getRecord,
@@ -192,6 +193,7 @@ router.get('/map', async (req, res) => {
             rateUnit: d.rateUnit ?? null,
             withholdingUntil: withholdingUntil?.toISOString() ?? null,
             withholdingActive: withholdingUntil ? withholdingUntil.getTime() > now : false,
+            applicationId: d.applicationId ?? null,
           },
         };
       }),
@@ -250,6 +252,8 @@ router.post('/products', async (req, res) => {
       withholdingDays: data.withholdingDays ?? null,
       notes: data.notes ?? null,
     }).returning();
+    // Products a farm adds are its own, marked farm-entered until their label is checked
+    await db.execute(sql`UPDATE input_products SET verification = 'farm_entered', created_by = ${getUserId(req)} WHERE id = ${product.id}`);
     res.status(201).json({ id: product.id, name: product.name, kind: product.kind });
   } catch (error) {
     handleError(res, error, 'Failed to save product');

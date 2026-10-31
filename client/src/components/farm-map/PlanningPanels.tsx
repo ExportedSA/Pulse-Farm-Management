@@ -378,9 +378,11 @@ export function planOverlays(plan: RatePlan | undefined): Overlay[] {
   return out;
 }
 
-export function PlanEditor({ planId, state, canEdit, run, onDrawZone, onClose, onOpenPlan, onPlan, selectedZoneId }: {
+export function PlanEditor({ planId, state, canEdit, run, onDrawZone, onClose, onOpenPlan, onPlan, selectedZoneId, onCreateJob }: {
   planId: string; state: MapState; canEdit: boolean; run: Run; onDrawZone: () => void; onClose: () => void;
   onOpenPlan: (id: string) => void; onPlan: (p: RatePlan | undefined) => void; selectedZoneId?: string;
+  // Approved fertiliser plans become a job: one line per zone at its rate
+  onCreateJob?: (p: RatePlan) => void;
 }) {
   const queryClient = useQueryClient();
   const { data: plan, error } = useQuery({ queryKey: ["/api/farm-map/plans", planId], queryFn: () => farmMap.plan(planId) });
@@ -470,6 +472,7 @@ export function PlanEditor({ planId, state, canEdit, run, onDrawZone, onClose, o
                 onClick={() => act(() => farmMap.approvePlan(plan.id, acceptGaps), "Plan approved")}><CheckCircle2 className="h-4 w-4 mr-1" />Approve</Button>
             </>
           )}
+          {plan.status === "approved" && plan.activity === "fertiliser" && onCreateJob && <Button size="sm" className="bg-pulse-forest hover:bg-pulse-forest-dark" onClick={() => onCreateJob(plan)}><Plus className="h-4 w-4 mr-1" />Create job</Button>}
           <Button size="sm" variant="outline" onClick={async () => { const r = await run(() => farmMap.copyPlan(plan.id), "Copied to a new draft"); if (r) onOpenPlan(r.id); }}><Copy className="h-4 w-4 mr-1" />Copy</Button>
           {plan.status !== "cancelled" && <Button size="sm" variant="ghost" className="text-red-700" onClick={async () => {
             if (!window.confirm(`Cancel "${plan.name}"?`)) return;

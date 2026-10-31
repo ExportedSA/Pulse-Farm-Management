@@ -28,6 +28,8 @@ import {
   exclusionOverlays, exclusionPreview, planOverlays, type ExclusionDraft,
 } from "@/components/farm-map/PlanningPanels";
 import type { RatePlan } from "@/lib/farm-map";
+import { JobView, JobsSection, NewJobForm, jobOverlays, JOBS_KEY, type JobDraft } from "@/components/farm-map/JobPanels";
+import { jobsApi, type JobSummary } from "@/lib/jobs";
 
 const DRAFT_KEY = "pulse-farm-map-draft";
 const PREFS_KEY = "pulse-farm-map-prefs";
@@ -55,6 +57,7 @@ export default function FarmMapPage() {
   const queryClient = useQueryClient();
   const { currentFarm } = useFarm();
   const canEdit = currentFarm?.role === "owner" || currentFarm?.role === "manager";
+  const canRecord = !!currentFarm?.role && currentFarm.role !== "viewer";
   const { data: state, isLoading, error } = useQuery({ queryKey: FARM_MAP_KEY, queryFn: farmMap.state });
 
   // Per-person settings kept on this device: basemap and which layers are shown
@@ -83,7 +86,7 @@ export default function FarmMapPage() {
   const [saveState, setSaveState] = useState<SaveState>(navigator.onLine ? "saved" : "offline");
   const [search, setSearch] = useState("");
   const [panel, setPanel] = useState<"left" | "right" | null>(null);
-  const [drawTarget, setDrawTarget] = useState<"paddock" | "feature" | "exclusion" | "zone">("paddock");
+  const [drawTarget, setDrawTarget] = useState<"paddock" | "feature" | "exclusion" | "zone" | "job">("paddock");
   // Exclusions and rate plans
   const [exclusionStart, setExclusionStart] = useState(false);
   const [exclusionDraft, setExclusionDraft] = useState<ExclusionDraft | null>(null);
@@ -92,6 +95,9 @@ export default function FarmMapPage() {
   const [newPlan, setNewPlan] = useState(false);
   const [openPlan, setOpenPlan] = useState<RatePlan | undefined>();
   const [drawFor, setDrawFor] = useState<string | null>(null);
+  // Fertiliser jobs: the one being set up, or the one open
+  const [jobDraft, setJobDraft] = useState<JobDraft | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
 
   const dirty = !!pending || (!!edit && edit.index > 0);
   useEffect(() => {
@@ -128,16 +134,26 @@ export default function FarmMapPage() {
       return res.json();
     },
   });
-  const records = useMemo(() => (recordData?.features ?? []).map((f: any) => ({ id: f.id ?? f.properties.id, geometry: f.geometry, properties: f.properties })), [recordData]);
+  // Records made by a job are shown as the job, not twice
+  const records = useMemo(() => (recordData?.features ?? []).filter((f: any) => !f.properties.applicationId)
+    .map((f: any) => ({ id: f.id ?? f.properties.id, geometry: f.geometry, properties: f.properties })), [recordData]);
+  const { data: jobs = [] } = useQuery<JobSummary[]>({
+    queryKey: [...JOBS_KEY, "map", range.from, range.to],
+    queryFn: () => jobsApi.list({ activity: "fertiliser", from: range.from, to: range.to }),
+  });
 
   // Exclusions (on their layer), the open plan's zones, gaps and overlaps, and the exclusion being set up
   const overlays = useMemo<Overlay[]>(() => {
     if (!state) return [];
-    const out = [...exclusionOverlays(state), ...planOverlays(openPlan)];
+    const out = [...exclusionOverlays(state), ...planOverlays(openPlan), ...(jobDraft ? [] : jobOverlays(jobs, state.layers.find(l => l.key === "fertiliser")))];
+    for (const l of jobDraft?.lines ?? []) {
+      const g = l.geometry ?? state.paddocks.find(p => p.id === l.pastureId)?.geometry;
+      if (g) out.push({ key: `jobline-${l.key}`, geometry: g, rank: 8, style: { color: "#ffd43b", weight: 3, fillColor: "#ffd43b", fillOpacity: 0.35 } });
+    }
     const draftShape = exclusionDraft ? (preview ?? exclusionPreview(state, exclusionDraft, 0) ?? exclusionDraft.geometry ?? null) : preview;
     if (draftShape) out.push({ key: "preview", geometry: draftShape, rank: 9, style: { color: "#e03131", weight: 2, dashArray: "6 4", fillColor: "#e03131", fillOpacity: 0.3 } });
     return out;
-  }, [state, openPlan, exclusionDraft, preview]);
+  }, [state, openPlan, exclusionDraft, preview, jobs, jobDraft]);
 
   // Frame the farm the first time the map loads
   const framed = useRef(false);
@@ -184,21 +200,42 @@ export default function FarmMapPage() {
     setExclusionDraft(null);
     setPreview(null);
     setNewPlan(false);
+    setJobDraft(null);
+  };
+  const lineFor = (pastureId: string) => ({ key: crypto.randomUUID(), pastureId, rateUnit: "kg/ha" });
+  const startJob = (d: JobDraft) => {
+    if (!canRecord) return toast.error("Viewers can look but not record");
+    cancelAll();
+    setPlanId(null);
+    setJobId(null);
+    setSelection(null);
+    setJobDraft(d);
+    setMode({ kind: "pick" });
+    setPanel("right");
   };
 
-  const startDraw = (target: "paddock" | "feature" | "exclusion" | "zone", shape: DrawShape, forPaddockId?: string) => {
-    if (!canEdit) return toast.error("Only owners and managers can change the farm map");
+  const startDraw = (target: "paddock" | "feature" | "exclusion" | "zone" | "job", shape: DrawShape, forPaddockId?: string) => {
+    if (!canEdit && target !== "job") return toast.error("Only owners and managers can change the farm map");
     if (target === "paddock" && paddocksLocked) return toast.error("The paddocks layer is locked. Unlock it in Layers first.");
-    if (target !== "zone") cancelAll(); else { setMode({ kind: "view" }); setPending(null); setEdit(null); }
+    if (target !== "zone" && target !== "job") cancelAll(); else { setMode({ kind: "view" }); setPending(null); setEdit(null); }
     setDrawTarget(target);
     setDrawFor(forPaddockId ?? null);
-    if (!forPaddockId && target !== "zone") setSelection(null);
+    if (!forPaddockId && target !== "zone" && target !== "job") setSelection(null);
     setMode({ kind: "draw", shape });
     setPanel("right");
   };
 
   const onDrawn = useCallback(async (shape: Drawn) => {
     setMode({ kind: "view" });
+    if (drawTarget === "job") {
+      setMode({ kind: "pick" });
+      if (shape.kind !== "polygon") return toast.error("Draw the treated area as a closed shape");
+      // The paddock it's in, for the paddock history
+      const centre = turf.pointOnFeature(shape.geometry as any);
+      const pd = state?.paddocks.find(p => p.geometry && turf.booleanPointInPolygon(centre, p.geometry as any));
+      setJobDraft(d => d && ({ ...d, lines: [...d.lines, { key: crypto.randomUUID(), pastureId: pd?.id ?? null, geometry: shape.geometry, name: pd ? `${pd.name} (part)` : "Drawn area", rateUnit: "kg/ha" }] }));
+      return;
+    }
     if (drawTarget === "exclusion") {
       setExclusionStart(false);
       setExclusionDraft({ sourceKind: shape.kind === "polygon" ? "area" : "around", geometry: shape.geometry });
@@ -213,7 +250,7 @@ export default function FarmMapPage() {
     }
     const target = shape.kind === "polygon" && (drawTarget === "paddock" || drawTarget === "feature") ? drawTarget : "feature";
     setPending({ ...shape, target, forPaddockId: target === "paddock" ? drawFor ?? undefined : undefined });
-  }, [drawTarget, drawFor, planId, openPlan]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [drawTarget, drawFor, planId, openPlan, state]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startEdit = (target: Selection) => {
     if (!state || !canEdit) return;
@@ -285,9 +322,18 @@ export default function FarmMapPage() {
       setMode({ ...mode, picks: mode.picks.includes(sel.id) ? mode.picks.filter(i => i !== sel.id) : [...mode.picks, sel.id] });
       return;
     }
+    if (mode.kind === "pick") {
+      if (!sel || sel.type !== "paddock") return;
+      if (!state?.paddocks.find(p => p.id === sel.id)?.geometry) return toast.error("That paddock has no boundary yet. Draw the treated area instead.");
+      setJobDraft(d => d && ({
+        ...d, lines: d.lines.some(l => l.pastureId === sel.id && !l.geometry) ? d.lines.filter(l => !(l.pastureId === sel.id && !l.geometry)) : [...d.lines, lineFor(sel.id)],
+      }));
+      return;
+    }
     setSelection(sel);
+    if (sel?.type === "job") { setPlanId(null); setJobId(sel.id); } else setJobId(null);
     if (sel) setPanel("right");
-  }, [mode]);
+  }, [mode, state]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const goTo = (geometry: GeoJSON.Geometry | null | undefined) => {
     if (!geometry) return;
@@ -346,9 +392,14 @@ export default function FarmMapPage() {
           saveState === "offline" && "text-red-800 bg-red-50 border-red-200")} role="status">
           {saveState === "offline" && <CloudOff className="h-3.5 w-3.5" />}{statusLabel}
         </span>
-        <Button className="ml-auto bg-pulse-forest hover:bg-pulse-forest-dark h-10" onClick={() => openNewRecord({ type: "fertiliser", pastureIds: selectedPaddock ? [selectedPaddock.id] : [] })}>
-          <Plus className="h-4 w-4 mr-1" />Add activity
-        </Button>
+        {canRecord && (
+          <div className="ml-auto flex gap-1">
+            <Button className="bg-pulse-forest hover:bg-pulse-forest-dark h-10" onClick={() => startJob({ lines: selectedPaddock?.geometry ? [lineFor(selectedPaddock.id)] : [] })}>
+              <Plus className="h-4 w-4 mr-1" />Add activity
+            </Button>
+            <Button variant="outline" className="h-10" onClick={() => openNewRecord({ type: "fertiliser", pastureIds: selectedPaddock ? [selectedPaddock.id] : [] })} title="Spray, grazing, effluent, harvest and other records">Other record</Button>
+          </div>
+        )}
       </div>
 
       {draft && !dirty && (
@@ -382,6 +433,9 @@ export default function FarmMapPage() {
             onAddExclusion={() => { if (!canEdit) return; cancelAll(); setPlanId(null); setSelection(null); setExclusionStart(true); setPanel("right"); }}
             onOpenPlan={id => { cancelAll(); setPlanId(id); setPanel("right"); }}
             onNewPlan={() => { cancelAll(); setPlanId(null); setNewPlan(true); setPanel("right"); }}
+            jobs={jobs} canRecord={canRecord}
+            onOpenJob={id => { cancelAll(); setPlanId(null); setJobId(id); setSelection({ type: "job", id }); setPanel("right"); goTo(jobs.find(j => j.id === id)?.lines?.[0]?.geometry); }}
+            onNewJob={() => startJob({ lines: [] })}
           />
         </aside>
 
@@ -415,14 +469,18 @@ export default function FarmMapPage() {
                 <Button size="sm" variant="ghost" onClick={redo} disabled={edit.index >= edit.history.length - 1} title="Redo (Ctrl+Y)"><Redo2 className="h-4 w-4" /></Button>
               </>
             )}
-            {mode.kind !== "view" && <Button size="sm" variant="ghost" onClick={cancelAll}><X className="h-4 w-4 mr-1" />Cancel</Button>}
+            {mode.kind !== "view" && mode.kind !== "pick" && <Button size="sm" variant="ghost" onClick={() => (mode.kind === "draw" && drawTarget === "job" ? setMode({ kind: "pick" }) : cancelAll())}><X className="h-4 w-4 mr-1" />Cancel</Button>}
             <select className="h-8 rounded-md border bg-background px-1 text-xs" value={basemap} onChange={e => setBasemap(e.target.value)} aria-label="Aerial imagery">
               {BASEMAPS.map(b => <option key={b.key} value={b.key} disabled={!b.available}>{b.label}{b.available ? "" : " (needs key)"}</option>)}
             </select>
           </div>
+          {mode.kind === "pick" && (
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[500] rounded-md bg-background/95 px-3 py-2 text-sm shadow">Tap paddocks to add them to the job. Tap again to remove.</div>
+          )}
           {(mode.kind === "draw" || mode.kind === "split") && (
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[500] rounded-md bg-background/95 px-3 py-2 text-sm shadow">
-              {mode.kind === "draw" && drawTarget === "zone" ? "Draw the zone. Corners snap to the paddock edge and other zones. Tap the first corner to finish."
+              {mode.kind === "draw" && drawTarget === "job" ? "Draw the area that was (or will be) spread. Tap the first corner to finish. Exclusions are taken off on save."
+                : mode.kind === "draw" && drawTarget === "zone" ? "Draw the zone. Corners snap to the paddock edge and other zones. Tap the first corner to finish."
                 : mode.kind === "split" ? "Draw a line across the paddock, from outside one edge to outside the other. Tap the last point again to finish."
                 : mode.shape === "Polygon" ? "Tap each corner. Tap the first corner to close the shape. Corners snap to nearby paddocks."
                 : mode.shape === "Line" ? "Tap each point along the line. Tap the last point again to finish."
@@ -438,7 +496,7 @@ export default function FarmMapPage() {
         {/* Right panel: what's selected, being drawn, edited or measured */}
         <aside className={cn("bg-background border-l overflow-y-auto z-[600] p-3 space-y-3",
           "absolute inset-x-0 bottom-0 max-h-[55%] border-t md:static md:max-h-none md:border-t-0",
-          panel === "right" || pending || edit || mode.kind !== "view" || exclusionStart || exclusionDraft || planId || newPlan ? "block" : "hidden md:block")}>
+          panel === "right" || pending || edit || mode.kind !== "view" || exclusionStart || exclusionDraft || planId || newPlan || jobDraft || jobId ? "block" : "hidden md:block")}>
           <button className="md:hidden absolute right-2 top-2" onClick={() => setPanel(null)} aria-label="Close panel"><X className="h-4 w-4" /></button>
 
           {pending ? (
@@ -500,6 +558,13 @@ export default function FarmMapPage() {
           ) : exclusionDraft ? (
             <ExclusionEditor key={JSON.stringify(exclusionDraft).slice(0, 80)} state={state} draft={exclusionDraft} canEdit={canEdit} run={run}
               onPreview={setPreview} onDone={() => { setExclusionDraft(null); setPreview(null); }} />
+          ) : jobDraft ? (
+            <NewJobForm state={state} draft={jobDraft} setDraft={fn => setJobDraft(d => (d ? fn(d) : d))}
+              onDrawPart={() => startDraw("job", "Polygon")}
+              onCreated={job => { setJobDraft(null); setMode({ kind: "view" }); setJobId(job.id); setSelection({ type: "job", id: job.id }); }}
+              onCancel={() => { setJobDraft(null); setMode({ kind: "view" }); }} />
+          ) : jobId ? (
+            <JobView key={jobId} jobId={jobId} canEdit={canRecord} onClose={() => { setJobId(null); setSelection(null); }} />
           ) : newPlan ? (
             <NewPlanForm state={state} selectedPaddockId={selectedPaddock?.id} run={run}
               onCreated={id => { setNewPlan(false); setPlanId(id); }} onCancel={() => setNewPlan(false)} />
@@ -508,7 +573,11 @@ export default function FarmMapPage() {
               selectedZoneId={selection?.type === "zone" ? selection.id : undefined}
               onDrawZone={() => startDraw("zone", "Polygon")}
               onClose={() => { setPlanId(null); setOpenPlan(undefined); }}
-              onOpenPlan={id => setPlanId(id)} />
+              onOpenPlan={id => setPlanId(id)}
+              onCreateJob={p => startJob({
+                planId: p.id, title: p.name,
+                lines: p.zones.map(z => ({ key: crypto.randomUUID(), pastureId: z.pastureId, geometry: z.geometry, name: z.name ?? null, productId: z.productId, rate: z.rate, rateUnit: z.rateUnit })),
+              })} />
           ) : selection?.type === "exclusion" && state.exclusions.find(e => e.id === selection.id) ? (
             <ExclusionEditor key={selection.id} state={state} exclusion={state.exclusions.find(e => e.id === selection.id)} canEdit={canEdit} run={run}
               onPreview={setPreview} onDone={() => { setSelection(null); setPreview(null); }} />
@@ -521,6 +590,9 @@ export default function FarmMapPage() {
               onDraw={() => startDraw("paddock", "Polygon", selectedPaddock.id)}
               run={run}
               onArchived={() => setSelection(null)}
+              canRecord={canRecord}
+              onAddJob={() => startJob({ lines: selectedPaddock.geometry ? [lineFor(selectedPaddock.id)] : [] })}
+              onOpenJob={id => { setJobId(id); setSelection({ type: "job", id }); }}
             />
           ) : selectedFeature ? (
             <FeaturePanel feature={selectedFeature} layers={layers} canEdit={canEdit} onEdit={() => startEdit({ type: "feature", id: selectedFeature.id })} run={run} onDeleted={() => setSelection(null)} />
@@ -662,11 +734,16 @@ function PendingForm({ pending, layers, canEdit, onSave, onDiscard }: {
   );
 }
 
-function PaddockPanel({ paddock, canEdit, locked, range, onEdit, onSplit, onMerge, onDraw, run, onArchived }: {
+function PaddockPanel({ paddock, canEdit, locked, range, onEdit, onSplit, onMerge, onDraw, run, onArchived, canRecord, onAddJob, onOpenJob }: {
   paddock: MapState["paddocks"][number]; canEdit: boolean; locked: boolean; range: { from: string; to: string };
   onEdit: () => void; onSplit: () => void; onMerge: () => void; onDraw: () => void;
   run: <T>(w: () => Promise<T>, s?: string) => Promise<T | undefined>; onArchived: () => void;
+  canRecord: boolean; onAddJob: () => void; onOpenJob: (id: string) => void;
 }) {
+  const { data: paddockJobs = [] } = useQuery<JobSummary[]>({
+    queryKey: [...JOBS_KEY, "paddock", paddock.id, range.from, range.to],
+    queryFn: () => jobsApi.list({ pastureId: paddock.id, from: range.from, to: range.to }),
+  });
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(paddock.name);
   const [num, setNum] = useState(paddock.paddockNumber != null ? String(paddock.paddockNumber) : "");
@@ -725,13 +802,37 @@ function PaddockPanel({ paddock, canEdit, locked, range, onEdit, onSplit, onMerg
         </div>
       )}
       {canEdit && locked && <p className="text-xs text-muted-foreground flex items-center gap-1"><Lock className="h-3 w-3" />Paddocks are locked. Unlock the layer to change them.</p>}
-      <Button size="sm" className="bg-pulse-forest hover:bg-pulse-forest-dark" onClick={() => openNewRecord({ type: "fertiliser", pastureIds: [paddock.id] })}><Plus className="h-4 w-4 mr-1" />Add activity here</Button>
+      {canRecord && (
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" className="bg-pulse-forest hover:bg-pulse-forest-dark" onClick={onAddJob}><Plus className="h-4 w-4 mr-1" />Fertiliser job here</Button>
+          <Button size="sm" variant="outline" onClick={() => openNewRecord({ type: "fertiliser", pastureIds: [paddock.id] })}>Other record</Button>
+        </div>
+      )}
 
       <section className="space-y-1">
-        <h3 className="text-sm font-semibold">Activity ({range.from} to {range.to})</h3>
-        {activity.length === 0 ? <p className="text-sm text-muted-foreground">Nothing recorded in these dates.</p> : (
+        <h3 className="text-sm font-semibold">Fertiliser jobs</h3>
+        {paddockJobs.length === 0 ? <p className="text-sm text-muted-foreground">None in these dates.</p> : (
           <ul className="divide-y rounded-md border text-sm">
-            {activity.map(r => (
+            {paddockJobs.map(j => {
+              const mine = (j.lines ?? []).filter(l => l.pastureId === paddock.id);
+              return (
+                <li key={j.id}>
+                  <button className="w-full text-left px-2 py-1.5 hover:bg-muted" onClick={() => onOpenJob(j.id)}>
+                    <div className="flex justify-between gap-2"><span className="font-medium">{mine.map(l => `${l.product} ${l.rate ?? ""} ${l.rateUnit}`).join(", ") || j.products}</span><span className="text-xs text-muted-foreground">{(j.completedAt ?? j.plannedOn ?? "").slice(0, 10)}</span></div>
+                    <div className="text-xs text-muted-foreground">{j.status === "completed" ? "Applied" : j.status === "cancelled" ? "Cancelled" : "Planned"}{j.contractor ? ` · ${j.contractor}` : ""}{j.dockets ? ` · ${j.dockets} docket${j.dockets === 1 ? "" : "s"}` : ""}</div>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <section className="space-y-1">
+        <h3 className="text-sm font-semibold">Other activity ({range.from} to {range.to})</h3>
+        {activity.filter(r => !r.details?.applicationId).length === 0 ? <p className="text-sm text-muted-foreground">Nothing else recorded in these dates.</p> : (
+          <ul className="divide-y rounded-md border text-sm">
+            {activity.filter(r => !r.details?.applicationId).map(r => (
               <li key={r.id} className="px-2 py-1.5">
                 <div className="flex justify-between gap-2"><span className="font-medium">{r.title}</span><span className="text-xs text-muted-foreground">{r.occurredAt.slice(0, 10)}</span></div>
                 <div className="text-xs text-muted-foreground">{recordTypeDef(r.type).label}{r.attachments?.length ? ` · ${r.attachments.length} file${r.attachments.length === 1 ? "" : "s"}` : ""}</div>
@@ -807,11 +908,12 @@ function FeaturePanel({ feature, layers, canEdit, onEdit, run, onDeleted }: {
   );
 }
 
-function LeftPanel({ state, canEdit, visible, setVisible, onSelectPaddock, mapView, basemap, onApplyView, run, onSelectExclusion, onAddExclusion, onOpenPlan, onNewPlan }: {
+function LeftPanel({ state, canEdit, visible, setVisible, onSelectPaddock, mapView, basemap, onApplyView, run, onSelectExclusion, onAddExclusion, onOpenPlan, onNewPlan, jobs, canRecord, onOpenJob, onNewJob }: {
   state: MapState; canEdit: boolean; visible: Record<string, boolean>; setVisible: (fn: (v: Record<string, boolean>) => Record<string, boolean>) => void;
   onSelectPaddock: (id: string) => void; mapView: { lat: number; lng: number; zoom: number } | null; basemap: string;
   onApplyView: (v: MapState["views"][number]) => void; run: <T>(w: () => Promise<T>, s?: string) => Promise<T | undefined>;
   onSelectExclusion: (id: string) => void; onAddExclusion: () => void; onOpenPlan: (id: string) => void; onNewPlan: () => void;
+  jobs: JobSummary[]; canRecord: boolean; onOpenJob: (id: string) => void; onNewJob: () => void;
 }) {
   const [styling, setStyling] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -908,6 +1010,7 @@ function LeftPanel({ state, canEdit, visible, setVisible, onSelectPaddock, mapVi
 
       <ExclusionsSection exclusions={state.exclusions} canEdit={canEdit} onSelect={onSelectExclusion} onAdd={onAddExclusion} />
 
+      <JobsSection jobs={jobs} onOpen={onOpenJob} onNew={onNewJob} canRecord={canRecord} />
       <PlansSection plans={state.plans} canEdit={canEdit} onOpen={onOpenPlan} onNew={onNewPlan} />
 
       <section className="space-y-2">
