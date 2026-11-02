@@ -6,6 +6,7 @@ import { productSnapshot, touchProduct } from './catalogue';
 import { createRecord, updateRecord, deleteRecord } from './records';
 import { attachmentsFor, saveAttachments, toApiAttachment } from './attachments';
 import { recalcRestrictions, restrictionSummary, saveMix, setMixUsed, sprayDetail, syncSprayRecords, type MixInput } from './sprays';
+import { EXCLUSION_ACTIVITY, activityDetail, checkDetails, isLiquid, runFootprint, syncActivityRecords, type RunInput } from './activities';
 
 // Jobs (applications): one activity over one or more paddocks or parts of them. Each line keeps
 // its treated shape, the exclusions taken off, the product as it was then and its rate.
@@ -13,7 +14,7 @@ import { recalcRestrictions, restrictionSummary, saveMix, setMixUsed, sprayDetai
 // adjusted to agree. Completed fertiliser lines also appear in Records (for season totals).
 
 export const STATUSES = ['draft', 'planned', 'in_progress', 'completed', 'cancelled'] as const;
-export const ACTIVITIES = ['fertiliser', 'spray'] as const;
+export const ACTIVITIES = ['fertiliser', 'spray', 'effluent', 'slurry', 'baleage', 'silage', 'topping', 'mowing'] as const;
 export const FERTILISER_UNITS: Record<string, { quantity: string; toKg: number | null }> = {
   'kg/ha': { quantity: 'kg', toKg: 1 },
   't/ha': { quantity: 't', toKg: 1000 },
@@ -62,6 +63,10 @@ export interface ApplicationInput {
   windDirection?: string | null;
   temperature?: number | null;
   operatorCert?: string | null;
+  // Effluent, slurry, harvest, topping and mowing
+  details?: Record<string, unknown>;
+  run?: RunInput | null;
+  linkedJobId?: string | null;
 }
 
 const dayOf = (app: any) =>
@@ -91,8 +96,13 @@ async function buildLine(tx: any, farmId: string, app: any, line: LineInput, ord
     }
   }
   if (!shape) throw new MapError('Choose a paddock or draw the area treated');
-  if (app.activity === 'spray') {
-    const areas = await areaBreakdown(tx, farmId, shape, 'spraying', dayOf(app));
+  if (app.activity !== 'fertiliser') {
+    // Exclusions only for activities that apply something; harvest and field work keep the gross area
+    const exAct = EXCLUSION_ACTIVITY[app.activity];
+    const areas = exAct
+      ? await areaBreakdown(tx, farmId, shape, exAct, dayOf(app))
+      : { ...(await areaBreakdown(tx, farmId, shape, '__none__', dayOf(app))), excludedHa: 0, exclusions: [] as any[] };
+    if (!exAct) areas.netHa = areas.grossHa;
     const [row] = rowsOf(await tx.execute(sql`
       INSERT INTO application_lines (application_id, pasture_id, boundary_id, name, geom, partial, gross_ha, excluded_ha, net_ha,
         exclusions, rate_unit, sort_order)
@@ -140,6 +150,18 @@ function checkTimes(input: ApplicationInput) {
   if (input.startedAt && input.completedAt && input.completedAt < input.startedAt) throw new MapError('The finish is before the start');
 }
 
+async function withRun(tx: any, activity: string, input: ApplicationInput) {
+  if (!input.run) return input;
+  if (!isLiquid(activity)) throw new MapError('Only effluent and slurry jobs have an irrigator run');
+  const footprint = await runFootprint(tx, input.run);
+  const allowed = (input.lines ?? []).map(l => l.pastureId).filter(Boolean) as string[];
+  return {
+    ...input,
+    details: { ...(input.details ?? {}), allowedPastureIds: allowed },
+    lines: [{ pastureId: allowed.length === 1 ? allowed[0] : null, geometry: footprint, name: 'Irrigator run (wetted footprint)' }],
+  };
+}
+
 export async function createApplication(farmId: string, userId: string, input: ApplicationInput) {
   checkTimes(input);
   checkSpray(input);
@@ -150,16 +172,22 @@ export async function createApplication(farmId: string, userId: string, input: A
       const [existing] = rowsOf(await tx.execute(sql`SELECT id FROM applications WHERE farm_id = ${farmId} AND client_id = ${input.clientId}`));
       if (existing) return { id: existing.id as string, created: false };
     }
+    const activity = input.activity ?? 'fertiliser';
+    await checkDetails(tx, farmId, activity, input.details, input.linkedJobId);
+    input = await withRun(tx, activity, input);
     const [app] = rowsOf(await tx.execute(sql`
       INSERT INTO applications (farm_id, activity, status, title, planned_on, started_at, completed_at, evidence, plan_id,
         supplier, contractor, operator, equipment, weather, notes, cost, client_id, created_by,
-        crop, target, water_rate, tank_volume, tank_loads, wind_speed, wind_direction, temperature, operator_cert)
+        crop, target, water_rate, tank_volume, tank_loads, wind_speed, wind_direction, temperature, operator_cert,
+        details, run_geom, wetted_width_m, drift_m, linked_job_id)
       VALUES (${farmId}, ${input.activity ?? 'fertiliser'}, ${input.status ?? 'draft'}, ${input.title ?? null}, ${input.plannedOn ?? null},
         ${input.startedAt ?? null}, ${input.completedAt ?? null}, ${input.evidence ?? (input.status === 'completed' ? 'manual' : 'planned')},
         ${input.planId ?? null}, ${input.supplier ?? null}, ${input.contractor ?? null}, ${input.operator ?? null}, ${input.equipment ?? null},
         ${input.weather ?? null}, ${input.notes ?? null}, ${input.cost ?? null}, ${input.clientId ?? null}, ${userId},
         ${input.crop ?? null}, ${input.target ?? null}, ${input.waterRate ?? null}, ${input.tankVolume ?? null}, ${input.tankLoads ?? null},
-        ${input.windSpeed ?? null}, ${input.windDirection ?? null}, ${input.temperature ?? null}, ${input.operatorCert ?? null})
+        ${input.windSpeed ?? null}, ${input.windDirection ?? null}, ${input.temperature ?? null}, ${input.operatorCert ?? null},
+        ${JSON.stringify(input.details ?? {})}::jsonb, ${input.run ? sql`ST_GeomFromGeoJSON(${JSON.stringify(input.run.geometry)})::geography` : null},
+        ${input.run?.wettedWidthM ?? null}, ${input.run ? input.run.driftM ?? 0 : null}, ${input.linkedJobId ?? null})
       RETURNING *`));
     let order = 0;
     for (const line of input.lines!) await buildLine(tx, farmId, app, line, order++);
@@ -185,6 +213,14 @@ export async function updateApplication(farmId: string, userId: string, id: stri
     };
     checkTimes(merged as ApplicationInput);
     checkSpray(input);
+    if (input.details !== undefined || input.linkedJobId !== undefined) {
+      await checkDetails(tx, farmId, app.activity, input.details ?? app.details, input.linkedJobId !== undefined ? input.linkedJobId : app.linked_job_id, id);
+    }
+    if (input.run) input = await withRun(tx, app.activity, input);
+    else if (input.lines && input.details === undefined && app.run_geom) {
+      // New paddocks without a new run: the run is dropped, the paddocks are the treated area
+      await tx.execute(sql`UPDATE applications SET run_geom = NULL, wetted_width_m = NULL, drift_m = NULL WHERE id = ${id}`);
+    }
     const keep = <K extends keyof ApplicationInput>(k: K, col: string) => (input[k] !== undefined ? input[k] : app[col]);
     const [updated] = rowsOf(await tx.execute(sql`
       UPDATE applications SET
@@ -203,6 +239,11 @@ export async function updateApplication(farmId: string, userId: string, id: stri
         tank_volume = ${keep('tankVolume', 'tank_volume')}, tank_loads = ${keep('tankLoads', 'tank_loads')},
         wind_speed = ${keep('windSpeed', 'wind_speed')}, wind_direction = ${keep('windDirection', 'wind_direction')},
         temperature = ${keep('temperature', 'temperature')}, operator_cert = ${keep('operatorCert', 'operator_cert')},
+        details = ${input.details !== undefined ? sql`${JSON.stringify({ ...(app.details?.allowedPastureIds && !input.run ? { allowedPastureIds: app.details.allowedPastureIds } : {}), ...input.details })}::jsonb` : sql`details`},
+        run_geom = ${input.run ? sql`ST_GeomFromGeoJSON(${JSON.stringify(input.run.geometry)})::geography` : sql`run_geom`},
+        wetted_width_m = ${input.run ? input.run.wettedWidthM : sql`wetted_width_m`},
+        drift_m = ${input.run ? input.run.driftM ?? 0 : sql`drift_m`},
+        linked_job_id = ${input.linkedJobId !== undefined ? input.linkedJobId : app.linked_job_id},
         version = version + 1, updated_at = now()
       WHERE id = ${id} RETURNING *`));
     if (input.lines) {
@@ -275,6 +316,7 @@ const toKg = (qty: number | null, unit: string | null) => (qty == null || unit =
 async function syncRecords(farmId: string, userId: string, id: string) {
   const [app] = rowsOf(await db.execute(sql`SELECT * FROM applications WHERE id = ${id}`));
   if (app?.activity === 'spray') return syncSprayRecords(farmId, userId, id);
+  if (app && app.activity !== 'fertiliser') return syncActivityRecords(farmId, userId, id);
   if (!app || app.activity !== 'fertiliser') return;
   const lines = rowsOf(await db.execute(sql`
     SELECT l.*, ST_AsGeoJSON(l.geom, 7)::json AS geometry FROM application_lines l WHERE l.application_id = ${id} ORDER BY sort_order`));
@@ -409,16 +451,19 @@ export async function getApplication(farmId: string, id: string) {
     supplier: app.supplier, contractor: app.contractor, operator: app.operator, equipment: app.equipment,
     weather: app.weather, notes: app.notes, cost: app.cost != null ? Number(app.cost) : null, version: app.version,
     createdBy: app.created_by_name, createdAt: app.created_at, updatedAt: app.updated_at,
+    linkedJobId: app.linked_job_id,
     ...(app.activity === 'spray'
-      ? { lines, dockets: ds, spray: await sprayDetail(farmId, app, lines), reconciliation: [], nutrients: null }
-      : { lines, dockets: ds, reconciliation: reconcile(lines, ds), nutrients: nutrients(lines), spray: null }),
+      ? { lines, dockets: ds, spray: await sprayDetail(farmId, app, lines), reconciliation: [], nutrients: null, work: null }
+      : app.activity === 'fertiliser'
+        ? { lines, dockets: ds, reconciliation: reconcile(lines, ds), nutrients: nutrients(lines), spray: null, work: null }
+        : { lines, dockets: ds, reconciliation: [], nutrients: null, spray: null, work: await activityDetail(farmId, app, lines) }),
   };
 }
 
 export async function listApplications(farmId: string, opts: { activity?: string; status?: string; from?: string; to?: string; pastureId?: string }) {
   return rowsOf(await db.execute(sql`
     SELECT a.id, a.activity, a.status, a.title, a.planned_on::text AS "plannedOn", a.completed_at AT TIME ZONE 'UTC' AS "completedAt", a.evidence,
-      a.contractor, a.supplier, a.target,
+      a.contractor, a.supplier, a.target, a.details, a.linked_job_id AS "linkedJobId",
       COALESCE((SELECT string_agg(DISTINCT l.product_snapshot->>'name', ', ') FROM application_lines l WHERE l.application_id = a.id),
         (SELECT string_agg(m.product_snapshot->>'name', ' + ' ORDER BY m.sort_order) FROM application_mix m WHERE m.application_id = a.id)) AS products,
       (SELECT json_agg(json_build_object('kind', r.kind, 'status', r.status, 'endsAt', r.ends_at AT TIME ZONE 'UTC'))

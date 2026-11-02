@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { FARM_MAP_KEY, type MapLayer, type MapState } from "@/lib/farm-map";
 import {
-  FERT_UNITS, JOB_STATUSES, activesText, analysisText, jobsApi, type CatalogueProduct, type Job, type JobSummary, type NewLine,
+  ACTIVITY_LABELS, ACTIVITY_LAYER, FERT_UNITS, JOB_STATUSES, activesText, type Activity, analysisText, jobsApi, type CatalogueProduct, type Job, type JobSummary, type NewLine,
 } from "@/lib/jobs";
 import type { Overlay } from "./FarmMapCanvas";
 
@@ -271,7 +271,8 @@ function CustomSprayForm({ initialName, onCreated, onCancel }: { initialName: st
 
 // ===== New fertiliser job =====
 
-export interface JobDraft { activity?: "fertiliser" | "spray"; lines: NewLine[]; planId?: string | null; title?: string | null }
+// run: an effluent irrigator run drawn as a line (its footprint becomes the treated area)
+export interface JobDraft { activity?: Activity; lines: NewLine[]; planId?: string | null; title?: string | null; run?: GeoJSON.LineString | null }
 
 /**
  * Select paddocks (tap them on the map) → product → rate → save. Each paddock can have its own
@@ -649,13 +650,13 @@ function DocketForm({ job, onDone }: { job: Job; onDone: (j?: Job) => void }) {
 
 // ===== Lists and map =====
 
-export function JobsSection({ jobs, onOpen, onNew, canRecord }: { jobs: JobSummary[]; onOpen: (id: string) => void; onNew: (activity: "fertiliser" | "spray") => void; canRecord: boolean }) {
+export function JobsSection({ jobs, onOpen, onNew, canRecord }: { jobs: JobSummary[]; onOpen: (id: string) => void; onNew: (activity: Activity) => void; canRecord: boolean }) {
   const [status, setStatus] = useState("open");
   const list = jobs.filter(j => status === "all" || (status === "open" ? ["draft", "planned", "in_progress"].includes(j.status) : j.status === status));
   return (
     <section className="space-y-2">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Fertiliser and spray jobs</h2>
+        <h2 className="text-sm font-semibold">Jobs</h2>
         <select className="h-7 rounded border bg-background px-1 text-xs" value={status} onChange={e => setStatus(e.target.value)} aria-label="Job status">
           <option value="open">Not done</option><option value="completed">Completed</option><option value="all">All</option>
         </select>
@@ -665,7 +666,7 @@ export function JobsSection({ jobs, onOpen, onNew, canRecord }: { jobs: JobSumma
           {list.map(j => (
             <li key={j.id}>
               <button className="w-full text-left px-2 py-1.5 hover:bg-muted" onClick={() => onOpen(j.id)}>
-                <div className="flex justify-between gap-2"><span className="truncate">{j.activity === "spray" ? "Spray: " : ""}{j.title || j.products}</span><span className={cn("text-xs", j.status === "completed" ? "text-green-700" : "text-amber-700")}>{JOB_STATUSES.find(s => s.key === j.status)?.label}</span></div>
+                <div className="flex justify-between gap-2"><span className="truncate">{ACTIVITY_LABELS[j.activity as Activity] ?? j.activity}{j.title || j.products ? `: ${j.title || j.products}` : ""}</span><span className={cn("text-xs", j.status === "completed" ? "text-green-700" : "text-amber-700")}>{JOB_STATUSES.find(s => s.key === j.status)?.label}</span></div>
                 <div className="text-xs text-muted-foreground">{(j.completedAt ?? j.plannedOn ?? "").slice(0, 10)} · {j.netHa != null ? `${j.netHa.toFixed(2)} ha` : ""}{j.dockets ? ` · ${j.dockets} docket${j.dockets === 1 ? "" : "s"}` : ""}
                   {j.restriction?.grazing?.state === "unresolved" && <span className="text-red-700"> · grazing restriction unresolved</span>}
                   {j.restriction?.grazing?.state === "active" && <span className="text-orange-700"> · no grazing until {new Date(j.restriction.grazing.until!).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</span>}
@@ -676,10 +677,11 @@ export function JobsSection({ jobs, onOpen, onNew, canRecord }: { jobs: JobSumma
         </ul>
       )}
       {canRecord && (
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" onClick={() => onNew("fertiliser")}><Plus className="h-4 w-4 mr-1" />Fertiliser job</Button>
-          <Button size="sm" variant="outline" onClick={() => onNew("spray")}><Plus className="h-4 w-4 mr-1" />Spray job</Button>
-        </div>
+        <select className="h-8 w-full rounded-md border bg-background px-2 text-sm" value="" aria-label="New job"
+          onChange={e => { if (e.target.value) onNew(e.target.value as Activity); }}>
+          <option value="">+ New job…</option>
+          {(Object.keys(ACTIVITY_LABELS) as Activity[]).map(a => <option key={a} value={a}>{ACTIVITY_LABELS[a]}</option>)}
+        </select>
       )}
     </section>
   );
@@ -692,15 +694,15 @@ export function jobOverlays(jobs: JobSummary[], layers: MapLayer[]): Overlay[] {
   const out: Overlay[] = [];
   for (const j of jobs) {
     if (j.status === "cancelled") continue;
-    const layer = layers.find(l => l.key === (j.activity === "spray" ? "spraying" : "fertiliser"));
+    const layer = layers.find(l => l.key === (ACTIVITY_LAYER[j.activity as Activity] ?? "fertiliser"));
     if (!layer) continue;
     for (const l of j.lines ?? []) {
       const done = j.status === "completed";
       out.push({
         key: `job-${j.id}-${l.id}`, geometry: l.geometry, layerId: layer.id, rank: 3,
         sel: { type: "job", id: j.id },
-        pickLabel: j.activity === "spray"
-          ? `${done ? "Spray" : "Planned spray"}: ${j.products ?? ""} · ${(j.completedAt ?? j.plannedOn ?? "").slice(0, 10)}`
+        pickLabel: j.activity !== "fertiliser"
+          ? `${done ? "" : "Planned "}${ACTIVITY_LABELS[j.activity as Activity] ?? j.activity}${j.products ? `: ${j.products}` : ""} · ${(j.completedAt ?? j.plannedOn ?? "").slice(0, 10)}`
           : `${done ? "Fertiliser" : "Planned"}: ${l.product} ${l.rate ?? ""} ${l.rateUnit} · ${(j.completedAt ?? j.plannedOn ?? "").slice(0, 10)}`,
         style: done
           ? { color: layer.style.color, weight: layer.style.weight, fillColor: layer.style.fillColor, fillOpacity: layer.style.fillOpacity }

@@ -60,11 +60,34 @@ export interface Job {
   reconciliation: { product: string; plannedKg: number; deliveredKg: number | null; appliedKg: number | null; unknownUnits: boolean; issues: string[] }[];
   nutrients: { basis: "applied" | "planned" | "mixed" | null; kg: Record<string, number>; perHa: Record<string, number> | null; netHa: number; notCounted: string[] } | null;
   spray: SprayDetail | null;
+  work: WorkDetail | null;
+  linkedJobId: string | null;
 }
+export type Activity = "fertiliser" | "spray" | "effluent" | "slurry" | "baleage" | "silage" | "topping" | "mowing";
+export const ACTIVITY_LABELS: Record<Activity, string> = {
+  fertiliser: "Fertiliser", spray: "Spray", effluent: "Effluent", slurry: "Slurry",
+  baleage: "Baleage", silage: "Silage", topping: "Topping", mowing: "Mowing",
+};
+// The map layer each activity's jobs are drawn on
+export const ACTIVITY_LAYER: Record<Activity, string> = {
+  fertiliser: "fertiliser", spray: "spraying", effluent: "effluent", slurry: "slurry",
+  baleage: "baleage", silage: "silage", topping: "topping", mowing: "mowing",
+};
+export const WORK_ACTIVITIES: Activity[] = ["effluent", "slurry", "baleage", "silage", "topping", "mowing"];
+export type WorkDetail =
+  | { kind: "liquid"; netHa: number; details: Record<string, any>;
+      totals: { volumeM3: number | null; volumeSource: string | null; estimate: boolean; rateM3Ha: number | null; depthMm: number | null;
+        nutrientsKg: Record<string, number | null> | null; analysis: any; notes: string[] };
+      footprint: null | { run: GeoJSON.LineString; wettedWidthM: number; driftM: number; reach: GeoJSON.Geometry;
+        outsideHa: number; outside: GeoJSON.Geometry | null; exclusionHa: number; exclusion: GeoJSON.Geometry | null; allowed: string } }
+  | { kind: "harvest"; netHa: number; details: Record<string, any>;
+      totals: { freshT: number | null; freshBasis: "measured" | "estimated" | null; dmT: number | null; dmBasis: "measured" | "estimated" | null; kgDmPerBale: number | null; notes: string[] };
+      mowing: { id: string; status: string; completedAt: string | null } | null }
+  | { kind: "field"; netHa: number; details: Record<string, any>; linkedJob: { id: string; activity: string; title: string | null; status: string } | null };
 export interface JobSummary {
   id: string; activity: string; status: Job["status"]; title: string | null; plannedOn: string | null; completedAt: string | null;
   evidence: string; contractor: string | null; supplier: string | null; products: string | null; netHa: number | null; dockets: number;
-  target: string | null; restriction: SprayDetail["summary"] | null;
+  target: string | null; restriction: SprayDetail["summary"] | null; details: Record<string, any> | null; linkedJobId: string | null;
   lines: { id: string; name: string | null; pastureId: string | null; status: string; product: string; rate: number | null; rateUnit: string; geometry: GeoJSON.MultiPolygon }[] | null;
 }
 export interface NewLine { key: string; pastureId?: string | null; geometry?: GeoJSON.Geometry | null; name?: string | null; productId?: string | null; rate?: number | null; rateUnit: string; appliedQuantity?: number | null }

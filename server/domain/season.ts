@@ -86,13 +86,6 @@ export async function seasonSummary(farmId: string, season: string) {
     ))
     .orderBy(asc(farmRecords.occurredAt));
 
-  // Typical effluent analysis when the record doesn't carry one
-  const [effluentDefault] = await db
-    .select()
-    .from(inputProducts)
-    .where(and(isNull(inputProducts.farmId), eq(inputProducts.kind, 'effluent')))
-    .limit(1);
-
   const nutrients = { syntheticN: 0, effluentN: 0, p: 0, k: 0, s: 0 };
   const incomplete: { id: string; title: string; reason: string }[] = [];
   const feedFed = { boughtT: 0, homeGrownT: 0 };
@@ -113,13 +106,37 @@ export async function seasonSummary(farmId: string, season: string) {
   for (const r of records) {
     const d = r.details ?? {};
     switch (r.type) {
-      case 'fertiliser':
       case 'effluent': {
+        // Nitrogen only from an analysis entered on the record: never an assumed "typical" one
+        const volume = num(d.volumeM3);
+        if (volume !== undefined && num(d.nKgPerM3) !== undefined) {
+          nutrients.effluentN += volume * num(d.nKgPerM3)!;
+          nutrients.p += volume * (num(d.pKgPerM3) ?? 0);
+          nutrients.k += volume * (num(d.kKgPerM3) ?? 0);
+          break;
+        }
+        if (num(d.nPercent) === undefined) {
+          incomplete.push({ id: r.id, title: r.title, reason: volume === undefined && num(d.depthMm) === undefined
+            ? 'needs the volume or depth, and an effluent analysis'
+            : "no effluent analysis entered, so its nitrogen is unknown (not estimated)" });
+          break;
+        }
         const ha = recordHectares(r, paddockHa);
         const kg = productKg(r, ha);
-        const pct = (key: string, fallback?: unknown) => num(d[key]) ?? num(fallback) ?? 0;
-        const isEffluent = r.type === 'effluent';
-        const nPct = isEffluent ? pct('nPercent', effluentDefault?.nPercent) : pct('nPercent');
+        if (kg === undefined) {
+          incomplete.push({ id: r.id, title: r.title, reason: 'needs a depth and paddocks/area, or the amount applied' });
+          break;
+        }
+        nutrients.effluentN += kg * num(d.nPercent)! / 100;
+        nutrients.p += kg * (num(d.pPercent) ?? 0) / 100;
+        nutrients.k += kg * (num(d.kPercent) ?? 0) / 100;
+        break;
+      }
+      case 'fertiliser': {
+        const ha = recordHectares(r, paddockHa);
+        const kg = productKg(r, ha);
+        const pct = (key: string) => num(d[key]) ?? 0;
+        const nPct = pct('nPercent');
         if (kg === undefined) {
           incomplete.push({ id: r.id, title: r.title, reason: 'needs a rate and paddocks/area, or the amount applied' });
           break;
@@ -130,9 +147,9 @@ export async function seasonSummary(farmId: string, season: string) {
           break;
         }
         const n = kg * nPct / 100;
-        if (isEffluent) nutrients.effluentN += n; else nutrients.syntheticN += n;
-        nutrients.p += kg * (isEffluent ? pct('pPercent', effluentDefault?.pPercent) : pct('pPercent')) / 100;
-        nutrients.k += kg * (isEffluent ? pct('kPercent', effluentDefault?.kPercent) : pct('kPercent')) / 100;
+        nutrients.syntheticN += n;
+        nutrients.p += kg * pct('pPercent') / 100;
+        nutrients.k += kg * pct('kPercent') / 100;
         nutrients.s += kg * pct('sPercent') / 100;
         break;
       }

@@ -13,6 +13,7 @@ import {
   type CatalogueProduct, type Job, type JobSummary, type Restriction,
 } from "@/lib/jobs";
 import { JOBS_KEY, JobView, ProductPicker, type JobDraft } from "./JobPanels";
+import { WorkJobView } from "./WorkPanels";
 import type { Overlay } from "./FarmMapCanvas";
 
 const fmtHa = (ha: number | null | undefined) => (ha == null ? "—" : `${Number(ha).toFixed(3)} ha`);
@@ -25,9 +26,12 @@ const selectClass = "h-9 w-full rounded-md border bg-background px-2 text-sm";
 /**
  * A saved job of either kind
  */
-export function JobPanel({ jobId, canEdit, onClose }: { jobId: string; canEdit: boolean; onClose: () => void }) {
+export function JobPanel({ jobId, canEdit, onClose, onOpenJob, onJob }: { jobId: string; canEdit: boolean; onClose: () => void; onOpenJob: (id: string) => void; onJob?: (j: Job | undefined) => void }) {
   const { data: job } = useQuery({ queryKey: [...JOBS_KEY, jobId], queryFn: () => jobsApi.get(jobId) });
+  useEffect(() => { onJob?.(job); }, [job]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => onJob?.(undefined), []); // eslint-disable-line react-hooks/exhaustive-deps
   if (job?.activity === "spray") return <SprayJobView job={job} canEdit={canEdit} onClose={onClose} />;
+  if (job?.work) return <WorkJobView job={job} canEdit={canEdit} onClose={onClose} onOpenJob={onOpenJob} />;
   return <JobView jobId={jobId} canEdit={canEdit} onClose={onClose} />;
 }
 

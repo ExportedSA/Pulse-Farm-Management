@@ -141,6 +141,22 @@ const mixInput = z.object({
   actualUnit: z.enum(QTY_UNITS).optional().nullable(),
 });
 const optNum = (max: number) => z.number().min(0).max(max).optional().nullable();
+const basis = z.enum(['measured', 'estimated']).optional().nullable();
+// Effluent, slurry, baleage, silage, topping and mowing fields (the server checks which apply)
+const detailsInput = z.object({
+  method: text(80), machineSetting: text(80),
+  volumeM3: optNum(10000000), volumeSource: z.enum(['flow meter', 'pump hours', 'tanker loads', 'estimate', 'other']).optional().nullable(),
+  loads: optNum(100000), loadSizeM3: optNum(1000), loadSizeEstimated: z.boolean().optional(), loadTonnes: optNum(1000),
+  calibration: z.object({ depthMm: z.number().positive().max(1000), reference: z.string().trim().min(1).max(500) }).optional().nullable(),
+  soilMoisture: z.object({ reading: z.number().min(-10000).max(10000).nullable(), unit: text(20), probe: text(120), observedAt: when.optional().nullable() }).optional().nullable(),
+  soilCondition: text(60), pondLevel: optNum(100),
+  analysis: z.object({ n: optNum(1000000), p: optNum(1000000), k: optNum(1000000), unit: z.enum(['kg/m3', 'mg/L']), sampledOn: day.optional().nullable(), source: text(200) }).optional().nullable(),
+  cutOn: day.optional().nullable(), baledOn: day.optional().nullable(), wrappedOn: day.optional().nullable(), harvestedOn: day.optional().nullable(),
+  baleCount: optNum(100000), baleSize: text(60), baleWeightKg: optNum(5000), weightBasis: basis,
+  dmPercent: z.number().min(0).max(100).optional().nullable(), dmBasis: basis,
+  weighbridgeTonnes: optNum(1000000), additive: text(160), destination: text(160),
+  purpose: text(160), observations: text(2000), followUp: text(2000),
+}).strict();
 const appInput = z.object({
   activity: z.enum(ACTIVITIES).optional(),
   status: z.enum(STATUSES).optional(),
@@ -161,6 +177,12 @@ const appInput = z.object({
   waterRate: optNum(100000), tankVolume: optNum(100000), tankLoads: optNum(10000),
   windSpeed: optNum(300), windDirection: z.enum(['Calm', 'N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW', 'Variable']).optional().nullable(),
   temperature: z.number().min(-30).max(60).optional().nullable(),
+  details: detailsInput.optional(),
+  run: z.object({
+    geometry: z.object({ type: z.literal('LineString'), coordinates: z.array(z.array(z.number()).min(2)).min(2) }),
+    wettedWidthM: z.number().positive().max(500), driftM: z.number().min(0).max(500).optional().nullable(),
+  }).optional().nullable(),
+  linkedJobId: uuid.optional().nullable(),
 });
 
 applicationsRouter.get('/', route(async (req, res) => {
