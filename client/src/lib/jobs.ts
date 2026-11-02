@@ -7,6 +7,37 @@ export interface CatalogueProduct {
   registrationNumber: string | null; labelUrl: string | null; sourceUrl: string | null; sourceNote: string | null;
   verifiedOn: string | null; verification: "verified" | "farm_entered" | "unverified"; aliases: string[]; blend: any;
   notes: string | null; version: number; favourite: boolean | null; nickname: string | null; lastUsedAt: string | null;
+  sdsUrl?: string | null;
+}
+export interface ActiveIngredient { name: string; concentration: number | null; unit: string | null }
+export interface MixLine {
+  id: string; productId: string; productVersion: number; role: "product" | "adjuvant"; rate: number | null; rateUnit: string;
+  labelRef: string | null; actualQuantity: number | null; actualUnit: string | null;
+  productSnapshot: { name: string; supplier: string | null; category: string | null; verification: string; verifiedOn: string | null;
+    activeIngredients: ActiveIngredient[] | null; formulation: string | null; labelUrl: string | null; sdsUrl: string | null; sourceUrl: string | null };
+}
+export type RestrictionState = "not_started" | "unresolved" | "not_applicable" | "active" | "ended";
+export interface Restriction {
+  id: string; mixId: string | null; product: string | null; kind: "grazing" | "harvest" | "reentry" | "other";
+  status: "unresolved" | "confirmed" | "not_applicable"; periodValue: number | null; periodUnit: "hours" | "days" | null;
+  appliesTo: string | null; ruleSource: string | null; appliesFrom: string | null; endsAt: string | null; notes: string | null;
+  confirmedBy: string | null; confirmedAt: string | null; state: RestrictionState;
+}
+export interface RestrictionPosition { state: "not_started" | "unresolved" | "active" | "clear"; until: string | null }
+export interface SprayDetail {
+  crop: string | null; target: string | null; waterRate: number | null; tankVolume: number | null; tankLoads: number | null;
+  windSpeed: number | null; windDirection: string | null; temperature: number | null; operatorCert: string | null;
+  mix: MixLine[]; restrictions: Restriction[];
+  totals: {
+    netHa: number; waterRate: number | null; waterL: number | null; tankVolume: number | null; tankLoadsPlanned: number | null; tankLoadsUsed: number | null;
+    products: { mixId: string; product: string; planned: number | null; plannedUnit: string; reason: string | null; used: number | null; usedUnit: string | null; issues: string[] }[];
+  };
+  summary: { grazing: RestrictionPosition | null; harvest: RestrictionPosition | null; reentry: RestrictionPosition | null };
+}
+export interface ActiveRestriction {
+  id: string; applicationId: string; kind: string; status: string; endsAt: string | null; periodValue: number | null; periodUnit: string | null;
+  ruleSource: string | null; product: string | null; appliedAt: string; title: string | null; target: string | null; areas: string | null;
+  geometry: GeoJSON.Geometry | null;
 }
 export interface JobLine {
   id: string; pastureId: string | null; name: string | null; partial: boolean; grossHa: number; excludedHa: number; netHa: number;
@@ -15,6 +46,7 @@ export interface JobLine {
   rate: number | null; rateUnit: string; plannedQuantity: number | null; appliedQuantity: number | null; quantityUnit: string;
   recordId: string | null; geometry: GeoJSON.MultiPolygon;
 }
+// Spray lines carry no product of their own (productSnapshot is null); the job's mix applies
 export interface Docket {
   id: string; number: string; supplier: string | null; docketDate: string | null; productId: string | null; productName: string | null;
   quantity: number | null; unit: string | null; cost: number | null; notes: string | null; allocated: number | null;
@@ -26,11 +58,13 @@ export interface Job {
   supplier: string | null; contractor: string | null; operator: string | null; equipment: string | null; weather: string | null;
   notes: string | null; cost: number | null; version: number; createdBy: string | null; lines: JobLine[]; dockets: Docket[];
   reconciliation: { product: string; plannedKg: number; deliveredKg: number | null; appliedKg: number | null; unknownUnits: boolean; issues: string[] }[];
-  nutrients: { basis: "applied" | "planned" | "mixed" | null; kg: Record<string, number>; perHa: Record<string, number> | null; netHa: number; notCounted: string[] };
+  nutrients: { basis: "applied" | "planned" | "mixed" | null; kg: Record<string, number>; perHa: Record<string, number> | null; netHa: number; notCounted: string[] } | null;
+  spray: SprayDetail | null;
 }
 export interface JobSummary {
   id: string; activity: string; status: Job["status"]; title: string | null; plannedOn: string | null; completedAt: string | null;
   evidence: string; contractor: string | null; supplier: string | null; products: string | null; netHa: number | null; dockets: number;
+  target: string | null; restriction: SprayDetail["summary"] | null;
   lines: { id: string; name: string | null; pastureId: string | null; status: string; product: string; rate: number | null; rateUnit: string; geometry: GeoJSON.MultiPolygon }[] | null;
 }
 export interface NewLine { key: string; pastureId?: string | null; geometry?: GeoJSON.Geometry | null; name?: string | null; productId?: string | null; rate?: number | null; rateUnit: string; appliedQuantity?: number | null }
@@ -40,6 +74,11 @@ export const JOB_STATUSES: { key: Job["status"]; label: string }[] = [
   { key: "completed", label: "Completed" }, { key: "cancelled", label: "Cancelled" },
 ];
 export const FERT_UNITS = ["kg/ha", "t/ha", "L/ha"];
+// Hectare rates, and rates per 100 L of water (concentration directions) kept apart
+export const SPRAY_UNITS = ["L/ha", "mL/ha", "kg/ha", "g/ha", "L/100L", "mL/100L", "kg/100L", "g/100L"];
+export const QTY_UNITS = ["L", "mL", "kg", "g"];
+export const WIND_DIRECTIONS = ["Calm", "N", "NE", "E", "SE", "S", "SW", "W", "NW", "Variable"];
+export const RESTRICTION_LABELS: Record<Restriction["kind"], string> = { grazing: "Grazing", harvest: "Harvest", reentry: "Re-entry", other: "Other" };
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { credentials: "include", ...init });
@@ -70,8 +109,17 @@ export const jobsApi = {
   },
   linkDocket: (id: string, docketId: string, allocated?: number | null) => send<Job>("POST", `/api/applications/${id}/dockets`, { docketId, allocated: allocated ?? null }),
   unlinkDocket: (id: string, docketId: string) => send<Job>("DELETE", `/api/applications/${id}/dockets/${docketId}`),
+  used: (id: string, b: { tankLoads?: number | null; used: { mixId: string; quantity: number | null; unit: string | null }[] }) => send<Job>("PUT", `/api/applications/${id}/used`, b),
+  addRestriction: (id: string, b: any) => send<Job>("POST", `/api/applications/${id}/restrictions`, b),
+  saveRestriction: (id: string, rid: string, b: any) => send<Job>("PUT", `/api/applications/${id}/restrictions/${rid}`, b),
+  deleteRestriction: (id: string, rid: string) => send<Job>("DELETE", `/api/applications/${id}/restrictions/${rid}`),
+  restrictions: (q: { pastureId?: string; kind?: string; at?: string }) =>
+    api<ActiveRestriction[]>(`/api/restrictions?${new URLSearchParams(Object.entries(q).filter(([, v]) => v) as any)}`),
   dockets: (q: string) => api<{ id: string; number: string; supplier: string | null; docketDate: string | null; productName: string | null; quantity: number | null; unit: string | null; jobs: number }[]>(`/api/dockets?q=${encodeURIComponent(q)}`),
 };
 
 export const analysisText = (p: Pick<CatalogueProduct, "N" | "P" | "K" | "S" | "Mg" | "Ca">) =>
   (["N", "P", "K", "S", "Mg", "Ca"] as const).filter(k => p[k] != null && (p[k] as number) > 0).map(k => `${k} ${p[k]}`).join(" · ") || (p.N == null ? "analysis not known" : "no N, P, K, S, Mg or Ca");
+
+export const activesText = (a: ActiveIngredient[] | null | undefined) =>
+  (a ?? []).map(x => `${x.concentration != null ? `${x.concentration} ${x.unit ?? ""} ` : ""}${x.name}`.trim()).join(" + ") || "active ingredient not listed";

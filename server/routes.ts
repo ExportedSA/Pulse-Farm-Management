@@ -73,7 +73,7 @@ import stockReconRouter from "./routes/stock-recon";
 import paddockMapRouter from "./routes/paddock-map";
 import healthReportsRouter from "./routes/health-reports";
 import farmMapRouter from "./routes/farm-map";
-import { catalogueRouter, applicationsRouter, docketsRouter } from "./routes/applications";
+import { catalogueRouter, applicationsRouter, docketsRouter, restrictionsRouter } from "./routes/applications";
 import { tagsRouter, attachmentsRouter, searchRouter } from "./routes/farm-data";
 import animalTagsRouter from "./routes/animal-tags";
 // Phase overlay routes
@@ -187,6 +187,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/catalogue", requireAuth, catalogueRouter);
   app.use("/api/applications", requireAuth, applicationsRouter);
   app.use("/api/dockets", requireAuth, docketsRouter);
+  app.use("/api/restrictions", requireAuth, restrictionsRouter);
   app.use("/api/tags", requireAuth, tagsRouter);
   app.use("/api/attachments", requireAuth, attachmentsRouter);
   app.use("/api/search", requireAuth, searchRouter);

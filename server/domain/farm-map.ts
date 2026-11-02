@@ -20,6 +20,8 @@ export const DEFAULT_LAYERS: { key: string; name: string; color: string; fillOpa
   { key: 'effluent', name: 'Effluent', color: '#5f3dc4', fillOpacity: 0.3, records: ['effluent'] },
   { key: 'slurry', name: 'Slurry', color: '#862e9c', fillOpacity: 0.3 },
   { key: 'spraying', name: 'Spraying', color: '#9c36b5', fillOpacity: 0.3, records: ['spray'] },
+  // Paddocks under a spray restriction (worked out from jobs, not drawn)
+  { key: 'restrictions', name: 'Spray restrictions', color: '#e8590c', fillOpacity: 0.25 },
   { key: 'baleage', name: 'Baleage', color: '#a87d10', fillOpacity: 0.3, records: ['baleage'] },
   { key: 'silage', name: 'Silage', color: '#d9480f', fillOpacity: 0.3 },
   { key: 'topping', name: 'Topping', color: '#1971c2', fillOpacity: 0.3 },
@@ -28,6 +30,19 @@ export const DEFAULT_LAYERS: { key: string; name: string; color: string; fillOpa
 ];
 
 export const rowsOf = (r: any) => (r?.rows ?? r) as any[];
+/**
+ * Raw queries return timestamp columns as text in UTC ("2026-11-01 22:30:00", or "+00" for
+ * timestamptz). new Date() on that text would read it as server-local time, so convert here.
+ */
+export function isoUtc(v: unknown): string | null {
+  if (v == null) return null;
+  if (v instanceof Date) return v.toISOString();
+  let t = String(v).trim().replace(' ', 'T');
+  if (/T[\d:.]+[+-]\d\d$/.test(t)) t += ':00';
+  else if (!/(Z|[+-]\d\d:?\d\d)$/i.test(t)) t += 'Z';
+  const d = new Date(t);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
 
 // A list of ids as a Postgres uuid[] parameter
 export const uuidArray = (ids: string[]) => sql`ARRAY[${sql.join(ids.map(id => sql`${id}`), sql`, `)}]::uuid[]`;

@@ -8,7 +8,7 @@ import { MapError, rowsOf } from './farm-map';
 
 export const PRODUCT_KINDS = ['fertiliser', 'spray', 'effluent'] as const;
 export const FERTILISER_CATEGORIES = ['nitrogen', 'phosphate', 'potassium', 'sulphur', 'lime', 'calcium', 'magnesium', 'trace', 'liquid', 'compound', 'blend'] as const;
-export const SPRAY_CATEGORIES = ['herbicide', 'insecticide', 'fungicide', 'adjuvant', 'wetting agent', 'other'] as const;
+export const SPRAY_CATEGORIES = ['herbicide', 'insecticide', 'fungicide', 'adjuvant', 'wetting agent', 'plant growth regulator', 'molluscicide', 'other'] as const;
 
 // Converting oxide-basis analyses (P2O5, K2O, SO3, MgO, CaO) to elemental, by molar mass
 export const OXIDE_TO_ELEMENT: Record<string, number> = { P: 0.4364, K: 0.8301, S: 0.4005, Mg: 0.6030, Ca: 0.7147 };
@@ -222,5 +222,6 @@ export async function productSnapshot(exec: any, farmId: string, productId: stri
     verifiedOn: p.verifiedOn, sourceUrl: p.sourceUrl, analysisBasis: p.analysisBasis,
     analysis: Object.fromEntries(NUTRIENTS.map(k => [k, p[k]])),
     blend: p.blend, registrationNumber: p.registrationNumber, activeIngredients: p.activeIngredients,
+    formulation: p.formulation, labelUrl: p.labelUrl, sdsUrl: p.sdsUrl,
   };
 }

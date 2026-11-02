@@ -176,7 +176,10 @@ router.get('/map', async (req, res) => {
       features: records.map(r => {
         const d = r.details ?? {};
         const withholdingDays = r.type === 'spray' ? num(d.withholdingDays) : undefined;
-        const withholdingUntil = withholdingDays != null ? new Date(r.occurredAt.getTime() + withholdingDays * daysMs) : undefined;
+        const withholdingUntil = d.withholdingUntil ? new Date(d.withholdingUntil)
+          : withholdingDays != null ? new Date(r.occurredAt.getTime() + withholdingDays * daysMs) : undefined;
+        // From a spray job whose grazing restriction isn't resolved yet: treat as in force
+        const unresolved = r.type === 'spray' && d.restrictionUnresolved === true;
         return {
           type: 'Feature',
           id: r.id,
@@ -192,7 +195,8 @@ router.get('/map', async (req, res) => {
             rate: num(d.rate) ?? null,
             rateUnit: d.rateUnit ?? null,
             withholdingUntil: withholdingUntil?.toISOString() ?? null,
-            withholdingActive: withholdingUntil ? withholdingUntil.getTime() > now : false,
+            withholdingActive: unresolved || (withholdingUntil ? withholdingUntil.getTime() > now : false),
+            restrictionUnresolved: unresolved,
             applicationId: d.applicationId ?? null,
           },
         };

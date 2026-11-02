@@ -157,7 +157,8 @@ export async function seasonSummary(farmId: string, season: string) {
       case 'spray': {
         sprays++;
         const days = num(d.withholdingDays);
-        if (days !== undefined && r.occurredAt.getTime() + days * DAY_MS > now) activeWithholding++;
+        const until = d.withholdingUntil ? new Date(d.withholdingUntil).getTime() : days !== undefined ? r.occurredAt.getTime() + days * DAY_MS : undefined;
+        if (d.restrictionUnresolved === true || (until !== undefined && until > now)) activeWithholding++;
         break;
       }
       case 'monthly_check':

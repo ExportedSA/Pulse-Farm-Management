@@ -7,9 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { FARM_MAP_KEY, type MapState } from "@/lib/farm-map";
+import { FARM_MAP_KEY, type MapLayer, type MapState } from "@/lib/farm-map";
 import {
-  FERT_UNITS, JOB_STATUSES, analysisText, jobsApi, type CatalogueProduct, type Job, type JobSummary, type NewLine,
+  FERT_UNITS, JOB_STATUSES, activesText, analysisText, jobsApi, type CatalogueProduct, type Job, type JobSummary, type NewLine,
 } from "@/lib/jobs";
 import type { Overlay } from "./FarmMapCanvas";
 
@@ -26,7 +26,7 @@ export const JOBS_KEY = ["/api/applications"];
 
 function VerificationBadge({ p }: { p: Pick<CatalogueProduct, "verification" | "verifiedOn"> }) {
   return p.verification === "verified"
-    ? <span className="text-[10px] rounded px-1 bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300" title={`Checked against the supplier's published analysis on ${p.verifiedOn}`}>Verified {p.verifiedOn}</span>
+    ? <span className="text-[10px] rounded px-1 bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300" title={`Checked against the supplier's published details on ${p.verifiedOn}`}>Verified {p.verifiedOn}</span>
     : p.verification === "farm_entered"
       ? <span className="text-[10px] rounded px-1 bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300" title="Added by this farm; its details haven't been checked">Farm-entered</span>
       : <span className="text-[10px] rounded px-1 bg-gray-200 text-gray-700">Unverified</span>;
@@ -50,10 +50,13 @@ export function ProductPicker({ kind = "fertiliser", value, onChange, label = "P
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, []);
+  const describe = (p: CatalogueProduct) =>
+    kind === "spray" ? `${activesText(p.activeIngredients)}${p.formulation ? ` · ${p.formulation}` : ""}` : analysisText(p);
   const star = async (p: CatalogueProduct) => {
     await jobsApi.pref(p.id, { favourite: !p.favourite });
     queryClient.invalidateQueries({ queryKey: ["/api/catalogue"] });
   };
+  if (adding && kind === "spray") return <CustomSprayForm initialName={q} onCancel={() => setAdding(false)} onCreated={async id => { setAdding(false); onChange(await jobsApi.product(id)); queryClient.invalidateQueries({ queryKey: ["/api/catalogue"] }); }} />;
   if (adding) return <CustomProductForm kind={kind} initialName={q} onCancel={() => setAdding(false)} onCreated={async id => { setAdding(false); onChange(await jobsApi.product(id)); queryClient.invalidateQueries({ queryKey: ["/api/catalogue"] }); }} />;
   return (
     <div className="space-y-1 relative" ref={boxRef}>
@@ -61,11 +64,11 @@ export function ProductPicker({ kind = "fertiliser", value, onChange, label = "P
       {value && !open ? (
         <button type="button" className="w-full text-left rounded-md border px-2 py-1.5 hover:bg-muted" onClick={() => { setOpen(true); setQ(""); }}>
           <div className="flex items-center gap-2"><span className="font-medium text-sm">{value.nickname ?? value.name}</span><VerificationBadge p={value} /></div>
-          <div className="text-xs text-muted-foreground">{value.supplier ?? "—"} · {analysisText(value)}</div>
+          <div className="text-xs text-muted-foreground">{value.supplier ?? "—"} · {describe(value)}</div>
         </button>
       ) : (
         <Input autoFocus={open} value={q} onFocus={() => setOpen(true)} onChange={e => { setQ(e.target.value); setOpen(true); }}
-          placeholder="Search: name, supplier, ingredient, registration no." aria-label={label} />
+          placeholder={kind === "spray" ? "Search: name, supplier, active ingredient" : "Search: name, supplier, ingredient, registration no."} aria-label={label} />
       )}
       {open && (
         <div className="absolute z-[900] mt-1 w-full max-h-80 overflow-y-auto rounded-md border bg-popover shadow-lg">
@@ -76,7 +79,7 @@ export function ProductPicker({ kind = "fertiliser", value, onChange, label = "P
                   <span className="text-sm font-medium">{p.nickname ? `${p.nickname} (${p.name})` : p.name}</span>
                   <VerificationBadge p={p} />
                 </div>
-                <div className="text-xs text-muted-foreground">{p.supplier ?? "Own product"}{p.category ? ` · ${p.category}` : ""} · {analysisText(p)}{p.registrationNumber ? ` · reg ${p.registrationNumber}` : ""}</div>
+                <div className="text-xs text-muted-foreground">{p.supplier ?? "Own product"}{p.category ? ` · ${p.category}` : ""} · {describe(p)}{p.registrationNumber ? ` · reg ${p.registrationNumber}` : ""}</div>
               </button>
               <button type="button" className="p-1" onClick={() => star(p)} aria-label={p.favourite ? `Unfavourite ${p.name}` : `Favourite ${p.name}`}>
                 <Star className={cn("h-4 w-4", p.favourite ? "fill-amber-400 text-amber-500" : "text-muted-foreground")} />
@@ -198,9 +201,77 @@ export function CatalogueCoverage() {
   );
 }
 
+const SPRAY_CATEGORIES = ["herbicide", "insecticide", "fungicide", "adjuvant", "wetting agent", "plant growth regulator", "molluscicide", "other"];
+
+function CustomSprayForm({ initialName, onCreated, onCancel }: { initialName: string; onCreated: (id: string) => void; onCancel: () => void }) {
+  const [name, setName] = useState(initialName);
+  const [supplier, setSupplier] = useState("");
+  const [category, setCategory] = useState("herbicide");
+  const [formulation, setFormulation] = useState("");
+  const [actives, setActives] = useState<{ name: string; concentration: string; unit: string }[]>([{ name: "", concentration: "", unit: "g/L" }]);
+  const [liquid, setLiquid] = useState(true);
+  const [registration, setRegistration] = useState("");
+  const [labelUrl, setLabelUrl] = useState("");
+  const [nickname, setNickname] = useState("");
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (!name.trim()) return toast.error("Give the product a name");
+    setSaving(true);
+    try {
+      const r = await jobsApi.addProduct({
+        kind: "spray", name: name.trim(), supplier: supplier || null, category, formulation: formulation || null,
+        units: liquid ? ["L/ha", "mL/ha", "L/100L", "mL/100L"] : ["kg/ha", "g/ha", "kg/100L", "g/100L"],
+        // Blank concentration stays unknown
+        activeIngredients: actives.filter(a => a.name.trim()).map(a => ({ name: a.name.trim(), concentration: a.concentration === "" ? null : Number(a.concentration), unit: a.concentration === "" ? null : a.unit })),
+        registrationNumber: registration || null, labelUrl: labelUrl || null, nickname: nickname || null, notes: notes || null,
+      });
+      toast.success(`${name} added. It's marked farm-entered until its label is checked.`);
+      onCreated(r.id);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="space-y-2 rounded-md border p-2 bg-muted/30">
+      <div className="flex items-center justify-between"><h3 className="text-sm font-semibold">Add custom spray product</h3><button type="button" onClick={onCancel} aria-label="Cancel"><X className="h-4 w-4" /></button></div>
+      <Input value={name} onChange={e => setName(e.target.value)} placeholder="Product name (as on the label)" aria-label="Product name" />
+      <div className="grid grid-cols-2 gap-2">
+        <Input value={supplier} onChange={e => setSupplier(e.target.value)} placeholder="Manufacturer or supplier" aria-label="Supplier" />
+        <select className={selectClass} value={category} onChange={e => setCategory(e.target.value)} aria-label="Category">{SPRAY_CATEGORIES.map(c => <option key={c}>{c}</option>)}</select>
+        <Input value={formulation} onChange={e => setFormulation(e.target.value)} placeholder="Formulation (e.g. soluble concentrate)" aria-label="Formulation" />
+        <select className={selectClass} value={liquid ? "liquid" : "solid"} onChange={e => setLiquid(e.target.value === "liquid")} aria-label="Measured in">
+          <option value="liquid">Measured in litres</option><option value="solid">Measured in kilograms</option>
+        </select>
+      </div>
+      <Label className="text-xs">Active ingredients</Label>
+      {actives.map((a, i) => (
+        <div key={i} className="grid grid-cols-[1fr_4.5rem_4.5rem] gap-1">
+          <Input className="h-8 text-sm" value={a.name} placeholder="e.g. triclopyr" aria-label="Active ingredient" onChange={e => setActives(xs => xs.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+          <Input className="h-8 text-sm" type="number" inputMode="decimal" value={a.concentration} placeholder="amount" aria-label="Concentration" onChange={e => setActives(xs => xs.map((x, j) => (j === i ? { ...x, concentration: e.target.value } : x)))} />
+          <select className="h-8 rounded-md border bg-background px-1 text-xs" value={a.unit} aria-label="Concentration unit" onChange={e => setActives(xs => xs.map((x, j) => (j === i ? { ...x, unit: e.target.value } : x)))}>
+            {["g/L", "g/kg", "mL/L"].map(u => <option key={u}>{u}</option>)}
+          </select>
+        </div>
+      ))}
+      <button type="button" className="text-xs underline" onClick={() => setActives(xs => [...xs, { name: "", concentration: "", unit: "g/L" }])}>Add active ingredient</button>
+      <div className="grid grid-cols-2 gap-2">
+        <Input value={registration} onChange={e => setRegistration(e.target.value)} placeholder="ACVM no. (optional)" aria-label="Registration number" />
+        <Input value={nickname} onChange={e => setNickname(e.target.value)} placeholder="Farm nickname (optional)" aria-label="Nickname" />
+      </div>
+      <Input value={labelUrl} onChange={e => setLabelUrl(e.target.value)} placeholder="Label or SDS link (optional)" aria-label="Label link" />
+      <Textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Notes" aria-label="Notes" />
+      <p className="text-xs text-muted-foreground">Rates and withholding periods aren't stored with the product: they depend on the crop, target and label, so they're entered on each job.</p>
+      <div className="flex gap-2"><Button type="button" size="sm" onClick={save} disabled={saving}>{saving ? "Saving…" : "Add product"}</Button><Button type="button" size="sm" variant="outline" onClick={onCancel}>Cancel</Button></div>
+    </div>
+  );
+}
+
 // ===== New fertiliser job =====
 
-export interface JobDraft { lines: NewLine[]; planId?: string | null; title?: string | null }
+export interface JobDraft { activity?: "fertiliser" | "spray"; lines: NewLine[]; planId?: string | null; title?: string | null }
 
 /**
  * Select paddocks (tap them on the map) → product → rate → save. Each paddock can have its own
@@ -419,17 +490,17 @@ export function JobView({ jobId, canEdit, onClose, onJob }: { jobId: string; can
       </section>
 
       <section className="rounded-md border p-2 text-sm space-y-1">
-        <h3 className="font-semibold">{job.nutrients.basis === "planned" ? "Nutrients planned" : "Nutrients applied"}</h3>
-        {job.nutrients.basis ? (
+        <h3 className="font-semibold">{job.nutrients!.basis === "planned" ? "Nutrients planned" : "Nutrients applied"}</h3>
+        {job.nutrients!.basis ? (
           <>
             <div className="grid grid-cols-6 text-center text-xs tabular-nums">
-              {Object.entries(job.nutrients.kg).map(([k, v]) => <div key={k}><div className="text-muted-foreground">{k}</div>{v} kg</div>)}
+              {Object.entries(job.nutrients!.kg).map(([k, v]) => <div key={k}><div className="text-muted-foreground">{k}</div>{v} kg</div>)}
             </div>
-            {job.nutrients.perHa && <p className="text-xs tabular-nums">Per hectare (net {fmtHa(job.nutrients.netHa)}): {Object.entries(job.nutrients.perHa).filter(([, v]) => v > 0).map(([k, v]) => `${k} ${v}`).join(" · ") || "—"} kg/ha</p>}
-            <p className="text-xs text-muted-foreground">kg of nutrient (not kg of product), from {job.nutrients.basis === "applied" ? "the applied amounts" : job.nutrients.basis === "planned" ? "the planned amounts" : "applied amounts where entered, planned elsewhere"} and verified analyses.</p>
+            {job.nutrients!.perHa && <p className="text-xs tabular-nums">Per hectare (net {fmtHa(job.nutrients!.netHa)}): {Object.entries(job.nutrients!.perHa).filter(([, v]) => v > 0).map(([k, v]) => `${k} ${v}`).join(" · ") || "—"} kg/ha</p>}
+            <p className="text-xs text-muted-foreground">kg of nutrient (not kg of product), from {job.nutrients!.basis === "applied" ? "the applied amounts" : job.nutrients!.basis === "planned" ? "the planned amounts" : "applied amounts where entered, planned elsewhere"} and verified analyses.</p>
           </>
         ) : <p className="text-xs text-muted-foreground">Nothing to total yet.</p>}
-        {job.nutrients.notCounted.map((n, i) => <p key={i} className="text-xs text-amber-800">Not counted: {n}</p>)}
+        {job.nutrients!.notCounted.map((n, i) => <p key={i} className="text-xs text-amber-800">Not counted: {n}</p>)}
       </section>
 
       <section className="space-y-1">
@@ -578,13 +649,13 @@ function DocketForm({ job, onDone }: { job: Job; onDone: (j?: Job) => void }) {
 
 // ===== Lists and map =====
 
-export function JobsSection({ jobs, onOpen, onNew, canRecord }: { jobs: JobSummary[]; onOpen: (id: string) => void; onNew: () => void; canRecord: boolean }) {
+export function JobsSection({ jobs, onOpen, onNew, canRecord }: { jobs: JobSummary[]; onOpen: (id: string) => void; onNew: (activity: "fertiliser" | "spray") => void; canRecord: boolean }) {
   const [status, setStatus] = useState("open");
   const list = jobs.filter(j => status === "all" || (status === "open" ? ["draft", "planned", "in_progress"].includes(j.status) : j.status === status));
   return (
     <section className="space-y-2">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Fertiliser jobs</h2>
+        <h2 className="text-sm font-semibold">Fertiliser and spray jobs</h2>
         <select className="h-7 rounded border bg-background px-1 text-xs" value={status} onChange={e => setStatus(e.target.value)} aria-label="Job status">
           <option value="open">Not done</option><option value="completed">Completed</option><option value="all">All</option>
         </select>
@@ -594,14 +665,22 @@ export function JobsSection({ jobs, onOpen, onNew, canRecord }: { jobs: JobSumma
           {list.map(j => (
             <li key={j.id}>
               <button className="w-full text-left px-2 py-1.5 hover:bg-muted" onClick={() => onOpen(j.id)}>
-                <div className="flex justify-between gap-2"><span className="truncate">{j.title || j.products}</span><span className={cn("text-xs", j.status === "completed" ? "text-green-700" : "text-amber-700")}>{JOB_STATUSES.find(s => s.key === j.status)?.label}</span></div>
-                <div className="text-xs text-muted-foreground">{(j.completedAt ?? j.plannedOn ?? "").slice(0, 10)} · {j.netHa != null ? `${j.netHa.toFixed(2)} ha` : ""}{j.dockets ? ` · ${j.dockets} docket${j.dockets === 1 ? "" : "s"}` : ""}</div>
+                <div className="flex justify-between gap-2"><span className="truncate">{j.activity === "spray" ? "Spray: " : ""}{j.title || j.products}</span><span className={cn("text-xs", j.status === "completed" ? "text-green-700" : "text-amber-700")}>{JOB_STATUSES.find(s => s.key === j.status)?.label}</span></div>
+                <div className="text-xs text-muted-foreground">{(j.completedAt ?? j.plannedOn ?? "").slice(0, 10)} · {j.netHa != null ? `${j.netHa.toFixed(2)} ha` : ""}{j.dockets ? ` · ${j.dockets} docket${j.dockets === 1 ? "" : "s"}` : ""}
+                  {j.restriction?.grazing?.state === "unresolved" && <span className="text-red-700"> · grazing restriction unresolved</span>}
+                  {j.restriction?.grazing?.state === "active" && <span className="text-orange-700"> · no grazing until {new Date(j.restriction.grazing.until!).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</span>}
+                </div>
               </button>
             </li>
           ))}
         </ul>
       )}
-      {canRecord && <Button size="sm" variant="outline" onClick={onNew}><Plus className="h-4 w-4 mr-1" />New fertiliser job</Button>}
+      {canRecord && (
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" onClick={() => onNew("fertiliser")}><Plus className="h-4 w-4 mr-1" />Fertiliser job</Button>
+          <Button size="sm" variant="outline" onClick={() => onNew("spray")}><Plus className="h-4 w-4 mr-1" />Spray job</Button>
+        </div>
+      )}
     </section>
   );
 }
@@ -609,17 +688,20 @@ export function JobsSection({ jobs, onOpen, onNew, canRecord }: { jobs: JobSumma
 /**
  * Jobs on the fertiliser layer: planned dashed, completed solid
  */
-export function jobOverlays(jobs: JobSummary[], layer: MapState["layers"][number] | undefined): Overlay[] {
-  if (!layer) return [];
+export function jobOverlays(jobs: JobSummary[], layers: MapLayer[]): Overlay[] {
   const out: Overlay[] = [];
   for (const j of jobs) {
     if (j.status === "cancelled") continue;
+    const layer = layers.find(l => l.key === (j.activity === "spray" ? "spraying" : "fertiliser"));
+    if (!layer) continue;
     for (const l of j.lines ?? []) {
       const done = j.status === "completed";
       out.push({
         key: `job-${j.id}-${l.id}`, geometry: l.geometry, layerId: layer.id, rank: 3,
         sel: { type: "job", id: j.id },
-        pickLabel: `${done ? "Fertiliser" : "Planned"}: ${l.product} ${l.rate ?? ""} ${l.rateUnit} · ${(j.completedAt ?? j.plannedOn ?? "").slice(0, 10)}`,
+        pickLabel: j.activity === "spray"
+          ? `${done ? "Spray" : "Planned spray"}: ${j.products ?? ""} · ${(j.completedAt ?? j.plannedOn ?? "").slice(0, 10)}`
+          : `${done ? "Fertiliser" : "Planned"}: ${l.product} ${l.rate ?? ""} ${l.rateUnit} · ${(j.completedAt ?? j.plannedOn ?? "").slice(0, 10)}`,
         style: done
           ? { color: layer.style.color, weight: layer.style.weight, fillColor: layer.style.fillColor, fillOpacity: layer.style.fillOpacity }
           : { color: layer.style.color, weight: 2, dashArray: "6 6", fillColor: layer.style.fillColor, fillOpacity: layer.style.fillOpacity / 3 },

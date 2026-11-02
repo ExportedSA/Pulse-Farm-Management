@@ -10,9 +10,12 @@ import {
   createCustomProduct, updateCustomProduct, archiveCustomProduct, setProductPref,
 } from '../domain/catalogue';
 import {
-  STATUSES, FERTILISER_UNITS, createApplication, updateApplication, setApplied, cancelApplication, getApplication,
+  STATUSES, ACTIVITIES, FERTILISER_UNITS, createApplication, updateApplication, setApplied, setSprayUsed, cancelApplication, getApplication,
   listApplications, createDocket, linkDocket, unlinkDocket, searchDockets,
 } from '../domain/applications';
+import {
+  SPRAY_UNITS, QTY_UNITS, RESTRICTION_KINDS, RESTRICTION_STATUSES, addRestriction, updateRestriction, deleteRestriction, activeRestrictions,
+} from '../domain/sprays';
 
 // /api/catalogue (products), /api/applications (jobs) and /api/dockets.
 // Viewers look; everyone else on the farm records work and adds farm-entered products;
@@ -123,13 +126,23 @@ const lineInput = z.object({
   pastureId: uuid.optional().nullable(),
   geometry: geometry.optional().nullable(),
   name: text(120),
-  productId: uuid,
+  productId: uuid.optional().nullable(),
   rate: z.number().min(0).max(1000000).optional().nullable(),
   rateUnit: z.enum(Object.keys(FERTILISER_UNITS) as [string, ...string[]]).optional(),
   appliedQuantity: z.number().min(0).max(100000000).optional().nullable(),
 });
+const mixInput = z.object({
+  productId: uuid,
+  role: z.enum(['product', 'adjuvant']).optional(),
+  rate: z.number().min(0).max(1000000).optional().nullable(),
+  rateUnit: z.enum(Object.keys(SPRAY_UNITS) as [string, ...string[]]),
+  labelRef: text(500),
+  actualQuantity: z.number().min(0).max(100000000).optional().nullable(),
+  actualUnit: z.enum(QTY_UNITS).optional().nullable(),
+});
+const optNum = (max: number) => z.number().min(0).max(max).optional().nullable();
 const appInput = z.object({
-  activity: z.enum(['fertiliser']).optional(),
+  activity: z.enum(ACTIVITIES).optional(),
   status: z.enum(STATUSES).optional(),
   title: text(160),
   plannedOn: day.optional().nullable(),
@@ -143,6 +156,11 @@ const appInput = z.object({
   clientId: z.string().max(64).optional().nullable(),
   lines: z.array(lineInput).max(200).optional(),
   version: z.number().int().optional(),
+  mix: z.array(mixInput).max(12).optional(),
+  crop: text(160), target: text(240), operatorCert: text(80),
+  waterRate: optNum(100000), tankVolume: optNum(100000), tankLoads: optNum(10000),
+  windSpeed: optNum(300), windDirection: z.enum(['Calm', 'N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW', 'Variable']).optional().nullable(),
+  temperature: z.number().min(-30).max(60).optional().nullable(),
 });
 
 applicationsRouter.get('/', route(async (req, res) => {
@@ -177,6 +195,52 @@ applicationsRouter.put('/:id/applied', route(async (req, res) => {
   await setApplied(farmId, userId, id, input);
   res.json(await getApplication(farmId, id));
 }, 'Failed to save the applied amounts'));
+
+applicationsRouter.put('/:id/used', route(async (req, res) => {
+  await requireRecorder(req);
+  const { farmId, userId } = ctx(req);
+  const id = uuid.parse(req.params.id);
+  const input = z.object({
+    tankLoads: optNum(10000),
+    used: z.array(z.object({ mixId: uuid, quantity: z.number().min(0).nullable(), unit: z.enum(QTY_UNITS).nullable() })).max(12),
+  }).parse(req.body);
+  await setSprayUsed(farmId, userId, id, input);
+  res.json(await getApplication(farmId, id));
+}, 'Failed to save the quantities used'));
+
+const restrictionInput = z.object({
+  kind: z.enum(RESTRICTION_KINDS).optional(),
+  mixId: uuid.optional().nullable(),
+  status: z.enum(RESTRICTION_STATUSES),
+  periodValue: z.number().min(0).max(10000).optional().nullable(),
+  periodUnit: z.enum(['hours', 'days']).optional().nullable(),
+  appliesTo: text(160), ruleSource: text(1000), notes: text(2000),
+});
+
+// Restrictions: anyone recording can enter what the label says; the end date is worked out
+applicationsRouter.post('/:id/restrictions', route(async (req, res) => {
+  await requireRecorder(req);
+  const { farmId, userId } = ctx(req);
+  const id = uuid.parse(req.params.id);
+  await addRestriction(farmId, userId, id, restrictionInput.parse(req.body));
+  res.status(201).json(await getApplication(farmId, id));
+}, 'Failed to add the restriction'));
+
+applicationsRouter.put('/:id/restrictions/:rid', route(async (req, res) => {
+  await requireRecorder(req);
+  const { farmId, userId } = ctx(req);
+  const id = uuid.parse(req.params.id);
+  await updateRestriction(farmId, userId, id, uuid.parse(req.params.rid), restrictionInput.parse(req.body));
+  res.json(await getApplication(farmId, id));
+}, 'Failed to save the restriction'));
+
+applicationsRouter.delete('/:id/restrictions/:rid', route(async (req, res) => {
+  await requireManager(req);
+  const { farmId, userId } = ctx(req);
+  const id = uuid.parse(req.params.id);
+  await deleteRestriction(farmId, userId, id, uuid.parse(req.params.rid));
+  res.json(await getApplication(farmId, id));
+}, 'Failed to remove the restriction'));
 
 applicationsRouter.delete('/:id', route(async (req, res) => {
   await requireManager(req);
@@ -222,6 +286,15 @@ applicationsRouter.delete('/:id/dockets/:docketId', route(async (req, res) => {
   await unlinkDocket(farmId, userId, id, uuid.parse(req.params.docketId));
   res.json(await getApplication(farmId, id));
 }, 'Failed to remove the docket'));
+
+// GET /api/restrictions?pastureId&at&kind=grazing,harvest - restrictions in force (unresolved ones count)
+export const restrictionsRouter = Router();
+restrictionsRouter.use(requireFarm);
+restrictionsRouter.get('/', route(async (req, res) => {
+  const q = z.object({ pastureId: uuid.optional(), at: when.optional(), kind: z.string().max(60).optional() }).parse(req.query);
+  const kinds = q.kind ? q.kind.split(',').filter(k => (RESTRICTION_KINDS as readonly string[]).includes(k)) : undefined;
+  res.json(await activeRestrictions(getFarmId(req)!, { pastureId: q.pastureId, at: q.at ? new Date(q.at).toISOString() : undefined, kinds }));
+}, 'Failed to check restrictions'));
 
 export const docketsRouter = Router();
 docketsRouter.use(requireFarm);

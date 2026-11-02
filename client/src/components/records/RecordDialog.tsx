@@ -14,6 +14,7 @@ import type { AreaGeometry } from "@shared/geo";
 import { AreaDrawer } from "./AreaDrawer";
 import { fetchPaddockMap, PADDOCK_MAP_KEY } from "@/lib/paddock-map";
 import { TankMixEditor, ProductPicker, type SprayProduct } from "./RecordInputs";
+import { RestrictionWarning } from "@/components/farm-map/SprayPanels";
 import {
   RECORD_TYPES,
   MONTHLY_CHECK_ITEMS,
@@ -369,6 +370,9 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray", preset
                     </button>
                   ))}
                 </div>
+              )}
+              {(def.type === "feed_out" || def.type === "baleage") && pastureIds.length > 0 && (
+                <RestrictionWarning pastureIds={pastureIds} kind={def.type === "feed_out" ? "grazing" : "harvest"} at={new Date(occurredAt).toISOString()} />
               )}
               {showMap ? (
                 <AreaDrawer value={area} onChange={setArea} color={def.color} background={paddockOutlines} />
