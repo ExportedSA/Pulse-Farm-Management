@@ -48,7 +48,7 @@ export default function JobPrintPage() {
   const exclusions = Array.from(new Map(job.lines.flatMap(l => l.exclusions).map(e => [e.id, e])).values());
 
   return (
-    <div className="p-4 max-w-4xl mx-auto space-y-4 text-sm print:p-0">
+    <div className="p-4 max-w-4xl mx-auto space-y-4 text-sm bg-background min-h-full print:p-0">
       <div className="flex items-center gap-2 print:hidden">
         <Button asChild variant="ghost" size="sm"><Link href="/app/farm-map"><ArrowLeft className="h-4 w-4 mr-1" />Farm map</Link></Button>
         <Button size="sm" className="ml-auto" onClick={() => window.print()}><Printer className="h-4 w-4 mr-1" />Print / save as PDF</Button>

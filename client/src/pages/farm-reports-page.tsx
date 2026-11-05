@@ -89,7 +89,7 @@ export default function FarmReportsPage() {
   const empty = { jobs: "No jobs in these dates.", sprays: "No sprays in these dates.", nutrients: "No completed fertiliser or effluent with a known analysis.", harvest: "No baleage or silage.", dockets: "No dockets." };
 
   return (
-    <div className="p-4 space-y-4 max-w-6xl mx-auto print:p-0">
+    <div className="p-4 space-y-4 max-w-6xl mx-auto bg-background min-h-full print:p-0">
       <div className="flex flex-wrap items-center gap-2 print:hidden">
         <Button asChild variant="ghost" size="sm"><Link href="/app/farm-map"><ArrowLeft className="h-4 w-4 mr-1" />Farm map</Link></Button>
         <h1 className="text-xl font-bold text-pulse-forest mr-auto">Activity reports</h1>
