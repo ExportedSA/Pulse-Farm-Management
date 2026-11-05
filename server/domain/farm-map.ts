@@ -14,6 +14,9 @@ export type Geo = { type: string; coordinates: any };
 // The default layers every farm starts with (activity layers show records of that kind)
 export const DEFAULT_LAYERS: { key: string; name: string; color: string; fillOpacity: number; records?: string[] }[] = [
   { key: 'paddocks', name: 'Farm and paddocks', color: '#ffffff', fillOpacity: 0.08 },
+  // The farm's outer boundary and its fence lines, drawn over the satellite view
+  { key: 'boundary', name: 'Farm boundary', color: '#fcc419', fillOpacity: 0 },
+  { key: 'fences', name: 'Fence lines', color: '#ff922b', fillOpacity: 0 },
   { key: 'exclusions', name: 'Exclusion zones', color: '#e03131', fillOpacity: 0.25 },
   { key: 'fertiliser', name: 'Fertiliser', color: '#5c940d', fillOpacity: 0.3, records: ['fertiliser'] },
   { key: 'variable_rate', name: 'Variable-rate zones', color: '#2f9e44', fillOpacity: 0.3 },

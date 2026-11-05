@@ -6,7 +6,7 @@ import "leaflet/dist/leaflet.css";
 import { ArrowLeft, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useFarm } from "@/lib/farm-context";
-import { BASEMAPS, FARM_MAP_KEY, farmMap } from "@/lib/farm-map";
+import { BASEMAPS, FARM_MAP_KEY, defaultBasemap, farmMap, googleSession, googleTileUrl } from "@/lib/farm-map";
 import { ACTIVITY_LABELS, RESTRICTION_LABELS, activesText, jobsApi, type Activity, type Job } from "@/lib/jobs";
 
 // The job sheet for the contractor or operator: the map of where to work (and where not to), what
@@ -21,8 +21,16 @@ function JobMap({ job }: { job: Job }) {
   useEffect(() => {
     if (!ref.current || !state) return;
     const map = L.map(ref.current, { zoomControl: false, attributionControl: true });
-    const base = BASEMAPS[0];
-    L.tileLayer(base.url ?? "", { attribution: base.attribution, maxNativeZoom: base.maxNativeZoom, maxZoom: 21 }).addTo(map);
+    // The farm's imagery: Google satellite when available, else LINZ or Esri
+    const pick = BASEMAPS.find(b => b.key === defaultBasemap())!;
+    const esri = BASEMAPS[0];
+    if (pick.key === "google") {
+      googleSession()
+        .then(s => L.tileLayer(googleTileUrl(s), { attribution: `Map data ©${new Date().getFullYear()} Google`, maxNativeZoom: pick.maxNativeZoom, maxZoom: 21 }).addTo(map).bringToBack())
+        .catch(() => L.tileLayer(esri.url!, { attribution: esri.attribution, maxNativeZoom: esri.maxNativeZoom, maxZoom: 21 }).addTo(map).bringToBack());
+    } else {
+      L.tileLayer(pick.url ?? esri.url!, { attribution: pick.attribution, maxNativeZoom: pick.maxNativeZoom, maxZoom: 21 }).addTo(map);
+    }
     const group = L.featureGroup().addTo(map);
     state.paddocks.filter(p => p.geometry).forEach(p => {
       L.geoJSON(p.geometry as any, { style: { color: "#ffffff", weight: 1.5, fillOpacity: 0 } }).bindTooltip(p.name, { permanent: true, direction: "center", className: "!bg-white/80 !text-[10px] !p-0.5 !border-0" }).addTo(map);

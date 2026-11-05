@@ -85,7 +85,7 @@ export const farmMap = {
   split: (id: string, line: GeoJSON.LineString, newName: string) => send<{ kept: { areaHa: number }; created: { id: string; name: string; areaHa: number } }>("POST", `/api/farm-map/paddocks/${id}/split`, { line, newName }),
   merge: (keepId: string, otherIds: string[]) => send<{ areaHa: number }>("POST", "/api/farm-map/paddocks/merge", { keepId, otherIds }),
   history: (id: string) => api<BoundaryVersion[]>(`/api/farm-map/paddocks/${id}/history`),
-  createFeature: (b: { layerId: string; kind: MapFeature["kind"]; name?: string | null; notes?: string | null; geometry: GeoJSON.Geometry; radiusM?: number | null }) => send<{ id: string }>("POST", "/api/farm-map/features", b),
+  createFeature: (b: { layerId: string; kind: MapFeature["kind"]; name?: string | null; notes?: string | null; geometry: GeoJSON.Geometry; radiusM?: number | null; properties?: Record<string, unknown> }) => send<{ id: string }>("POST", "/api/farm-map/features", b),
   updateFeature: (id: string, b: Partial<{ layerId: string; name: string | null; notes: string | null; geometry: GeoJSON.Geometry; radiusM: number | null; version: number }>) => send("PATCH", `/api/farm-map/features/${id}`, b),
   deleteFeature: (id: string) => send("DELETE", `/api/farm-map/features/${id}`),
   createLayer: (b: { name: string; color?: string }) => send<{ id: string }>("POST", "/api/farm-map/layers", b),
@@ -163,6 +163,43 @@ export const BASEMAPS: Basemap[] = [
     maxNativeZoom: 20,
   },
 ];
+
+const GOOGLE_KEY: string | undefined = env.VITE_GOOGLE_MAPS_API_KEY;
+const SESSION_KEY = "pulse-google-tiles-session";
+
+/**
+ * A Google Map Tiles API session for satellite imagery. A session lasts about two weeks, so it's
+ * kept on the device and reused instead of starting a new one each time the map opens.
+ */
+export async function googleSession(): Promise<{ session: string; key: string }> {
+  if (!GOOGLE_KEY) throw new Error("No Google Maps key");
+  try {
+    const saved = JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null");
+    // Reuse it if it's for this key and has more than an hour left
+    if (saved?.key === GOOGLE_KEY && Number(saved.expiry) * 1000 > Date.now() + 3600_000) return { session: saved.session, key: GOOGLE_KEY };
+  } catch { /* not readable: start a new one */ }
+  const res = await fetch(`https://tile.googleapis.com/v1/createSession?key=${GOOGLE_KEY}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mapType: "satellite", language: "en-NZ", region: "NZ" }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.session) throw new Error(body?.error?.message ?? "Google imagery couldn't be loaded");
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify({ key: GOOGLE_KEY, session: body.session, expiry: body.expiry })); } catch { /* private mode */ }
+  return { session: body.session, key: GOOGLE_KEY };
+}
+export function forgetGoogleSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch { /* nothing kept */ }
+}
+export const googleTileUrl = (s: { session: string; key: string }) => `https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}?session=${s.session}&key=${s.key}`;
+
+/**
+ * The imagery everyone starts on: Google satellite when the farm's app has a key, then LINZ, then Esri
+ */
+export const defaultBasemap = () => (BASEMAPS.find(b => b.key === "google")?.available ? "google" : BASEMAPS.find(b => b.key === "linz")?.available ? "linz" : "esri");
+
+// Fence lines carry their type (and wires) so lengths can be totalled by type
+export const FENCE_TYPES = ["Post and wire", "Electric (permanent)", "Electric (temporary)", "Post and rail", "Netting", "Deer fence", "Boundary fence", "Other"];
 
 // ===== Files: KML, KMZ, GeoJSON =====
 

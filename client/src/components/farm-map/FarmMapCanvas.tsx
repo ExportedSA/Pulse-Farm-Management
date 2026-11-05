@@ -4,7 +4,7 @@ import "leaflet/dist/leaflet.css";
 import "@geoman-io/leaflet-geoman-free";
 import "@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css";
 import * as turf from "@turf/turf";
-import { BASEMAPS, LAYER_RECORD_TYPES, type MapState, type MapLayer } from "@/lib/farm-map";
+import { BASEMAPS, LAYER_RECORD_TYPES, forgetGoogleSession, googleSession, googleTileUrl, type MapState, type MapLayer } from "@/lib/farm-map";
 import { DEFAULT_CENTER } from "@/components/records/AreaDrawer";
 
 export type Selection = { type: "paddock" | "feature" | "record" | "exclusion" | "zone" | "job"; id: string };
@@ -140,22 +140,25 @@ export function FarmMapCanvas(props: Props) {
       baseRef.current.bringToBack();
     };
     if (def.key === "google") {
-      // Google Map Tiles API: a session per map, and the copyright for what's in view
-      const key = (import.meta as any).env.VITE_GOOGLE_MAPS_API_KEY;
-      fetch(`https://tile.googleapis.com/v1/createSession?key=${key}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mapType: "satellite", language: "en-NZ", region: "NZ" }),
-      }).then(r => r.json()).then(s => {
-        add(`https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}?session=${s.session}&key=${key}`, "Google");
+      // Google Map Tiles API: a (reused) session, and Google's copyright for what's in view, which
+      // the terms require on screen
+      googleSession().then(s => {
+        add(googleTileUrl(s), "Google");
         onMove = () => {
           const b = map.getBounds();
-          fetch(`https://tile.googleapis.com/tile/v1/viewport?session=${s.session}&key=${key}&zoom=${map.getZoom()}&north=${b.getNorth()}&south=${b.getSouth()}&east=${b.getEast()}&west=${b.getWest()}`)
-            .then(r => r.json()).then(v => propsRef.current.onAttribution(`Google${v.copyright ? ` · ${v.copyright}` : ""}`)).catch(() => {});
+          fetch(`https://tile.googleapis.com/tile/v1/viewport?session=${s.session}&key=${s.key}&zoom=${map.getZoom()}&north=${b.getNorth()}&south=${b.getSouth()}&east=${b.getEast()}&west=${b.getWest()}`)
+            .then(r => (r.ok ? r.json() : Promise.reject(r.status)))
+            .then(v => propsRef.current.onAttribution(`Map data ©${new Date().getFullYear()} Google${v.copyright ? ` · ${v.copyright}` : ""}`))
+            .catch(status => { if (status === 401 || status === 403) forgetGoogleSession(); });
         };
         map.on("moveend", onMove);
         onMove();
-      }).catch(() => propsRef.current.onAttribution("Google imagery couldn't be loaded"));
+      }).catch(() => {
+        // No usable Google session: show Esri so the map still works, and say so
+        const esri = BASEMAPS[0];
+        add(esri.url!, esri.attribution);
+        propsRef.current.onAttribution(`Google imagery couldn't be loaded, showing Esri · ${esri.attribution}`);
+      });
     } else {
       add(def.url!, def.attribution);
       props.onAttribution(def.attribution);

@@ -17,7 +17,7 @@ import { openNewRecord } from "@/components/records/RecordFab";
 import { currentSeason, previousSeasons } from "@/components/records/SeasonPanel";
 import { recordTypeDef } from "@/lib/records";
 import {
-  BASEMAPS, FARM_MAP_KEY, LAYER_RECORD_TYPES, download, farmMap, readMapFile, toKml, toKmz,
+  BASEMAPS, FARM_MAP_KEY, FENCE_TYPES, LAYER_RECORD_TYPES, defaultBasemap, download, farmMap, readMapFile, toKml, toKmz,
   type BoundaryVersion, type ImportItem, type MapLayer, type MapState,
 } from "@/lib/farm-map";
 import {
@@ -39,7 +39,8 @@ const JOB_DRAFT_KEY = "pulse-farm-map-job-draft";
 const PREFS_KEY = "pulse-farm-map-prefs";
 
 // forPaddockId: the outline for a paddock that has none yet
-type Pending = Drawn & { target: "paddock" | "feature"; forPaddockId?: string };
+// layerKey: the layer the drawing tool was opened for (farm boundary, fence lines)
+type Pending = Drawn & { target: "paddock" | "feature"; forPaddockId?: string; layerKey?: string };
 interface EditSession { target: Selection; original: GeoJSON.Geometry; originalRadius: number | null; history: { g: GeoJSON.Geometry; r: number | null }[]; index: number }
 type SaveState = "saved" | "unsaved" | "saving" | "offline";
 
@@ -69,7 +70,8 @@ export default function FarmMapPage() {
 
   // Per-person settings kept on this device: basemap and which layers are shown
   const prefs = useMemo(() => readJson<{ basemap?: string; visible?: Record<string, boolean> }>(`${PREFS_KEY}:${currentFarm?.id}`) ?? {}, [currentFarm?.id]);
-  const [basemap, setBasemap] = useState(prefs.basemap ?? "esri");
+  // Everyone starts on the farm's best imagery (Google satellite when set up); a choice made on this device is kept
+  const [basemap, setBasemap] = useState(() => (prefs.basemap && BASEMAPS.find(b => b.key === prefs.basemap)?.available ? prefs.basemap : defaultBasemap()));
   const [visible, setVisible] = useState<Record<string, boolean>>(prefs.visible ?? {});
   useEffect(() => {
     if (!state) return;
@@ -231,12 +233,14 @@ export default function FarmMapPage() {
     setPanel("right");
   };
 
-  const startDraw = (target: "paddock" | "feature" | "exclusion" | "zone" | "job" | "run", shape: DrawShape, forPaddockId?: string) => {
+  const [drawLayerKey, setDrawLayerKey] = useState<string | undefined>();
+  const startDraw = (target: "paddock" | "feature" | "exclusion" | "zone" | "job" | "run", shape: DrawShape, forPaddockId?: string, layerKey?: string) => {
     if (!canEdit && target !== "job" && target !== "run") return toast.error("Only owners and managers can change the farm map");
     if (target === "paddock" && paddocksLocked) return toast.error("The paddocks layer is locked. Unlock it in Layers first.");
     if (target !== "zone" && target !== "job" && target !== "run") cancelAll(); else { setMode({ kind: "view" }); setPending(null); setEdit(null); }
     setDrawTarget(target);
     setDrawFor(forPaddockId ?? null);
+    setDrawLayerKey(layerKey);
     if (!forPaddockId && target !== "zone" && target !== "job" && target !== "run") setSelection(null);
     setMode({ kind: "draw", shape });
     setPanel("right");
@@ -272,8 +276,8 @@ export default function FarmMapPage() {
       return;
     }
     const target = shape.kind === "polygon" && (drawTarget === "paddock" || drawTarget === "feature") ? drawTarget : "feature";
-    setPending({ ...shape, target, forPaddockId: target === "paddock" ? drawFor ?? undefined : undefined });
-  }, [drawTarget, drawFor, planId, openPlan, state]); // eslint-disable-line react-hooks/exhaustive-deps
+    setPending({ ...shape, target, forPaddockId: target === "paddock" ? drawFor ?? undefined : undefined, layerKey: target === "feature" ? drawLayerKey : undefined });
+  }, [drawTarget, drawFor, drawLayerKey, planId, openPlan, state]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startEdit = (target: Selection) => {
     if (!state || !canEdit) return;
@@ -500,6 +504,8 @@ export default function FarmMapPage() {
             {canEdit && (
               <>
                 <Button size="sm" variant={mode.kind === "draw" && drawTarget === "paddock" ? "default" : "ghost"} onClick={() => startDraw("paddock", "Polygon")} title="Draw a paddock"><Square className="h-4 w-4 mr-1" />Paddock</Button>
+                <Button size="sm" variant={mode.kind === "draw" && drawLayerKey === "boundary" ? "default" : "ghost"} onClick={() => startDraw("feature", "Polygon", undefined, "boundary")} title="Draw the farm boundary"><Square className="h-4 w-4 mr-1" />Boundary</Button>
+                <Button size="sm" variant={mode.kind === "draw" && drawLayerKey === "fences" ? "default" : "ghost"} onClick={() => startDraw("feature", "Line", undefined, "fences")} title="Draw a fence line"><Spline className="h-4 w-4 mr-1" />Fence</Button>
                 <ToolMenu disabled={!canEdit} active={mode.kind === "draw" && drawTarget === "feature"} onPick={shape => startDraw("feature", shape)} />
               </>
             )}
@@ -526,11 +532,16 @@ export default function FarmMapPage() {
                 : mode.kind === "draw" && drawTarget === "job" ? `Draw the area that was (or will be) ${jobDraft?.activity === "spray" ? "sprayed" : "spread"}. Tap the first corner to finish. Exclusions are taken off on save.`
                 : mode.kind === "draw" && drawTarget === "zone" ? "Draw the zone. Corners snap to the paddock edge and other zones. Tap the first corner to finish."
                 : mode.kind === "split" ? "Draw a line across the paddock, from outside one edge to outside the other. Tap the last point again to finish."
+                : mode.shape === "Polygon" && drawLayerKey === "boundary" ? "Tap each corner of the farm boundary. Tap the first corner to close it. Corners snap to paddock edges."
                 : mode.shape === "Polygon" ? "Tap each corner. Tap the first corner to close the shape. Corners snap to nearby paddocks."
+                : mode.shape === "Line" && drawLayerKey === "fences" ? "Tap each corner post along the fence. Points snap to paddock edges and other fences. Tap the last point again to finish."
                 : mode.shape === "Line" ? "Tap each point along the line. Tap the last point again to finish."
                 : mode.shape === "Circle" ? "Tap the centre, then drag out the radius."
                 : "Tap where it goes."}
             </div>
+          )}
+          {basemap === "google" && basemapDef.available && !attribution.startsWith("Google imagery couldn't") && (
+            <img src="https://maps.gstatic.com/mapfiles/api-3/images/google_white5_hdpi.png" alt="Google" width={66} height={26} className="absolute bottom-5 left-2 z-[400] pointer-events-none" />
           )}
           <div className="absolute bottom-0 left-0 z-[400] bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground max-w-[70%] truncate" title={basemapDef.captureNote}>
             {attribution} · {basemapDef.captureNote}
@@ -550,7 +561,7 @@ export default function FarmMapPage() {
               onSave={async (input) => {
                 const ok = pending.target === "paddock" && pending.kind === "polygon"
                   ? await run(() => farmMap.createPaddock({ name: input.name, paddockNumber: input.paddockNumber, geometry: pending.geometry }), `${input.name} saved`)
-                  : await run(() => farmMap.createFeature({ layerId: input.layerId!, kind: pending.kind, name: input.name || null, notes: input.notes || null, geometry: pending.geometry, radiusM: pending.radiusM ?? null }), "Saved to the map");
+                  : await run(() => farmMap.createFeature({ layerId: input.layerId!, kind: pending.kind, name: input.name || null, notes: input.notes || null, geometry: pending.geometry, radiusM: pending.radiusM ?? null, properties: input.properties }), "Saved to the map");
                 if (ok) setPending(null);
               }}
             />
@@ -710,6 +721,31 @@ function AddActivityMenu({ onJob, onOther }: { onJob: (a: Activity) => void; onO
 }
 
 /**
+ * The farm boundary's area and the fence lines' total length, by fence type
+ */
+function BoundaryAndFences({ state }: { state: MapState }) {
+  const layer = (key: string) => state.layers.find(l => l.key === key)?.id;
+  const boundary = state.features.filter(f => f.layerId === layer("boundary") && f.areaHa != null);
+  const fences = state.features.filter(f => f.layerId === layer("fences") && f.lengthM != null);
+  if (!boundary.length && !fences.length) return null;
+  const byType = new Map<string, number>();
+  fences.forEach(f => byType.set(f.properties?.fenceType ?? "Not set", (byType.get(f.properties?.fenceType ?? "Not set") ?? 0) + Number(f.lengthM)));
+  const km = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`);
+  return (
+    <section className="space-y-1 text-sm">
+      <h2 className="text-sm font-semibold">Boundary and fences</h2>
+      {boundary.length > 0 && <p className="tabular-nums">Farm boundary: {boundary.reduce((s, f) => s + Number(f.areaHa), 0).toFixed(2)} ha</p>}
+      {fences.length > 0 && (
+        <>
+          <p className="tabular-nums">Fences: {km(fences.reduce((s, f) => s + Number(f.lengthM), 0))} in {fences.length} line{fences.length === 1 ? "" : "s"}</p>
+          <ul className="text-xs text-muted-foreground tabular-nums">{Array.from(byType.entries()).map(([t, m]) => <li key={t}>{t}: {km(m)}</li>)}</ul>
+        </>
+      )}
+    </section>
+  );
+}
+
+/**
  * Who changed the map and when (managers): paddocks, boundaries, exclusions, layers, plans
  */
 function MapHistory() {
@@ -769,13 +805,16 @@ function EditMeasure({ geometry, radius }: { geometry: GeoJSON.Geometry; radius:
 
 function PendingForm({ pending, layers, canEdit, onSave, onDiscard }: {
   pending: Pending; layers: MapLayer[]; canEdit: boolean;
-  onSave: (v: { name: string; paddockNumber: number | null; layerId?: string; notes?: string }) => void; onDiscard: () => void;
+  onSave: (v: { name: string; paddockNumber: number | null; layerId?: string; notes?: string; properties?: Record<string, unknown> }) => void; onDiscard: () => void;
 }) {
   const asPaddock = pending.target === "paddock" && pending.kind === "polygon";
   const usable = layers.filter(l => !["paddocks", "exclusions", "variable_rate", "restrictions"].includes(l.key) && !l.locked);
-  const [name, setName] = useState("");
+  const [name, setName] = useState(pending.layerKey === "boundary" ? "Farm boundary" : "");
   const [num, setNum] = useState("");
-  const [layerId, setLayerId] = useState(() => usable.find(l => l.key === (pending.kind === "polygon" ? "fertiliser" : "features"))?.id ?? usable[0]?.id ?? "");
+  const [layerId, setLayerId] = useState(() => usable.find(l => l.key === (pending.layerKey ?? (pending.kind === "polygon" ? "fertiliser" : "features")))?.id ?? usable[0]?.id ?? "");
+  const layerKey = usable.find(l => l.id === layerId)?.key;
+  const [fenceType, setFenceType] = useState(FENCE_TYPES[0]);
+  const [wires, setWires] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const target = pending.forPaddockId;
@@ -798,7 +837,10 @@ function PendingForm({ pending, layers, canEdit, onSave, onDiscard }: {
         }
         if (asPaddock && !name.trim()) { toast.error("Give the paddock a name"); return; }
         if (!asPaddock && !layerId) { toast.error("Choose a layer"); return; }
-        await onSave({ name: name.trim(), paddockNumber: num === "" ? null : Number(num), layerId, notes });
+        await onSave({
+          name: name.trim(), paddockNumber: num === "" ? null : Number(num), layerId, notes,
+          properties: layerKey === "fences" ? { fenceType, wires: wires === "" ? null : Number(wires) } : undefined,
+        });
       } catch (err: any) {
         toast.error(err.message);
       } finally {
@@ -821,6 +863,15 @@ function PendingForm({ pending, layers, canEdit, onSave, onDiscard }: {
             </select>
           </div>
           <div className="space-y-1"><Label htmlFor="ft-name">Name</Label><Input id="ft-name" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Bore 2, Race to shed" /></div>
+          {layerKey === "fences" && (
+            <div className="grid grid-cols-[1fr_5rem] gap-2">
+              <div className="space-y-1"><Label htmlFor="ft-fence-type">Fence type</Label>
+                <select id="ft-fence-type" className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={fenceType} onChange={e => setFenceType(e.target.value)}>
+                  {FENCE_TYPES.map(t => <option key={t}>{t}</option>)}
+                </select></div>
+              <div className="space-y-1"><Label htmlFor="ft-wires">Wires</Label><Input id="ft-wires" type="number" inputMode="numeric" value={wires} onChange={e => setWires(e.target.value)} /></div>
+            </div>
+          )}
           <div className="space-y-1"><Label htmlFor="ft-notes">Notes</Label><Textarea id="ft-notes" rows={2} value={notes} onChange={e => setNotes(e.target.value)} /></div>
         </>
       ) : null}
@@ -1014,6 +1065,7 @@ function FeaturePanel({ feature, layers, canEdit, onEdit, run, onDeleted }: {
   return (
     <div className="space-y-3">
       <p className="text-xs uppercase tracking-wide text-muted-foreground">{layer?.name} · {feature.kind}</p>
+      {feature.properties?.fenceType && <p className="text-sm">{feature.properties.fenceType}{feature.properties.wires ? ` · ${feature.properties.wires} wires` : ""}</p>}
       <p className="text-sm font-medium tabular-nums">
         {feature.areaHa != null ? `${Number(feature.areaHa).toFixed(3)} ha` : feature.lengthM != null ? fmtM(Number(feature.lengthM)) : ""}
         {feature.kind === "circle" && feature.radiusM ? ` · ${Math.round(feature.radiusM)} m radius` : ""}
@@ -1142,6 +1194,7 @@ function LeftPanel({ state, canEdit, visible, setVisible, onSelectPaddock, mapVi
         <p className="text-xs text-muted-foreground">Showing and hiding is just for you. Activity layers show records from the dates above.</p>
       </section>
 
+      <BoundaryAndFences state={state} />
       <ExclusionsSection exclusions={state.exclusions} canEdit={canEdit} onSelect={onSelectExclusion} onAdd={onAddExclusion} />
 
       <JobsSection jobs={jobs} onOpen={onOpenJob} onNew={onNewJob} canRecord={canRecord} />
