@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Camera, CheckCircle2, ExternalLink, Link2, Paperclip, Plus, Save, Star, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
+import { saveMessage } from "@/lib/application-outbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -340,7 +341,8 @@ export function NewJobForm({ state, draft, setDraft, onDrawPart, onCreated, onCa
       queryClient.invalidateQueries({ queryKey: FARM_MAP_KEY });
       onCreated(job);
     } catch (e: any) {
-      toast.error(e.message);
+      // Offline: kept on the device and uploaded later
+      if (saveMessage(e, toast)) onCancel();
     } finally {
       setSaving(false);
     }
@@ -431,7 +433,7 @@ export function JobView({ jobId, canEdit, onClose, onJob }: { jobId: string; can
     queryClient.invalidateQueries({ queryKey: ["/api/records"] });
   };
   const act = async (w: () => Promise<Job | unknown>, msg: string) => {
-    try { const j = await w(); refresh(j as Job); toast.success(msg); } catch (e: any) { toast.error(e.message); }
+    try { const j = await w(); refresh(j as Job); toast.success(msg); } catch (e: any) { saveMessage(e, toast); }
   };
   if (error) return <p className="text-sm text-red-700">{(error as Error).message}</p>;
   if (!job) return <p className="text-sm text-muted-foreground">Loading the job…</p>;

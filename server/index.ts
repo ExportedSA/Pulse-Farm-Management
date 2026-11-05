@@ -24,8 +24,7 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ extended: false }));
 
-// Serve uploaded files statically
-app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads")));
+// Uploaded files are served after sign-in checks (see routes.ts)
 
 setupAuth(app, storage);
 

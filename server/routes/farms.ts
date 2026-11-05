@@ -13,7 +13,7 @@ import { listUserFarms, getFarmRole, createFarmForUser, type FarmRole } from '..
 const router = Router();
 
 const uuidSchema = z.string().uuid();
-const roleSchema = z.enum(['owner', 'manager', 'worker', 'viewer']);
+const roleSchema = z.enum(['owner', 'manager', 'worker', 'viewer', 'contractor']);
 
 const farmFieldsSchema = z.object({
   name: z.string().min(1).max(255),

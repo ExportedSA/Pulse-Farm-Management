@@ -81,7 +81,7 @@ export const alertTypeEnum = pgEnum('alert_type', [
 export const alertSeverityEnum = pgEnum('alert_severity', ['low', 'medium', 'high', 'critical']);
 
 // User roles enum (Phase 6E)
-export const userRoleEnum = pgEnum('user_role', ['owner', 'manager', 'worker', 'viewer']);
+export const userRoleEnum = pgEnum('user_role', ['owner', 'manager', 'worker', 'viewer', 'contractor']);
 
 // ===== CORE TABLES =====
 

@@ -7,6 +7,7 @@ import { sanitizeUser, sanitizeUsers } from "./auth-utils";
 import { requireAuth, optionalAuth, getFarmId, getUserId } from "./middleware/auth";
 import { getFarmRole } from "./domain/farms";
 import { uploadsMiddleware } from "./middleware/serveUploads";
+import { contractorGuard, uploadsGuard } from "./middleware/farmAccess";
 import { httpLogger, addRequestContext, logError } from "./middleware/logging";
 import logger from "./config/logger";
 import { initSentry, captureException } from "./config/sentry";
@@ -73,7 +74,7 @@ import stockReconRouter from "./routes/stock-recon";
 import paddockMapRouter from "./routes/paddock-map";
 import healthReportsRouter from "./routes/health-reports";
 import farmMapRouter from "./routes/farm-map";
-import { catalogueRouter, applicationsRouter, docketsRouter, restrictionsRouter } from "./routes/applications";
+import { catalogueRouter, applicationsRouter, docketsRouter, restrictionsRouter, activityReportsRouter } from "./routes/applications";
 import { tagsRouter, attachmentsRouter, searchRouter } from "./routes/farm-data";
 import animalTagsRouter from "./routes/animal-tags";
 // Phase overlay routes
@@ -133,7 +134,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api", healthRouter);
 
   // ===== STATIC FILE SERVING (Local only, disabled when S3 is configured) =====
-  app.use("/uploads", uploadsMiddleware);
+  // Signed-in members only: a farm's files are for that farm
+  app.use("/uploads", optionalAuth, uploadsGuard, uploadsMiddleware);
+
+  // Contractors reach only the jobs shared with them (checked before every other API route)
+  app.use("/api", optionalAuth, contractorGuard);
 
   // ===== PHASE 4: ANIMAL GROUPS =====
   app.use("/api/groups", requireAuth, groupsRouter);
@@ -188,6 +193,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/applications", requireAuth, applicationsRouter);
   app.use("/api/dockets", requireAuth, docketsRouter);
   app.use("/api/restrictions", requireAuth, restrictionsRouter);
+  app.use("/api/activity-reports", requireAuth, activityReportsRouter);
   app.use("/api/tags", requireAuth, tagsRouter);
   app.use("/api/attachments", requireAuth, attachmentsRouter);
   app.use("/api/search", requireAuth, searchRouter);

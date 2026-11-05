@@ -8,6 +8,7 @@ import {
   splitPaddock, mergePaddocks, paddockHistory, createFeature, updateFeature, deleteFeature, createLayer, updateLayer,
   archiveLayer, saveView, deleteView, exportMap, importShapes,
 } from '../domain/farm-map';
+import { mapAudit } from '../domain/map-audit';
 import { EXCLUSION_ACTIVITIES, createExclusion, updateExclusion, archiveExclusion, listExclusions, paddockAreas } from '../domain/exclusions';
 import {
   PLAN_ACTIVITIES, RATE_UNITS, createPlan, updatePlan, getPlan, listPlans, addZone, updateZone, deleteZone, approvePlan, copyPlan, cancelPlan,
@@ -49,6 +50,13 @@ const ctx = (req: Request) => ({ farmId: getFarmId(req)!, userId: getUserId(req)
 // GET /api/farm-map - layers, paddocks, features and views
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 const today = () => new Date().toISOString().slice(0, 10);
+
+// GET /api/farm-map/audit - who changed the map (paddocks, boundaries, exclusions, layers, plans) and when
+router.get('/audit', route(async (req, res) => {
+  await requireManager(req);
+  const { limit } = z.object({ limit: z.coerce.number().int().min(1).max(500).default(100) }).parse(req.query);
+  res.json(await mapAudit(getFarmId(req)!, limit));
+}, 'Failed to load the map history'));
 
 router.get('/', route(async (req, res) => {
   const farmId = getFarmId(req)!;

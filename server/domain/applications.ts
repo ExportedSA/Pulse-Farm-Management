@@ -6,6 +6,8 @@ import { productSnapshot, touchProduct } from './catalogue';
 import { createRecord, updateRecord, deleteRecord } from './records';
 import { attachmentsFor, saveAttachments, toApiAttachment } from './attachments';
 import { recalcRestrictions, restrictionSummary, saveMix, setMixUsed, sprayDetail, syncSprayRecords, type MixInput } from './sprays';
+import { snapshotJob } from './versions';
+import { gpsSummary } from './evidence';
 import { EXCLUSION_ACTIVITY, activityDetail, checkDetails, isLiquid, runFootprint, syncActivityRecords, type RunInput } from './activities';
 
 // Jobs (applications): one activity over one or more paddocks or parts of them. Each line keeps
@@ -205,6 +207,7 @@ export async function createApplication(farmId: string, userId: string, input: A
 export async function updateApplication(farmId: string, userId: string, id: string, input: ApplicationInput) {
   await db.transaction(async tx => {
     const app = await farmApp(tx, farmId, id);
+    await snapshotJob(tx, id, userId, 'update');
     if (input.version != null && input.version !== app.version) throw new MapError('This job was changed by someone else since you opened it. Reload to see their change.', 409);
     const merged = {
       status: input.status ?? app.status,
@@ -271,6 +274,7 @@ export async function updateApplication(farmId: string, userId: string, id: stri
 export async function setApplied(farmId: string, userId: string, id: string, applied: { lineId: string; quantity: number | null }[]) {
   await db.transaction(async tx => {
     await farmApp(tx, farmId, id);
+    await snapshotJob(tx, id, userId, 'applied');
     for (const a of applied) {
       if (a.quantity != null && !(a.quantity >= 0)) throw new MapError('Applied amounts must be 0 or more');
       await tx.execute(sql`UPDATE application_lines SET applied_quantity = ${a.quantity}, updated_at = now() WHERE id = ${a.lineId} AND application_id = ${id}`);
@@ -287,6 +291,7 @@ export async function setApplied(farmId: string, userId: string, id: string, app
 export async function setSprayUsed(farmId: string, userId: string, id: string, input: { tankLoads?: number | null; used: { mixId: string; quantity: number | null; unit: string | null }[] }) {
   await db.transaction(async tx => {
     const app = await farmApp(tx, farmId, id);
+    await snapshotJob(tx, id, userId, 'used');
     if (app.activity !== 'spray') throw new MapError('That is not a spray job');
     if (input.tankLoads != null && !(input.tankLoads >= 0)) throw new MapError('Tank loads must be 0 or more');
     await setMixUsed(tx, id, input.used);
@@ -300,6 +305,7 @@ export async function setSprayUsed(farmId: string, userId: string, id: string, i
 export async function cancelApplication(farmId: string, userId: string, id: string) {
   await db.transaction(async tx => {
     const app = await farmApp(tx, farmId, id);
+    await snapshotJob(tx, id, userId, 'cancel');
     await tx.execute(sql`UPDATE applications SET status = 'cancelled', version = version + 1, updated_at = now() WHERE id = ${id}`);
     await recalcRestrictions(tx, id);
     await audit(tx, farmId, userId, 'application', id, 'cancel', { status: app.status }, null);
@@ -451,7 +457,8 @@ export async function getApplication(farmId: string, id: string) {
     supplier: app.supplier, contractor: app.contractor, operator: app.operator, equipment: app.equipment,
     weather: app.weather, notes: app.notes, cost: app.cost != null ? Number(app.cost) : null, version: app.version,
     createdBy: app.created_by_name, createdAt: app.created_at, updatedAt: app.updated_at,
-    linkedJobId: app.linked_job_id,
+    linkedJobId: app.linked_job_id, sharedWith: app.shared_with ?? [],
+    gps: app.gps_geom ? await gpsSummary(id) : null,
     ...(app.activity === 'spray'
       ? { lines, dockets: ds, spray: await sprayDetail(farmId, app, lines), reconciliation: [], nutrients: null, work: null }
       : app.activity === 'fertiliser'
@@ -460,10 +467,10 @@ export async function getApplication(farmId: string, id: string) {
   };
 }
 
-export async function listApplications(farmId: string, opts: { activity?: string; status?: string; from?: string; to?: string; pastureId?: string }) {
+export async function listApplications(farmId: string, opts: { activity?: string; status?: string; from?: string; to?: string; pastureId?: string; sharedWith?: string }) {
   return rowsOf(await db.execute(sql`
     SELECT a.id, a.activity, a.status, a.title, a.planned_on::text AS "plannedOn", a.completed_at AT TIME ZONE 'UTC' AS "completedAt", a.evidence,
-      a.contractor, a.supplier, a.target, a.details, a.linked_job_id AS "linkedJobId",
+      a.contractor, a.supplier, a.target, a.details, a.linked_job_id AS "linkedJobId", a.shared_with AS "sharedWith", (a.gps_geom IS NOT NULL) AS "hasGps",
       COALESCE((SELECT string_agg(DISTINCT l.product_snapshot->>'name', ', ') FROM application_lines l WHERE l.application_id = a.id),
         (SELECT string_agg(m.product_snapshot->>'name', ' + ' ORDER BY m.sort_order) FROM application_mix m WHERE m.application_id = a.id)) AS products,
       (SELECT json_agg(json_build_object('kind', r.kind, 'status', r.status, 'endsAt', r.ends_at AT TIME ZONE 'UTC'))
@@ -479,6 +486,7 @@ export async function listApplications(farmId: string, opts: { activity?: string
       AND (${opts.status ?? null}::text IS NULL OR a.status = ${opts.status ?? null})
       AND (${opts.from ?? null}::date IS NULL OR COALESCE(a.completed_at::date, a.planned_on, a.created_at::date) >= ${opts.from ?? null}::date)
       AND (${opts.to ?? null}::date IS NULL OR COALESCE(a.completed_at::date, a.planned_on, a.created_at::date) <= ${opts.to ?? null}::date)
+      AND (${opts.sharedWith ?? null}::uuid IS NULL OR ${opts.sharedWith ?? null}::uuid = ANY(a.shared_with))
       AND (${opts.pastureId ?? null}::uuid IS NULL OR EXISTS (SELECT 1 FROM application_lines l WHERE l.application_id = a.id AND l.pasture_id = ${opts.pastureId ?? null}::uuid))
     ORDER BY COALESCE(a.completed_at, a.planned_on::timestamp, a.created_at) DESC
     LIMIT 300`)).map((j: any) => {
@@ -538,12 +546,14 @@ export async function createDocket(farmId: string, userId: string, input: Docket
 export async function linkDocket(farmId: string, userId: string, appId: string, docketId: string, quantity: number | null) {
   await db.transaction(async tx => {
     await farmApp(tx, farmId, appId);
+    await snapshotJob(tx, appId, userId, 'docket attached');
     const [d] = rowsOf(await tx.execute(sql`SELECT id FROM dockets WHERE id = ${docketId} AND farm_id = ${farmId} AND archived_at IS NULL`));
     if (!d) throw new MapError('Docket not found', 404);
     await tx.execute(sql`
       INSERT INTO application_dockets (application_id, docket_id, quantity) VALUES (${appId}, ${docketId}, ${quantity})
       ON CONFLICT (application_id, docket_id) DO UPDATE SET quantity = EXCLUDED.quantity`);
     await audit(tx, farmId, userId, 'application', appId, 'docket_link', null, { docketId, quantity });
+    await tx.execute(sql`UPDATE applications SET version = version + 1, updated_at = now() WHERE id = ${appId}`);
   });
   await syncRecords(farmId, userId, appId);
 }
@@ -551,8 +561,10 @@ export async function linkDocket(farmId: string, userId: string, appId: string, 
 export async function unlinkDocket(farmId: string, userId: string, appId: string, docketId: string) {
   await db.transaction(async tx => {
     await farmApp(tx, farmId, appId);
+    await snapshotJob(tx, appId, userId, 'docket removed');
     await tx.execute(sql`DELETE FROM application_dockets WHERE application_id = ${appId} AND docket_id = ${docketId}`);
     await audit(tx, farmId, userId, 'application', appId, 'docket_unlink', { docketId }, null);
+    await tx.execute(sql`UPDATE applications SET version = version + 1, updated_at = now() WHERE id = ${appId}`);
   });
   await syncRecords(farmId, userId, appId);
 }

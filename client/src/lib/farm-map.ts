@@ -1,5 +1,5 @@
 // Farm map: data from /api/farm-map, basemaps, and reading/writing KML, KMZ and GeoJSON files
-import { kml as kmlToGeoJSON } from "@tmcw/togeojson";
+import { gpx as gpxToGeoJSON, kml as kmlToGeoJSON } from "@tmcw/togeojson";
 import JSZip from "jszip";
 
 export interface LayerStyle { color: string; fillColor: string; fillOpacity: number; weight: number; dashArray: string | null }
@@ -207,13 +207,15 @@ export async function readMapFile(file: File): Promise<ImportItem[]> {
     collection = kmlToGeoJSON(new DOMParser().parseFromString(await entry.async("text"), "text/xml")) as GeoJSON.FeatureCollection;
   } else if (name.endsWith(".kml")) {
     collection = kmlToGeoJSON(new DOMParser().parseFromString(await file.text(), "text/xml")) as GeoJSON.FeatureCollection;
+  } else if (name.endsWith(".gpx")) {
+    collection = gpxToGeoJSON(new DOMParser().parseFromString(await file.text(), "text/xml")) as GeoJSON.FeatureCollection;
   } else if (name.endsWith(".geojson") || name.endsWith(".json")) {
     const data = JSON.parse(await file.text());
     collection = data.type === "FeatureCollection" ? data
       : data.type === "Feature" ? { type: "FeatureCollection", features: [data] }
       : { type: "FeatureCollection", features: [{ type: "Feature", geometry: data, properties: {} }] };
   } else {
-    throw new Error("Choose a .kml, .kmz or .geojson file");
+    throw new Error("Choose a .kml, .kmz, .gpx or .geojson file");
   }
   const items = flatten(collection.features ?? []);
   if (items.length === 0) throw new Error("No shapes found in that file");

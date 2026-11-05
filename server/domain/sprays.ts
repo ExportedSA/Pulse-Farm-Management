@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { db } from '../db';
 import { MapError, audit, isoUtc, rowsOf } from './farm-map';
 import { productSnapshot, touchProduct } from './catalogue';
+import { snapshotJob } from './versions';
 import { createRecord, updateRecord, deleteRecord } from './records';
 
 // Spray jobs: a tank mix (each product at its own rate, in its own units) over the job's areas,
@@ -135,6 +136,7 @@ export async function updateRestriction(farmId: string, userId: string, appId: s
   checkRestriction(input);
   await db.transaction(async tx => {
     await restrictionApp(tx, farmId, appId);
+    await snapshotJob(tx, appId, userId, 'restriction');
     const [old] = rowsOf(await tx.execute(sql`SELECT * FROM restrictions WHERE id = ${id} AND application_id = ${appId}`));
     if (!old) throw new MapError('Restriction not found', 404);
     const resolved = input.status !== 'unresolved';
@@ -158,6 +160,7 @@ export async function addRestriction(farmId: string, userId: string, appId: stri
   checkRestriction(input);
   const id = await db.transaction(async tx => {
     await restrictionApp(tx, farmId, appId);
+    await snapshotJob(tx, appId, userId, 'restriction');
     if (input.mixId) {
       const [m] = rowsOf(await tx.execute(sql`SELECT id FROM application_mix WHERE id = ${input.mixId} AND application_id = ${appId}`));
       if (!m) throw new MapError('That product is not in this mix');
@@ -186,6 +189,7 @@ export async function addRestriction(farmId: string, userId: string, appId: stri
 export async function deleteRestriction(farmId: string, userId: string, appId: string, id: string) {
   await db.transaction(async tx => {
     await restrictionApp(tx, farmId, appId);
+    await snapshotJob(tx, appId, userId, 'restriction');
     const [r] = rowsOf(await tx.execute(sql`SELECT * FROM restrictions WHERE id = ${id} AND application_id = ${appId}`));
     if (!r) throw new MapError('Restriction not found', 404);
     if (r.mix_id && (REQUIRED_KINDS as readonly string[]).includes(r.kind)) {

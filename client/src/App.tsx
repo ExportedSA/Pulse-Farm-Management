@@ -87,6 +87,8 @@ import EquipmentMaintenancePage from "@/pages/EquipmentMaintenancePage";
 import EquipmentServiceHistoryPage from "@/pages/EquipmentServiceHistoryPage";
 import CompliancePackPage from "@/pages/compliance-pack-page";
 import FarmMapPage from "@/pages/farm-map-page";
+import FarmReportsPage from "@/pages/farm-reports-page";
+import JobPrintPage from "@/pages/job-print-page";
 import TimesheetReportPage from "@/pages/TimesheetReportPage";
 import SafetyReportPage from "@/pages/SafetyReportPage";
 import AnimalReportPage from "@/pages/AnimalReportPage";
@@ -185,6 +187,8 @@ function Router() {
         <Route path="/app/tasks" component={TaskListPage} />
         <Route path="/app/records" component={RecordsPage} />
         <Route path="/app/farm-map" component={FarmMapPage} />
+        <Route path="/app/farm-map/reports" component={FarmReportsPage} />
+        <Route path="/app/farm-map/jobs/:id/print" component={JobPrintPage} />
         <Route path="/app/equipment" component={EquipmentListPage} />
         <Route path="/app/equipment/maintenance" component={EquipmentMaintenancePage} />
         <Route path="/app/equipment/history" component={EquipmentServiceHistoryPage} />

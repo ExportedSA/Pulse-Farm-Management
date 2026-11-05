@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, ExternalLink, Plus, Save, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
+import { saveMessage } from "@/lib/application-outbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +15,7 @@ import {
 } from "@/lib/jobs";
 import { JOBS_KEY, JobView, ProductPicker, type JobDraft } from "./JobPanels";
 import { WorkJobView } from "./WorkPanels";
+import { JobExtras } from "./JobExtras";
 import type { Overlay } from "./FarmMapCanvas";
 
 const fmtHa = (ha: number | null | undefined) => (ha == null ? "—" : `${Number(ha).toFixed(3)} ha`);
@@ -26,13 +28,14 @@ const selectClass = "h-9 w-full rounded-md border bg-background px-2 text-sm";
 /**
  * A saved job of either kind
  */
-export function JobPanel({ jobId, canEdit, onClose, onOpenJob, onJob }: { jobId: string; canEdit: boolean; onClose: () => void; onOpenJob: (id: string) => void; onJob?: (j: Job | undefined) => void }) {
+export function JobPanel({ jobId, canEdit, role, onClose, onOpenJob, onJob }: { jobId: string; canEdit: boolean; role: string | undefined; onClose: () => void; onOpenJob: (id: string) => void; onJob?: (j: Job | undefined) => void }) {
   const { data: job } = useQuery({ queryKey: [...JOBS_KEY, jobId], queryFn: () => jobsApi.get(jobId) });
   useEffect(() => { onJob?.(job); }, [job]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onJob?.(undefined), []); // eslint-disable-line react-hooks/exhaustive-deps
-  if (job?.activity === "spray") return <SprayJobView job={job} canEdit={canEdit} onClose={onClose} />;
-  if (job?.work) return <WorkJobView job={job} canEdit={canEdit} onClose={onClose} onOpenJob={onOpenJob} />;
-  return <JobView jobId={jobId} canEdit={canEdit} onClose={onClose} />;
+  const view = job?.activity === "spray" ? <SprayJobView job={job} canEdit={canEdit} onClose={onClose} />
+    : job?.work ? <WorkJobView job={job} canEdit={canEdit} onClose={onClose} onOpenJob={onOpenJob} />
+    : <JobView jobId={jobId} canEdit={canEdit} onClose={onClose} />;
+  return <div className="space-y-3">{view}{job && <JobExtras job={job} role={role} />}</div>;
 }
 
 // ===== New spray job =====
@@ -96,7 +99,8 @@ export function NewSprayForm({ state, draft, setDraft, onDrawPart, onCreated, on
       queryClient.invalidateQueries({ queryKey: FARM_MAP_KEY });
       onCreated(job);
     } catch (e: any) {
-      toast.error(e.message);
+      // Offline: kept on the device and uploaded later
+      if (saveMessage(e, toast)) onCancel();
     } finally {
       setSaving(false);
     }
@@ -221,7 +225,7 @@ export function SprayJobView({ job, canEdit, onClose }: { job: Job; canEdit: boo
     queryClient.invalidateQueries({ queryKey: ["/api/restrictions"] });
   };
   const act = async (w: () => Promise<Job | unknown>, msg: string) => {
-    try { const j = await w(); refresh(j as Job); toast.success(msg); return true; } catch (e: any) { toast.error(e.message); return false; }
+    try { const j = await w(); refresh(j as Job); toast.success(msg); return true; } catch (e: any) { saveMessage(e, toast); return false; }
   };
   const editable = canEdit && job.status !== "cancelled";
   const usedChanged = sp.mix.some(m => (used[m.id]?.q ?? "") !== (m.actualQuantity != null ? String(m.actualQuantity) : "")) || loads !== (sp.tankLoads != null ? String(sp.tankLoads) : "");

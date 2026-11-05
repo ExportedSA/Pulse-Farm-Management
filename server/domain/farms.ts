@@ -2,7 +2,7 @@ import { db } from '../db';
 import { farms, farmMembers, users, type Farm } from '@shared/schema';
 import { eq, and, asc, inArray } from 'drizzle-orm';
 
-export type FarmRole = 'owner' | 'manager' | 'worker' | 'viewer';
+export type FarmRole = 'owner' | 'manager' | 'worker' | 'viewer' | 'contractor';
 
 export interface FarmWithRole extends Farm {
   role: FarmRole;

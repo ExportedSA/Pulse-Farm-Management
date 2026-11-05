@@ -31,9 +31,11 @@ import type { RatePlan } from "@/lib/farm-map";
 import { JobsSection, NewJobForm, jobOverlays, JOBS_KEY, type JobDraft } from "@/components/farm-map/JobPanels";
 import { JobPanel, NewSprayForm, RestrictionWarning, restrictionOverlays } from "@/components/farm-map/SprayPanels";
 import { NewWorkForm, footprintOverlays, runPreview } from "@/components/farm-map/WorkPanels";
+import { useApplicationOutbox } from "@/lib/application-outbox";
 import { ACTIVITY_LABELS, WORK_ACTIVITIES, jobsApi, type Activity, type Job, type JobSummary } from "@/lib/jobs";
 
 const DRAFT_KEY = "pulse-farm-map-draft";
+const JOB_DRAFT_KEY = "pulse-farm-map-job-draft";
 const PREFS_KEY = "pulse-farm-map-prefs";
 
 // forPaddockId: the outline for a paddock that has none yet
@@ -60,6 +62,9 @@ export default function FarmMapPage() {
   const { currentFarm } = useFarm();
   const canEdit = currentFarm?.role === "owner" || currentFarm?.role === "manager";
   const canRecord = !!currentFarm?.role && currentFarm.role !== "viewer";
+  // Contractors record the work on jobs shared with them; only farm staff start jobs
+  const canCreate = canRecord && currentFarm?.role !== "contractor";
+  const isContractor = currentFarm?.role === "contractor";
   const { data: state, isLoading, error } = useQuery({ queryKey: FARM_MAP_KEY, queryFn: farmMap.state });
 
   // Per-person settings kept on this device: basemap and which layers are shown
@@ -100,6 +105,14 @@ export default function FarmMapPage() {
   // Fertiliser jobs: the one being set up, or the one open
   const [jobDraft, setJobDraft] = useState<JobDraft | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [jobDraftSaved, setJobDraftSaved] = useState<JobDraft | null>(() => readJson<JobDraft>(JOB_DRAFT_KEY));
+  // Kept while the job is being set up; cleared once it's saved or cancelled
+  const hadJobDraft = useRef(false);
+  useEffect(() => {
+    if (jobDraft) { writeJson(JOB_DRAFT_KEY, jobDraft); hadJobDraft.current = true; }
+    else if (hadJobDraft.current) { writeJson(JOB_DRAFT_KEY, null); setJobDraftSaved(null); hadJobDraft.current = false; }
+  }, [jobDraft]);
+  const outbox = useApplicationOutbox(() => { queryClient.invalidateQueries({ queryKey: JOBS_KEY }); toast.success("Saved work uploaded"); });
   const [openJob, setOpenJob] = useState<Job | undefined>();
 
   const dirty = !!pending || (!!edit && edit.index > 0);
@@ -148,7 +161,8 @@ export default function FarmMapPage() {
   // Exclusions (on their layer), the open plan's zones, gaps and overlaps, and the exclusion being set up
   const overlays = useMemo<Overlay[]>(() => {
     if (!state) return [];
-    const out = [...exclusionOverlays(state), ...planOverlays(openPlan), ...(jobDraft ? [] : jobOverlays(jobs, state.layers)), ...restrictionOverlays(jobs, state.layers), ...footprintOverlays(openJob), ...runPreview(jobDraft)];
+    const out = [...exclusionOverlays(state), ...planOverlays(openPlan), ...(jobDraft ? [] : jobOverlays(jobs, state.layers)), ...restrictionOverlays(jobs, state.layers), ...footprintOverlays(openJob), ...runPreview(jobDraft),
+      ...(openJob?.gps ? [{ key: "gps", geometry: openJob.gps.geometry, rank: 7, label: "GPS evidence", style: { color: "#111111", weight: 3, fillColor: "#111111", fillOpacity: 0.15 } }] : [])];
     for (const l of jobDraft?.lines ?? []) {
       const g = l.geometry ?? state.paddocks.find(p => p.id === l.pastureId)?.geometry;
       if (g) out.push({ key: `jobline-${l.key}`, geometry: g, rank: 8, style: { color: "#ffd43b", weight: 3, fillColor: "#ffd43b", fillOpacity: 0.35 } });
@@ -207,7 +221,7 @@ export default function FarmMapPage() {
   };
   const lineFor = (pastureId: string) => ({ key: crypto.randomUUID(), pastureId, rateUnit: "kg/ha" });
   const startJob = (d: JobDraft) => {
-    if (!canRecord) return toast.error("Viewers can look but not record");
+    if (!canCreate) return toast.error(isContractor ? "Contractors work on the jobs shared with them" : "Viewers can look but not record");
     cancelAll();
     setPlanId(null);
     setJobId(null);
@@ -401,13 +415,36 @@ export default function FarmMapPage() {
           saveState === "offline" && "text-red-800 bg-red-50 border-red-200")} role="status">
           {saveState === "offline" && <CloudOff className="h-3.5 w-3.5" />}{statusLabel}
         </span>
-        {canRecord && (
+        {outbox.pending.length > 0 && (
+          <span className="text-xs px-2 py-1 rounded-full border text-blue-800 bg-blue-50 border-blue-200" role="status">
+            {outbox.pending.length} job change{outbox.pending.length === 1 ? "" : "s"} waiting to upload
+          </span>
+        )}
+        {!isContractor && canRecord && <Button asChild variant="outline" className="h-9"><Link href="/app/farm-map/reports">Reports</Link></Button>}
+        {canCreate && (
           <AddActivityMenu
             onJob={(activity: Activity) => startJob({ activity, lines: selectedPaddock?.geometry ? [lineFor(selectedPaddock.id)] : [] })}
             onOther={() => openNewRecord({ type: "feed_out", pastureIds: selectedPaddock ? [selectedPaddock.id] : [] })} />
         )}
       </div>
 
+      {outbox.problems.length > 0 && (
+        <div className="border-b bg-red-50 dark:bg-red-950/30 px-3 py-2 text-sm space-y-1" role="alert">
+          {outbox.problems.map(i => (
+            <div key={i.id} className="flex flex-wrap items-center gap-2">
+              <span><strong>{i.label}</strong> saved on this device {new Date(i.createdAt).toLocaleString()} wasn't uploaded: {i.state === "conflict" ? "the job was changed by someone else since. Open the job, check it, and enter the change again if it's still needed." : i.error}</span>
+              <Button size="sm" variant="ghost" onClick={() => outbox.discard(i.id)}>Dismiss</Button>
+            </div>
+          ))}
+        </div>
+      )}
+      {jobDraftSaved && !jobDraft && (
+        <div className="flex flex-wrap items-center gap-2 border-b bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-sm">
+          Unsaved {jobDraftSaved.activity ?? "fertiliser"} job ({jobDraftSaved.lines.length} area{jobDraftSaved.lines.length === 1 ? "" : "s"}) from this device.
+          <Button size="sm" variant="outline" onClick={() => { startJob(jobDraftSaved); }}>Carry on</Button>
+          <Button size="sm" variant="ghost" onClick={() => { writeJson(JOB_DRAFT_KEY, null); setJobDraftSaved(null); }}>Discard</Button>
+        </div>
+      )}
       {draft && !dirty && (
         <div className="flex flex-wrap items-center gap-2 border-b bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-sm">
           Unsaved {draft.kind === "pending" ? "drawing" : "boundary edit"} from {new Date(draft.at).toLocaleString()}.
@@ -439,7 +476,7 @@ export default function FarmMapPage() {
             onAddExclusion={() => { if (!canEdit) return; cancelAll(); setPlanId(null); setSelection(null); setExclusionStart(true); setPanel("right"); }}
             onOpenPlan={id => { cancelAll(); setPlanId(id); setPanel("right"); }}
             onNewPlan={() => { cancelAll(); setPlanId(null); setNewPlan(true); setPanel("right"); }}
-            jobs={jobs} canRecord={canRecord}
+            jobs={jobs} canRecord={canCreate}
             onOpenJob={id => { cancelAll(); setPlanId(null); setJobId(id); setSelection({ type: "job", id }); setPanel("right"); goTo(jobs.find(j => j.id === id)?.lines?.[0]?.geometry); }}
             onNewJob={activity => startJob({ activity, lines: [] })}
           />
@@ -581,7 +618,7 @@ export default function FarmMapPage() {
               onCreated={job => { setJobDraft(null); setMode({ kind: "view" }); setJobId(job.id); setSelection({ type: "job", id: job.id }); }}
               onCancel={() => { setJobDraft(null); setMode({ kind: "view" }); }} />
           ) : jobId ? (
-            <JobPanel key={jobId} jobId={jobId} canEdit={canRecord} onClose={() => { setJobId(null); setSelection(null); }}
+            <JobPanel key={jobId} jobId={jobId} canEdit={canRecord} role={currentFarm?.role} onClose={() => { setJobId(null); setSelection(null); }}
               onJob={setOpenJob} onOpenJob={id => { setJobId(id); setSelection({ type: "job", id }); }} />
           ) : newPlan ? (
             <NewPlanForm state={state} selectedPaddockId={selectedPaddock?.id} run={run}
@@ -608,7 +645,7 @@ export default function FarmMapPage() {
               onDraw={() => startDraw("paddock", "Polygon", selectedPaddock.id)}
               run={run}
               onArchived={() => setSelection(null)}
-              canRecord={canRecord}
+              canRecord={canCreate}
               onAddJob={activity => startJob({ activity, lines: selectedPaddock.geometry ? [lineFor(selectedPaddock.id)] : [] })}
               onOpenJob={id => { setJobId(id); setSelection({ type: "job", id }); }}
             />
@@ -669,6 +706,31 @@ function AddActivityMenu({ onJob, onOther }: { onJob: (a: Activity) => void; onO
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Who changed the map and when (managers): paddocks, boundaries, exclusions, layers, plans
+ */
+function MapHistory() {
+  const [open, setOpen] = useState(false);
+  const { data = [] } = useQuery<{ id: string; entityType: string; action: string; at: string; by: string | null; name: string | null; note: string | null }[]>({
+    queryKey: ["/api/farm-map/audit"], enabled: open,
+    queryFn: async () => { const r = await fetch("/api/farm-map/audit?limit=100", { credentials: "include" }); return r.ok ? r.json() : []; },
+  });
+  return (
+    <details className="text-sm" onToggle={e => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary className="cursor-pointer font-semibold">Map edit history</summary>
+      <ul className="mt-1 max-h-64 overflow-y-auto divide-y rounded-md border text-xs">
+        {data.map(r => (
+          <li key={r.id} className="px-2 py-1">
+            <div className="flex justify-between gap-2"><span>{r.entityType.replace(/_/g, " ")} {r.action.replace(/_/g, " ")}{r.name ? `: ${r.name}` : ""}</span></div>
+            <div className="text-muted-foreground">{new Date(r.at).toLocaleString()} · {r.by ?? "—"}{r.note ? ` · ${r.note}` : ""}</div>
+          </li>
+        ))}
+        {open && data.length === 0 && <li className="px-2 py-1 text-muted-foreground">No changes recorded yet.</li>}
+      </ul>
+    </details>
   );
 }
 
@@ -780,6 +842,16 @@ function PaddockPanel({ paddock, canEdit, locked, range, onEdit, onSplit, onMerg
     queryKey: [...JOBS_KEY, "paddock", paddock.id, range.from, range.to],
     queryFn: () => jobsApi.list({ pastureId: paddock.id, from: range.from, to: range.to }),
   });
+  // Filter the paddock's history by activity, or by product, contractor or target
+  const [jobFilter, setJobFilter] = useState<{ activity: string; text: string }>({ activity: "", text: "" });
+  const shownJobs = paddockJobs.filter(j => (!jobFilter.activity || j.activity === jobFilter.activity)
+    && (!jobFilter.text || `${j.products ?? ""} ${j.contractor ?? ""} ${j.target ?? ""} ${j.title ?? ""}`.toLowerCase().includes(jobFilter.text.toLowerCase())));
+  // Totals for the paddock over these dates (staff only: the report isn't shared with contractors)
+  const { data: totals } = useQuery({
+    queryKey: ["/api/activity-reports", "paddock", paddock.id, range.from, range.to],
+    queryFn: () => jobsApi.report({ from: range.from, to: range.to, pastureId: paddock.id }),
+    enabled: canRecord,
+  });
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(paddock.name);
   const [num, setNum] = useState(paddock.paddockNumber != null ? String(paddock.paddockNumber) : "");
@@ -851,9 +923,28 @@ function PaddockPanel({ paddock, canEdit, locked, range, onEdit, onSplit, onMerg
 
       <section className="space-y-1">
         <h3 className="text-sm font-semibold">Jobs</h3>
-        {paddockJobs.length === 0 ? <p className="text-sm text-muted-foreground">None in these dates.</p> : (
+        {totals && (totals.nutrients.length > 0 || totals.harvest.length > 0 || totals.totals.cost > 0) && (
+          <div className="rounded-md border p-2 text-xs space-y-0.5 tabular-nums">
+            {totals.nutrients.map((n: any) => (
+              <p key={n.paddock}>Nutrients applied: {Object.entries(n.kg).filter(([, v]) => (v as number) > 0).map(([k, v]) => `${k} ${v} kg${n.perHa ? ` (${n.perHa[k]} kg/ha)` : ""}`).join(" · ") || "none counted"}
+                {n.notCounted.length > 0 && <span className="text-amber-800"> · not counted: {n.notCounted.join("; ")}</span>}</p>
+            ))}
+            {totals.harvest.length > 0 && <p>Harvested: {totals.harvest.map((h: any) => `${h.activity} ${h.freshT ?? "?"} t fresh / ${h.dmT ?? "?"} t DM${h.dmBasis === "estimated" || h.freshBasis === "estimated" ? " (est.)" : ""}`).join("; ")}</p>}
+            {totals.totals.cost > 0 && <p>Costs (this paddock's share): ${totals.totals.cost.toLocaleString()}</p>}
+          </div>
+        )}
+        {paddockJobs.length > 0 && (
+          <div className="grid grid-cols-[7rem_1fr] gap-1">
+            <select className="h-8 rounded-md border bg-background px-1 text-xs" value={jobFilter.activity} onChange={e => setJobFilter(f => ({ ...f, activity: e.target.value }))} aria-label="Filter by activity">
+              <option value="">All activities</option>
+              {(Object.keys(ACTIVITY_LABELS) as Activity[]).map(a => <option key={a} value={a}>{ACTIVITY_LABELS[a]}</option>)}
+            </select>
+            <Input className="h-8 text-xs" value={jobFilter.text} onChange={e => setJobFilter(f => ({ ...f, text: e.target.value }))} placeholder="Product, contractor or target" aria-label="Filter jobs" />
+          </div>
+        )}
+        {shownJobs.length === 0 ? <p className="text-sm text-muted-foreground">{paddockJobs.length ? "No jobs match." : "None in these dates."}</p> : (
           <ul className="divide-y rounded-md border text-sm">
-            {paddockJobs.map(j => {
+            {shownJobs.map(j => {
               const mine = (j.lines ?? []).filter(l => l.pastureId === paddock.id);
               return (
                 <li key={j.id}>
@@ -1055,6 +1146,7 @@ function LeftPanel({ state, canEdit, visible, setVisible, onSelectPaddock, mapVi
 
       <JobsSection jobs={jobs} onOpen={onOpenJob} onNew={onNewJob} canRecord={canRecord} />
       <PlansSection plans={state.plans} canEdit={canEdit} onOpen={onOpenPlan} onNew={onNewPlan} />
+      {canEdit && <MapHistory />}
 
       <section className="space-y-2">
         <h2 className="text-sm font-semibold">Paddocks</h2>

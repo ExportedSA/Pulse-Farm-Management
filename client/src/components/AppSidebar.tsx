@@ -2,6 +2,7 @@ import { Home, Syringe, Pill, Users, Sprout, Heart, Settings, BarChart3, Chevron
 import { Link, useLocation } from "wouter";
 import { useState, ComponentProps } from "react";
 import { useChatContext } from "@/contexts/ChatContext";
+import { useFarm } from "@/lib/farm-context";
 import { Badge } from "@/components/ui/badge";
 import {
   Sidebar,
@@ -166,6 +167,9 @@ export function AppSidebar({ ...props }: AppSidebarProps) {
   const [openMenus, setOpenMenus] = useState<string[]>([]);
   const { setOpen, setOpenMobile } = useSidebar();
   const { getTotalUnreadCount } = useChatContext();
+  // Contractors work only on the jobs shared with them, on the farm map
+  const { currentFarm } = useFarm();
+  const items = currentFarm?.role === "contractor" ? menuItems.filter(i => i.url === "/app/farm-map") : menuItems;
 
   const handleMenuClick = () => {
     setOpen(false);
@@ -204,7 +208,7 @@ export function AppSidebar({ ...props }: AppSidebarProps) {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {menuItems.map((item) => {
+              {items.map((item) => {
                 if (item.subItems) {
                   return (
                     <Collapsible

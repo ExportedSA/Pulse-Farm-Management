@@ -496,6 +496,7 @@ export default function SettingsPage() {
                         <SelectItem value="manager">Manager</SelectItem>
                         <SelectItem value="worker">Worker</SelectItem>
                         <SelectItem value="viewer">Viewer</SelectItem>
+                        <SelectItem value="contractor">Contractor (shared jobs only)</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />

@@ -188,6 +188,29 @@ export async function updateCustomProduct(farmId: string, userId: string, id: st
 /**
  * Products used in records are archived, never deleted
  */
+/**
+ * A manager checks one of the farm's own products against its label or analysis sheet. It then
+ * counts as verified (nutrients included), with who checked it, when and against what. Shared
+ * catalogue products are verified from their source and can't be changed here.
+ */
+export async function verifyFarmProduct(farmId: string, userId: string, id: string, input: { reference: string; labelUrl?: string | null }) {
+  await db.transaction(async tx => {
+    const [p] = rowsOf(await tx.execute(sql`SELECT id, farm_id, verification FROM input_products WHERE id = ${id} AND archived_at IS NULL`));
+    if (!p || (p.farm_id && p.farm_id !== farmId)) throw new MapError('Product not found', 404);
+    if (!p.farm_id) throw new MapError('Shared catalogue products are checked from their published source, not here', 403);
+    await saveVersion(tx, id, userId);
+    const [u] = rowsOf(await tx.execute(sql`SELECT name FROM users WHERE id = ${userId}`));
+    await tx.execute(sql`
+      UPDATE input_products SET verification = 'verified', verified_on = CURRENT_DATE, checked_by = ${userId}, checked_at = now(),
+        check_reference = ${input.reference}, label_url = COALESCE(${input.labelUrl ?? null}, label_url),
+        source_note = ${`Checked on the farm by ${u?.name ?? 'a manager'} against: ${input.reference}`},
+        version = version + 1, updated_at = now()
+      WHERE id = ${id}`);
+    await saveVersion(tx, id, userId);
+  });
+  return getProduct(farmId, id);
+}
+
 export async function archiveCustomProduct(farmId: string, id: string) {
   const rows = rowsOf(await db.execute(sql`
     UPDATE input_products SET archived_at = now() WHERE id = ${id} AND farm_id = ${farmId} AND archived_at IS NULL RETURNING id`));

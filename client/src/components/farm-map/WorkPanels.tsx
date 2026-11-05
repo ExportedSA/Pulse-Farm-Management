@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import * as turf from "@turf/turf";
 import { AlertTriangle, CheckCircle2, Save, Spline, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
+import { saveMessage } from "@/lib/application-outbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -105,7 +106,8 @@ export function NewWorkForm({ activity, state, draft, setDraft, jobs, onDrawPart
       queryClient.invalidateQueries({ queryKey: FARM_MAP_KEY });
       onCreated(job);
     } catch (e: any) {
-      toast.error(e.message);
+      // Offline: kept on the device and uploaded later
+      if (saveMessage(e, toast)) onCancel();
     } finally {
       setSaving(false);
     }
@@ -288,7 +290,7 @@ export function WorkJobView({ job, canEdit, onClose, onOpenJob }: { job: Job; ca
       queryClient.invalidateQueries({ queryKey: JOBS_KEY });
       queryClient.invalidateQueries({ queryKey: ["/api/records"] });
       toast.success(msg);
-    } catch (e: any) { toast.error(e.message); }
+    } catch (e: any) { saveMessage(e, toast); }
   };
   const editable = canEdit && job.status !== "cancelled";
   const evidence = { planned: "Planned on the map", manual: "Recorded by hand (not GPS evidence)", gps: "Imported GPS evidence" }[job.evidence];

@@ -1,4 +1,6 @@
 // Fertiliser jobs, the product catalogue and dockets (API helpers and types)
+// Job writes go through the device outbox when offline (see application-outbox.ts)
+import { queued } from "./application-outbox";
 
 export interface CatalogueProduct {
   id: string; farmId: string | null; kind: string; name: string; supplier: string | null; category: string | null;
@@ -62,6 +64,13 @@ export interface Job {
   spray: SprayDetail | null;
   work: WorkDetail | null;
   linkedJobId: string | null;
+  sharedWith: string[];
+  gps: null | { source: string; importedAt: string; geometry: GeoJSON.Geometry; trackM: number; trackOutsideM: number; points: number;
+    coveredHa: number; coveredPct: number | null; coveredOutsideHa: number };
+}
+export interface JobHistory {
+  events: { action: string; at: string; by: string | null }[];
+  changes: { version: number; reason: string | null; at: string; by: string | null; changes: string[] }[];
 }
 export type Activity = "fertiliser" | "spray" | "effluent" | "slurry" | "baleage" | "silage" | "topping" | "mowing";
 export const ACTIVITY_LABELS: Record<Activity, string> = {
@@ -88,6 +97,7 @@ export interface JobSummary {
   id: string; activity: string; status: Job["status"]; title: string | null; plannedOn: string | null; completedAt: string | null;
   evidence: string; contractor: string | null; supplier: string | null; products: string | null; netHa: number | null; dockets: number;
   target: string | null; restriction: SprayDetail["summary"] | null; details: Record<string, any> | null; linkedJobId: string | null;
+  sharedWith: string[]; hasGps: boolean;
   lines: { id: string; name: string | null; pastureId: string | null; status: string; product: string; rate: number | null; rateUnit: string; geometry: GeoJSON.MultiPolygon }[] | null;
 }
 export interface NewLine { key: string; pastureId?: string | null; geometry?: GeoJSON.Geometry | null; name?: string | null; productId?: string | null; rate?: number | null; rateUnit: string; appliedQuantity?: number | null }
@@ -120,9 +130,9 @@ export const jobsApi = {
   pref: (id: string, b: { favourite?: boolean; nickname?: string | null }) => send("PUT", `/api/catalogue/${id}/pref`, b),
   list: (q: Record<string, string | undefined>) => api<JobSummary[]>(`/api/applications?${new URLSearchParams(Object.entries(q).filter(([, v]) => v) as any)}`),
   get: (id: string) => api<Job>(`/api/applications/${id}`),
-  create: (b: any) => send<Job>("POST", "/api/applications", b),
-  update: (id: string, b: any) => send<Job>("PATCH", `/api/applications/${id}`, b),
-  applied: (id: string, b: { lineId: string; quantity: number | null }[]) => send<Job>("PUT", `/api/applications/${id}/applied`, b),
+  create: (b: any) => queued<Job>("POST", "/api/applications", b, "New job"),
+  update: (id: string, b: any) => queued<Job>("PATCH", `/api/applications/${id}`, b, "Job change"),
+  applied: (id: string, b: { lineId: string; quantity: number | null }[]) => queued<Job>("PUT", `/api/applications/${id}/applied`, b, "Applied amounts"),
   cancel: (id: string) => send("DELETE", `/api/applications/${id}`),
   addDocket: (id: string, data: any, files: File[]) => {
     const form = new FormData();
@@ -132,7 +142,15 @@ export const jobsApi = {
   },
   linkDocket: (id: string, docketId: string, allocated?: number | null) => send<Job>("POST", `/api/applications/${id}/dockets`, { docketId, allocated: allocated ?? null }),
   unlinkDocket: (id: string, docketId: string) => send<Job>("DELETE", `/api/applications/${id}/dockets/${docketId}`),
-  used: (id: string, b: { tankLoads?: number | null; used: { mixId: string; quantity: number | null; unit: string | null }[] }) => send<Job>("PUT", `/api/applications/${id}/used`, b),
+  used: (id: string, b: { tankLoads?: number | null; used: { mixId: string; quantity: number | null; unit: string | null }[] }) => queued<Job>("PUT", `/api/applications/${id}/used`, b, "Quantities used"),
+  history: (id: string) => api<JobHistory>(`/api/applications/${id}/history`),
+  version: (id: string, v: number) => api<{ data: any; reason: string | null; at: string; by: string | null }>(`/api/applications/${id}/versions/${v}`),
+  contractors: () => api<{ id: string; name: string; email: string }[]>("/api/applications/contractors"),
+  share: (id: string, userIds: string[]) => send<Job>("PUT", `/api/applications/${id}/share`, { userIds }),
+  setGps: (id: string, b: { geometries: GeoJSON.Geometry[]; source: string }) => send<Job>("PUT", `/api/applications/${id}/gps`, b),
+  clearGps: (id: string) => send<Job>("DELETE", `/api/applications/${id}/gps`),
+  verifyProduct: (id: string, b: { reference: string; labelUrl?: string | null }) => send<CatalogueProduct>("POST", `/api/catalogue/${id}/verify`, b),
+  report: (q: Record<string, string | undefined>) => api<any>(`/api/activity-reports?${new URLSearchParams(Object.entries(q).filter(([, v]) => v) as any)}`),
   addRestriction: (id: string, b: any) => send<Job>("POST", `/api/applications/${id}/restrictions`, b),
   saveRestriction: (id: string, rid: string, b: any) => send<Job>("PUT", `/api/applications/${id}/restrictions/${rid}`, b),
   deleteRestriction: (id: string, rid: string) => send<Job>("DELETE", `/api/applications/${id}/restrictions/${rid}`),

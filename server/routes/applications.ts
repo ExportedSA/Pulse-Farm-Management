@@ -13,6 +13,10 @@ import {
   STATUSES, ACTIVITIES, FERTILISER_UNITS, createApplication, updateApplication, setApplied, setSprayUsed, cancelApplication, getApplication,
   listApplications, createDocket, linkDocket, unlinkDocket, searchDockets,
 } from '../domain/applications';
+import { jobHistory, jobVersion } from '../domain/versions';
+import { activityReport, CSV_SECTIONS, jobsGeoJson, nutrientCsv, toCsv } from '../domain/reports';
+import { clearGps, contractors, isSharedWith, setGps, shareJob } from '../domain/evidence';
+import { verifyFarmProduct } from '../domain/catalogue';
 import {
   SPRAY_UNITS, QTY_UNITS, RESTRICTION_KINDS, RESTRICTION_STATUSES, addRestriction, updateRestriction, deleteRestriction, activeRestrictions,
 } from '../domain/sprays';
@@ -34,6 +38,23 @@ async function requireRecorder(req: Request) {
   const r = await role(req);
   if (!r || r === 'viewer') throw new MapError('Viewers can look but not record', 403);
 }
+// Contractors work only on the jobs shared with them, and can't create, cancel or reshape jobs
+async function requireJobAccess(req: Request, id: string, opts: { write?: boolean } = {}) {
+  const r = await role(req);
+  if (!r) throw new MapError('Job not found', 404);
+  if (r === 'contractor') {
+    if (!(await isSharedWith(id, getUserId(req)!))) throw new MapError('Job not found', 404);
+    return r;
+  }
+  if (opts.write && r === 'viewer') throw new MapError('Viewers can look but not record', 403);
+  return r;
+}
+async function requireStaff(req: Request) {
+  const r = await role(req);
+  if (!r || r === 'viewer' || r === 'contractor') throw new MapError('Only farm staff can do that', 403);
+}
+// What a contractor may change on a shared job: doing it, not redefining it
+const CONTRACTOR_FIELDS = ['status', 'startedAt', 'completedAt', 'weather', 'windSpeed', 'windDirection', 'temperature', 'notes', 'operator', 'operatorCert', 'tankLoads', 'version'];
 async function requireManager(req: Request) {
   const r = await role(req);
   if (r !== 'owner' && r !== 'manager') throw new MapError('Only owners and managers can do that', 403);
@@ -92,7 +113,7 @@ const productInput = z.object({
 });
 
 catalogueRouter.post('/', route(async (req, res) => {
-  await requireRecorder(req);
+  await requireStaff(req);
   const { farmId, userId } = ctx(req);
   res.status(201).json(await createCustomProduct(farmId, userId, productInput.parse(req.body)));
 }, 'Failed to add the product'));
@@ -110,8 +131,16 @@ catalogueRouter.delete('/:id', route(async (req, res) => {
   res.json({ ok: true });
 }, 'Failed to archive the product'));
 
+// A manager checks a farm-entered product against its label; its nutrients then count
+catalogueRouter.post('/:id/verify', route(async (req, res) => {
+  await requireManager(req);
+  const { farmId, userId } = ctx(req);
+  const input = z.object({ reference: z.string().trim().min(3, 'Say what it was checked against (label, analysis sheet)').max(500), labelUrl: z.string().url().max(500).optional().nullable() }).parse(req.body);
+  res.json(await verifyFarmProduct(farmId, userId, uuid.parse(req.params.id), input));
+}, 'Failed to check the product'));
+
 catalogueRouter.put('/:id/pref', route(async (req, res) => {
-  await requireRecorder(req);
+  await requireStaff(req);
   const input = z.object({ favourite: z.boolean().optional(), nickname: text(80) }).parse(req.body);
   await setProductPref(getFarmId(req)!, uuid.parse(req.params.id), input);
   res.json({ ok: true });
@@ -187,41 +216,54 @@ const appInput = z.object({
 
 applicationsRouter.get('/', route(async (req, res) => {
   const q = z.object({ activity: z.string().max(20).optional(), status: z.enum(STATUSES).optional(), from: day.optional(), to: day.optional(), pastureId: uuid.optional() }).parse(req.query);
-  res.json(await listApplications(getFarmId(req)!, q));
+  const r = await role(req);
+  res.json(await listApplications(getFarmId(req)!, { ...q, sharedWith: r === 'contractor' ? getUserId(req)! : undefined }));
 }, 'Failed to load jobs'));
 
+applicationsRouter.get('/contractors', route(async (req, res) => {
+  await requireStaff(req);
+  res.json(await contractors(getFarmId(req)!));
+}, 'Failed to load contractors'));
+
 applicationsRouter.post('/', route(async (req, res) => {
-  await requireRecorder(req);
+  await requireStaff(req);
   const { farmId, userId } = ctx(req);
   const r = await createApplication(farmId, userId, appInput.parse(req.body));
   res.status(r.created ? 201 : 200).json(await getApplication(farmId, r.id));
 }, 'Failed to save the job'));
 
 applicationsRouter.get('/:id', route(async (req, res) => {
-  res.json(await getApplication(getFarmId(req)!, uuid.parse(req.params.id)));
+  const id = uuid.parse(req.params.id);
+  await requireJobAccess(req, id);
+  res.json(await getApplication(getFarmId(req)!, id));
 }, 'Failed to load the job'));
 
 applicationsRouter.patch('/:id', route(async (req, res) => {
-  await requireRecorder(req);
   const { farmId, userId } = ctx(req);
   const id = uuid.parse(req.params.id);
-  await updateApplication(farmId, userId, id, appInput.parse(req.body));
+  const r = await requireJobAccess(req, id, { write: true });
+  const input = appInput.parse(req.body);
+  if (r === 'contractor') {
+    const extra = Object.keys(input).filter(k => (input as any)[k] !== undefined && !CONTRACTOR_FIELDS.includes(k));
+    if (extra.length) throw new MapError('Contractors can record the work, not change the job itself', 403);
+  }
+  await updateApplication(farmId, userId, id, input);
   res.json(await getApplication(farmId, id));
 }, 'Failed to update the job'));
 
 applicationsRouter.put('/:id/applied', route(async (req, res) => {
-  await requireRecorder(req);
   const { farmId, userId } = ctx(req);
   const id = uuid.parse(req.params.id);
+  await requireJobAccess(req, id, { write: true });
   const input = z.array(z.object({ lineId: uuid, quantity: z.number().min(0).nullable() })).max(200).parse(req.body);
   await setApplied(farmId, userId, id, input);
   res.json(await getApplication(farmId, id));
 }, 'Failed to save the applied amounts'));
 
 applicationsRouter.put('/:id/used', route(async (req, res) => {
-  await requireRecorder(req);
   const { farmId, userId } = ctx(req);
   const id = uuid.parse(req.params.id);
+  await requireJobAccess(req, id, { write: true });
   const input = z.object({
     tankLoads: optNum(10000),
     used: z.array(z.object({ mixId: uuid, quantity: z.number().min(0).nullable(), unit: z.enum(QTY_UNITS).nullable() })).max(12),
@@ -241,17 +283,17 @@ const restrictionInput = z.object({
 
 // Restrictions: anyone recording can enter what the label says; the end date is worked out
 applicationsRouter.post('/:id/restrictions', route(async (req, res) => {
-  await requireRecorder(req);
   const { farmId, userId } = ctx(req);
   const id = uuid.parse(req.params.id);
+  await requireJobAccess(req, id, { write: true });
   await addRestriction(farmId, userId, id, restrictionInput.parse(req.body));
   res.status(201).json(await getApplication(farmId, id));
 }, 'Failed to add the restriction'));
 
 applicationsRouter.put('/:id/restrictions/:rid', route(async (req, res) => {
-  await requireRecorder(req);
   const { farmId, userId } = ctx(req);
   const id = uuid.parse(req.params.id);
+  await requireJobAccess(req, id, { write: true });
   await updateRestriction(farmId, userId, id, uuid.parse(req.params.rid), restrictionInput.parse(req.body));
   res.json(await getApplication(farmId, id));
 }, 'Failed to save the restriction'));
@@ -263,6 +305,45 @@ applicationsRouter.delete('/:id/restrictions/:rid', route(async (req, res) => {
   await deleteRestriction(farmId, userId, id, uuid.parse(req.params.rid));
   res.json(await getApplication(farmId, id));
 }, 'Failed to remove the restriction'));
+
+// History: every change, who made it and when, and each earlier version in full
+applicationsRouter.get('/:id/history', route(async (req, res) => {
+  const id = uuid.parse(req.params.id);
+  await requireJobAccess(req, id);
+  res.json(await jobHistory(getFarmId(req)!, id));
+}, 'Failed to load the history'));
+
+applicationsRouter.get('/:id/versions/:version', route(async (req, res) => {
+  const id = uuid.parse(req.params.id);
+  await requireJobAccess(req, id);
+  res.json(await jobVersion(getFarmId(req)!, id, z.coerce.number().int().min(1).parse(req.params.version)));
+}, 'Failed to load that version'));
+
+applicationsRouter.put('/:id/share', route(async (req, res) => {
+  await requireManager(req);
+  const { farmId, userId } = ctx(req);
+  const id = uuid.parse(req.params.id);
+  await shareJob(farmId, userId, id, z.object({ userIds: z.array(uuid).max(50) }).parse(req.body).userIds);
+  res.json(await getApplication(farmId, id));
+}, 'Failed to share the job'));
+
+// Imported GPS evidence (geometries read from GPX/KML/GeoJSON on the device)
+applicationsRouter.put('/:id/gps', route(async (req, res) => {
+  const { farmId, userId } = ctx(req);
+  const id = uuid.parse(req.params.id);
+  await requireJobAccess(req, id, { write: true });
+  const input = z.object({ geometries: z.array(geometry).min(1).max(500), source: z.string().trim().min(1).max(200) }).parse(req.body);
+  await setGps(farmId, userId, id, input);
+  res.json(await getApplication(farmId, id));
+}, 'Failed to import the GPS evidence'));
+
+applicationsRouter.delete('/:id/gps', route(async (req, res) => {
+  await requireManager(req);
+  const { farmId, userId } = ctx(req);
+  const id = uuid.parse(req.params.id);
+  await clearGps(farmId, userId, id);
+  res.json(await getApplication(farmId, id));
+}, 'Failed to remove the GPS evidence'));
 
 applicationsRouter.delete('/:id', route(async (req, res) => {
   await requireManager(req);
@@ -285,13 +366,14 @@ const docketInput = z.object({
 
 // POST /api/applications/:id/dockets - attach a new docket (multipart: data + files), or link one: { docketId, quantity }
 applicationsRouter.post('/:id/dockets', withUploads, route(async (req, res) => {
-  await requireRecorder(req);
   const { farmId, userId } = ctx(req);
   const id = uuid.parse(req.params.id);
+  const r = await requireJobAccess(req, id, { write: true });
   const body = bodyOf(req);
   const quantity = z.number().min(0).nullable().optional().parse(body?.allocated ?? null) ?? null;
   let docketId: string;
   if (body?.docketId) {
+    if (r === 'contractor') throw new MapError('Contractors attach their own docket to the job', 403);
     docketId = uuid.parse(body.docketId);
   } else {
     const files = (req.files as Express.Multer.File[] | undefined) ?? [];
@@ -302,7 +384,7 @@ applicationsRouter.post('/:id/dockets', withUploads, route(async (req, res) => {
 }, 'Failed to attach the docket'));
 
 applicationsRouter.delete('/:id/dockets/:docketId', route(async (req, res) => {
-  await requireRecorder(req);
+  await requireStaff(req);
   const { farmId, userId } = ctx(req);
   const id = uuid.parse(req.params.id);
   await unlinkDocket(farmId, userId, id, uuid.parse(req.params.docketId));
@@ -317,6 +399,34 @@ restrictionsRouter.get('/', route(async (req, res) => {
   const kinds = q.kind ? q.kind.split(',').filter(k => (RESTRICTION_KINDS as readonly string[]).includes(k)) : undefined;
   res.json(await activeRestrictions(getFarmId(req)!, { pastureId: q.pastureId, at: q.at ? new Date(q.at).toISOString() : undefined, kinds }));
 }, 'Failed to check restrictions'));
+
+// /api/activity-reports: applications, sprays, nutrients, harvest and dockets over a date range
+export const activityReportsRouter = Router();
+activityReportsRouter.use(requireFarm);
+const reportQuery = z.object({
+  from: day, to: day, activity: z.enum(ACTIVITIES).optional(), pastureId: uuid.optional(),
+  product: z.string().max(80).optional(), contractor: z.string().max(80).optional(),
+});
+activityReportsRouter.get('/', route(async (req, res) => {
+  await requireStaff(req);
+  res.json(await activityReport(getFarmId(req)!, reportQuery.parse(req.query)));
+}, 'Failed to build the report'));
+
+activityReportsRouter.get('/export.csv', route(async (req, res) => {
+  await requireStaff(req);
+  const section = z.enum(['jobs', 'sprays', 'harvest', 'dockets', 'nutrients']).parse(req.query.section);
+  const f = reportQuery.parse(req.query);
+  const r = await activityReport(getFarmId(req)!, f);
+  const csv = section === 'nutrients' ? nutrientCsv(r.nutrients) : toCsv((r as any)[section], CSV_SECTIONS[section]);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="pulse-${section}-${f.from}-to-${f.to}.csv"`);
+  res.send('﻿' + csv);
+}, 'Failed to export'));
+
+activityReportsRouter.get('/jobs.geojson', route(async (req, res) => {
+  await requireStaff(req);
+  res.json(await jobsGeoJson(getFarmId(req)!, reportQuery.parse(req.query)));
+}, 'Failed to export the job areas'));
 
 export const docketsRouter = Router();
 docketsRouter.use(requireFarm);

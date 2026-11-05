@@ -12,7 +12,7 @@ export interface Farm {
   type?: string;
   color?: string;
   isDefault?: boolean;
-  role?: "owner" | "manager" | "worker" | "viewer";
+  role?: "owner" | "manager" | "worker" | "viewer" | "contractor";
 }
 
 interface FarmContextType {
