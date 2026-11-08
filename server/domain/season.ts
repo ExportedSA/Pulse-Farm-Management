@@ -146,6 +146,10 @@ export async function seasonSummary(farmId: string, season: string) {
           incomplete.push({ id: r.id, title: r.title, reason: "product analysis isn't verified, so its nutrients aren't counted" });
           break;
         }
+        // The analysis leaves some nutrients out: the others are counted, these are unknown
+        if (Array.isArray(d.nutrientsNotStated) && d.nutrientsNotStated.length) {
+          incomplete.push({ id: r.id, title: r.title, reason: `${d.nutrientsNotStated.join(', ')} not stated in the product's analysis, so not counted` });
+        }
         const n = kg * nPct / 100;
         nutrients.syntheticN += n;
         nutrients.p += kg * pct('pPercent') / 100;

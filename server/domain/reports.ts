@@ -94,8 +94,11 @@ export async function activityReport(farmId: string, f: ReportFilters) {
       const factor = KG[r.quantityUnit ?? ''];
       const p = r.product ?? {};
       if (qty == null || factor == null) { row.notCounted.push(`${j.date} ${p.name}: amount not known in kg`); continue; }
-      if (p.verification !== 'verified' || NUTRIENTS.some(n => p.analysis?.[n] == null)) { row.notCounted.push(`${j.date} ${p.name}: analysis not verified`); continue; }
-      for (const n of NUTRIENTS) row.kg[n] += qty * factor * Number(p.analysis[n]) / 100;
+      if (p.verification !== 'verified' || !p.analysis) { row.notCounted.push(`${j.date} ${p.name}: analysis not verified`); continue; }
+      // A nutrient the supplier doesn't state is unknown, not zero: count the others and say which is missing
+      const missing = NUTRIENTS.filter(n => p.analysis[n] == null);
+      if (missing.length) row.notCounted.push(`${j.date} ${p.name}: ${missing.join(', ')} not stated in its analysis`);
+      for (const n of NUTRIENTS) if (p.analysis[n] != null) row.kg[n] += qty * factor * Number(p.analysis[n]) / 100;
     } else if (isLiquid(r.activity)) {
       const t = liquidTotals(r.details ?? {}, r.jobNetHa ?? 0);
       if (!t.nutrientsKg) { row.notCounted.push(`${j.date} ${r.activity}: ${t.analysis ? 'volume unknown' : 'no analysis'}`); continue; }

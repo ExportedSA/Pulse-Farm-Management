@@ -347,6 +347,9 @@ async function syncRecords(farmId: string, userId: string, id: string) {
       amountUnit: appliedKg != null ? 'kg' : undefined,
       // Nutrient % only from a verified analysis; otherwise the season totals leave it out
       ...(verified ? { nPercent: p.analysis.N, pPercent: p.analysis.P, kPercent: p.analysis.K, sPercent: p.analysis.S } : { analysisUnverified: true }),
+      // Nutrients the supplier's analysis doesn't state: unknown, so the season totals flag them
+      ...(verified && (['N', 'P', 'K', 'S'] as const).some(n => p.analysis[n] == null)
+        ? { nutrientsNotStated: (['N', 'P', 'K', 'S'] as const).filter(n => p.analysis[n] == null) } : {}),
       applicationMethod: app.equipment ?? undefined,
       applicator: app.contractor ?? app.operator ?? undefined,
       docketNumber: dockets.map(d => d.number).join(', ') || undefined,
@@ -421,9 +424,12 @@ function nutrients(lines: any[]) {
     const kg = toKg(useApplied ? l.appliedQuantity : l.plannedQuantity, l.quantityUnit);
     const thisBasis = useApplied ? 'applied' : 'planned';
     if (kg == null) { notCounted.push(`${p.name}${l.name ? ` (${l.name})` : ''}: amount not known in kg`); continue; }
-    if (p.verification !== 'verified' || NUTRIENTS.some(n => p.analysis?.[n] == null)) { notCounted.push(`${p.name}: analysis not verified`); continue; }
+    if (p.verification !== 'verified' || !p.analysis) { notCounted.push(`${p.name}: analysis not verified`); continue; }
+    // A nutrient the supplier doesn't state is unknown, not zero: count the others and say which is missing
+    const missing = NUTRIENTS.filter(n => p.analysis[n] == null);
+    if (missing.length) notCounted.push(`${p.name}: ${missing.join(', ')} not stated in its analysis`);
     basis = basis == null ? thisBasis : basis === thisBasis ? basis : 'mixed';
-    for (const n of NUTRIENTS) totals[n] += kg * Number(p.analysis[n]) / 100;
+    for (const n of NUTRIENTS) if (p.analysis[n] != null) totals[n] += kg * Number(p.analysis[n]) / 100;
     netHa += Number(l.netHa ?? 0);
   }
   const round = (v: number) => Math.round(v * 10) / 10;
