@@ -14,6 +14,7 @@ import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { PWAProvider, usePWA } from "@/lib/pwa-context";
 import { FarmProvider } from "@/lib/farm-context";
 import { RequireAuth } from "@/components/RequireAuth";
+import { ScreenErrorBoundary } from "@/components/ScreenErrorBoundary";
 import { ChatProvider } from "@/contexts/ChatContext";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 import { FarmSwitcher } from "@/components/FarmSwitcher";
@@ -59,8 +60,6 @@ import WeatherPage from "@/pages/weather-page";
 import { NotificationCenter } from "@/components/NotificationCenter";
 import TimesheetsPage from "@/pages/timesheets-page";
 import KanbanPage from "@/pages/kanban-page";
-import TaskDependenciesPage from "@/pages/task-dependencies-page";
-import ComplianceTagsPage from "@/pages/compliance-tags-page";
 import VaccinationDashboard from "@/pages/vaccination-dashboard";
 import HealthMonitoringDashboard from "@/pages/health-monitoring-dashboard";
 import ReproductionDashboardNew from "@/pages/reproduction-dashboard";
@@ -70,8 +69,6 @@ import FieldModeDashboard from "@/pages/field-mode-dashboard";
 import AlertsNotificationsDashboard from "@/pages/alerts-notifications-dashboard";
 import BatchTreatmentPage from "@/pages/batch-treatment-page";
 import LabResultsImportPage from "@/pages/lab-results-import";
-import BenchmarkingPage from "@/pages/benchmarking-page";
-import HealthPredictionsPage from "@/pages/health-predictions-page";
 import NaitCompliancePage from "@/pages/nait-compliance-page";
 import WeightGrowthTrackingPage from "@/pages/weight-growth-tracking";
 import SmartGroupsPage from "@/pages/smart-groups-page";
@@ -96,11 +93,8 @@ import HerdReportsPage from "@/pages/herd-reports-page";
 import PastureWalkPage from "@/pages/pasture-walk-page";
 import RosterSchedulingPage from "@/pages/roster-scheduling-page";
 import QRCodeManagementPage from "@/pages/qr-code-management-page";
-import FinancialAnalyticsPage from "@/pages/financial-analytics-page";
 import AnimalPerformancePage from "@/pages/animal-performance-page";
 import ReportsExportPage from "@/pages/reports-export-page";
-import WeatherIntegrationPage from "@/pages/weather-integration-page";
-import GeneticMeritPage from "@/pages/genetic-merit-page";
 import MultiFarmPage from "@/pages/multi-farm-page";
 import CSVImportPage from "@/pages/csv-import-page";
 import MobileScanner from "@/pages/mobile-scanner";
@@ -125,6 +119,7 @@ function Router() {
 
   return (
     <RequireAuth>
+      <ScreenErrorBoundary key={location}>
       <Switch>
         <Route path="/" component={DashboardOverview} />
         <Route path="/app" component={DashboardOverview} />
@@ -138,8 +133,6 @@ function Router() {
         <Route path="/app/compliance" component={CompliancePage} />
         <Route path="/app/animals" component={AnimalsList} />
         <Route path="/app/kanban" component={KanbanPage} />
-        <Route path="/app/dependencies" component={TaskDependenciesPage} />
-        <Route path="/app/compliance-tags" component={ComplianceTagsPage} />
         <Route path="/app/operations" component={OperationsPage} />
         <Route path="/app/operations/vehicles" component={VehicleRegistryPage} />
         <Route path="/app/operations/vehicles/inspections" component={VehicleRegistryPage} />
@@ -150,10 +143,9 @@ function Router() {
         <Route path="/app/operations/roster" component={RosterSchedulingPage} />
         <Route path="/app/safety" component={CompliancePage} />
         <Route path="/app/people" component={StaffManagementPage} />
-        <Route path="/app/financial-analytics" component={FinancialAnalyticsPage} />
         <Route path="/app/animal-performance" component={AnimalPerformancePage} />
         <Route path="/app/reports" component={ReportsExportPage} />
-        <Route path="/app/weather" component={WeatherIntegrationPage} />
+        <Route path="/app/weather" component={WeatherPage} />
         <Route path="/app/farm-compliance" component={CompliancePackPage} />
         <Route path="/app/nait" component={NaitCompliancePage} />
         <Route path="/app/treatments/:section?" component={Home} />
@@ -172,8 +164,6 @@ function Router() {
         <Route path="/app/veterinary" component={VeterinaryDashboard} />
         <Route path="/app/lab-results" component={LabResultsImportPage} />
         <Route path="/app/health-analytics" component={HealthAnalyticsDashboard} />
-        <Route path="/app/benchmarking" component={BenchmarkingPage} />
-        <Route path="/app/health-predictions" component={HealthPredictionsPage} />
         <Route path="/app/field-mode" component={FieldModeDashboard} />
         <Route path="/app/smart-alerts" component={AlertsNotificationsDashboard} />
         <Route path="/app/weight-growth" component={WeightGrowthTrackingPage} />
@@ -205,7 +195,6 @@ function Router() {
         <Route path="/app/shed" component={ShedPage} />
         <Route path="/app/settings" component={SettingsPage} />
         <Route path="/app/alerts" component={AlertsPage} />
-        <Route path="/app/genetic-merit" component={GeneticMeritPage} />
         <Route path="/app/multi-farm" component={MultiFarmPage} />
         {/* Phase overlay routes */}
         <Route path="/app/health/medicines" component={MedicinesInventory} />
@@ -214,6 +203,7 @@ function Router() {
         <Route path="/app/setup" component={OnboardingWizard} />
         <Route component={NotFound} />
       </Switch>
+      </ScreenErrorBoundary>
     </RequireAuth>
   );
 }
@@ -312,7 +302,7 @@ function AlertsNotification() {
         {activeAlerts.length > 0 && (
           <div className="p-3 border-t">
             <Button asChild variant="ghost" size="sm" className="w-full" data-testid="button-view-all-alerts">
-              <Link href="/app/alerts">View All Alerts</Link>
+              <Link href="/app/smart-alerts">View All Alerts</Link>
             </Button>
           </div>
         )}

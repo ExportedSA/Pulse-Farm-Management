@@ -49,7 +49,7 @@ interface SafetyReport {
     id: string;
     title: string;
     status: string;
-    riskLevel: string;
+    riskLevel: number | string | null;
     identifiedAt: string;
     location: string;
   }>;
@@ -88,8 +88,14 @@ export default function SafetyReportPage() {
   }, [loadReport]);
 
   // Get risk level badge
-  function getRiskBadge(level: string) {
-    switch (level?.toLowerCase()) {
+  function getRiskBadge(level: number | string | null) {
+    // Hazards are stored with a 1-5 risk score; show the score rather than guess a word for it
+    const score = Number(level);
+    if (level != null && level !== '' && Number.isFinite(score)) {
+      const colour = score >= 5 ? 'bg-red-600' : score >= 4 ? 'bg-orange-500' : score >= 3 ? 'bg-yellow-500' : 'bg-green-500';
+      return <Badge className={colour}>Risk {score} of 5</Badge>;
+    }
+    switch (String(level ?? '').toLowerCase()) {
       case 'critical':
         return <Badge className="bg-red-600">Critical</Badge>;
       case 'high':
@@ -99,7 +105,7 @@ export default function SafetyReportPage() {
       case 'low':
         return <Badge className="bg-green-500">Low</Badge>;
       default:
-        return <Badge variant="outline">{level}</Badge>;
+        return <Badge variant="outline">{level ?? 'Not scored'}</Badge>;
     }
   }
 

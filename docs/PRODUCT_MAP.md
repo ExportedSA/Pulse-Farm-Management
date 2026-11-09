@@ -31,7 +31,6 @@
 | `routes/bulk-operations.ts` | `bulk-operations-page.tsx` | Live |
 | `routes/groups.ts` | `groups-management.tsx`, `smart-groups-page.tsx` | Live |
 | — | `animal-performance-page.tsx` | Live |
-| — | `genetic-merit-page.tsx` | Live |
 
 ---
 
@@ -50,7 +49,6 @@
 | — | `Treat.tsx` | Patch |
 | — | `Inventory.tsx` | Patch |
 | — | `Reports.tsx` (health) | Patch |
-| — | `health-predictions-page.tsx` | Live |
 
 ---
 
@@ -95,7 +93,6 @@
 | `routes/jobs.ts` | `jobs-page.tsx` | Live |
 | `routes/recurring-tasks.ts` | `recurring-tasks-page.tsx` | Live |
 | `routes/task-templates.ts` | `task-templates-page.tsx` | Live |
-| `routes/task-dependencies.ts` | `task-dependencies-page.tsx` | Live |
 | — | `farm-calendar-page.tsx` | Live |
 | — | `task-calendar-page.tsx` | Live |
 | — | `kanban-page.tsx` | Live |
@@ -130,8 +127,7 @@
 
 | Route Group (Backend) | Frontend Page/Component | Status |
 |----------------------|------------------------|--------|
-| `routes/compliance.ts` | `compliance-page.tsx`, `compliance-docs.tsx` | Live |
-| `routes/compliance-tags.ts` | `compliance-tags-page.tsx` | Live |
+| `routes/compliance.ts` | `compliance-page.tsx`, `compliance-docs.tsx` (documents tab shows sample documents) | Patch |
 | `routes/nait.ts` | `nait-compliance-page.tsx`, `nait-records.tsx` | Live |
 | `routes/nait.core.ts` | (NAIT API integration) | Stub |
 | `nzfap-routes.ts` | `nzfap-compliance-page.tsx` | Live |
@@ -149,7 +145,6 @@
 | Route Group (Backend) | Frontend Page/Component | Status |
 |----------------------|------------------------|--------|
 | `financial-routes.ts` | `financial-page.tsx` | Live |
-| `routes/financial-analytics.ts` | `financial-analytics-page.tsx` | Live |
 | `budgeting-routes.ts` | `farm-finance-page.tsx` | Live |
 | `routes/stock-transactions.ts` | `stock-reconciliation-page.tsx` | Live |
 
@@ -192,8 +187,7 @@
 | Route Group (Backend) | Frontend Page/Component | Status |
 |----------------------|------------------------|--------|
 | `routes/external-apis.ts` | — | Stub |
-| `weather-routes.ts` | `weather-page.tsx`, `weather-integration-page.tsx` | Live |
-| `routes/benchmarking.ts` | `benchmarking-page.tsx`, `performance-benchmarking-page.tsx` | Live |
+| `weather-routes.ts` | `weather-page.tsx` (Yr.no forecast at the farm's mapped paddocks) | Live |
 | `routes/multi-farm.ts` | `multi-farm-page.tsx`, `FarmSwitcher.tsx` | Live |
 
 ---

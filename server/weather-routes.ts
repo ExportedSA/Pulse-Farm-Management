@@ -1,5 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { sql } from 'drizzle-orm';
+import { db } from './db';
+import { getFarmId } from './middleware/auth';
+import { rowsOf } from './domain/farm-map';
 
 const router = Router();
 
@@ -8,9 +12,6 @@ const router = Router();
 const YR_API_BASE = 'https://api.met.no/weatherapi/locationforecast/2.0';
 const USER_AGENT = 'PulseFarmApp/1.0 (contact@pulse.farm)'; // Required by Yr.no
 
-// Default location (Palmerston North, NZ)
-const DEFAULT_LAT = -40.3523;
-const DEFAULT_LON = 175.6082;
 
 // Weather condition mappings from Yr.no symbol codes
 const WEATHER_CONDITIONS: Record<string, { label: string; icon: string; isRainy: boolean; isBadForOutdoor: boolean }> = {
@@ -109,10 +110,12 @@ async function fetchYrWeather(lat: number, lon: number): Promise<any> {
 }
 
 // Parse Yr.no response into our format
-function parseYrWeather(yrData: any, location: string): WeatherData {
+function parseYrWeather(yrData: any, location: string): WeatherData | null {
   const timeseries = yrData?.properties?.timeseries || [];
   const current = timeseries[0]?.data;
   const instant = current?.instant?.details || {};
+  // Without the current readings there's no forecast to show; don't fill gaps with typical values
+  if (instant.air_temperature == null || instant.relative_humidity == null || instant.wind_speed == null) return null;
   const next1h = current?.next_1_hours || {};
   const next6h = current?.next_6_hours || {};
   
@@ -142,7 +145,7 @@ function parseYrWeather(yrData: any, location: string): WeatherData {
   
   let dayCount = 0;
   dailyData.forEach((day, date) => {
-    if (dayCount >= 7) return;
+    if (dayCount >= 7 || !day.temps.length) return;
     const condSymbol = day.conditions[Math.floor(day.conditions.length / 2)] || 'cloudy';
     const cond = WEATHER_CONDITIONS[condSymbol] || { label: 'Cloudy', icon: '☁️', isRainy: false, isBadForOutdoor: false };
     
@@ -161,11 +164,11 @@ function parseYrWeather(yrData: any, location: string): WeatherData {
   
   return {
     location,
-    temperature: Math.round(instant.air_temperature || 15),
-    humidity: Math.round(instant.relative_humidity || 70),
-    windSpeed: Math.round((instant.wind_speed || 5) * 3.6), // m/s to km/h
-    windDirection: getWindDirection(instant.wind_from_direction || 0),
-    pressure: Math.round(instant.air_pressure_at_sea_level || 1013),
+    temperature: Math.round(instant.air_temperature),
+    humidity: Math.round(instant.relative_humidity),
+    windSpeed: Math.round(instant.wind_speed * 3.6), // m/s to km/h
+    windDirection: instant.wind_from_direction == null ? 'Unknown' : getWindDirection(instant.wind_from_direction),
+    pressure: instant.air_pressure_at_sea_level == null ? null as unknown as number : Math.round(instant.air_pressure_at_sea_level),
     condition: conditionInfo.label,
     conditionIcon: conditionInfo.icon,
     isRainy: conditionInfo.isRainy,
@@ -183,79 +186,52 @@ function getWindDirection(degrees: number): string {
 }
 
 // Mock weather data for demo purposes (fallback)
-const getMockWeatherData = (location: string): WeatherData => {
-  // Generate realistic NZ weather patterns
-  const hour = new Date().getHours();
-  const isDay = hour >= 6 && hour < 20;
-  const baseTemp = 12 + Math.sin((hour - 6) * Math.PI / 12) * 8; // Peaks at 2pm
-  
-  const conditions = [
-    { label: 'Clear Sky', icon: isDay ? '☀️' : '🌙', isRainy: false, isBadForOutdoor: false, weight: 3 },
-    { label: 'Partly Cloudy', icon: isDay ? '⛅' : '☁️', isRainy: false, isBadForOutdoor: false, weight: 4 },
-    { label: 'Cloudy', icon: '☁️', isRainy: false, isBadForOutdoor: false, weight: 3 },
-    { label: 'Light Rain', icon: '🌧️', isRainy: true, isBadForOutdoor: true, weight: 2 },
-    { label: 'Rain', icon: '🌧️', isRainy: true, isBadForOutdoor: true, weight: 1 },
-    { label: 'Showers', icon: '🌦️', isRainy: true, isBadForOutdoor: true, weight: 2 },
-  ];
-  
-  // Weighted random selection
-  const totalWeight = conditions.reduce((sum, c) => sum + c.weight, 0);
-  let random = Math.random() * totalWeight;
-  let selectedCondition = conditions[0];
-  for (const c of conditions) {
-    random -= c.weight;
-    if (random <= 0) {
-      selectedCondition = c;
-      break;
-    }
+class WeatherUnavailable extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
   }
-  
-  return {
-    location,
-    temperature: Math.round(baseTemp + (Math.random() - 0.5) * 4),
-    humidity: Math.round(60 + Math.random() * 30),
-    windSpeed: Math.round(10 + Math.random() * 25),
-    windDirection: ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.floor(Math.random() * 8)],
-    pressure: Math.round(1010 + (Math.random() - 0.5) * 30),
-    condition: selectedCondition.label,
-    conditionIcon: selectedCondition.icon,
-    isRainy: selectedCondition.isRainy,
-    isBadForOutdoor: selectedCondition.isBadForOutdoor,
-    forecast: Array.from({ length: 7 }, (_, i) => {
-      const dayCondition = conditions[Math.floor(Math.random() * conditions.length)];
-      return {
-        date: new Date(Date.now() + i * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        high: Math.round(15 + Math.random() * 10),
-        low: Math.round(5 + Math.random() * 8),
-        condition: dayCondition.label,
-        precipitation: dayCondition.isRainy ? Math.round(Math.random() * 15) : 0,
-        icon: dayCondition.icon,
-        isRainy: dayCondition.isRainy,
-        isBadForOutdoor: dayCondition.isBadForOutdoor,
-      };
-    }),
-    alerts: Math.random() > 0.8 ? [{
-      type: 'wind',
-      severity: 'moderate',
-      title: 'Strong Wind Advisory',
-      description: 'Gusty winds expected in the area. Secure loose items.',
-      validFrom: new Date().toISOString(),
-      validTo: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    }] : [],
-  };
-};
+}
+
+// Where the farm is: coordinates the caller passes, else the middle of the farm's mapped paddocks
+async function farmLocation(req: any): Promise<{ lat: number; lon: number }> {
+  const qLat = req.query?.lat ?? req.body?.lat;
+  const qLon = req.query?.lon ?? req.body?.lon;
+  if (qLat != null && qLon != null && Number.isFinite(Number(qLat)) && Number.isFinite(Number(qLon))) {
+    return { lat: Number(qLat), lon: Number(qLon) };
+  }
+  const farmId = getFarmId(req);
+  if (farmId) {
+    const [row] = rowsOf(await db.execute(sql`
+      SELECT ST_Y(c) AS lat, ST_X(c) AS lon FROM (
+        SELECT ST_Centroid(ST_Collect(geom::geometry)) AS c FROM paddock_boundaries
+        WHERE farm_id = ${farmId} AND valid_to IS NULL) s
+      WHERE c IS NOT NULL`));
+    if (row) return { lat: Number(row.lat), lon: Number(row.lon) };
+  }
+  throw new WeatherUnavailable(409, "Draw your paddocks on the farm map so Pulse knows where the farm is");
+}
+
+// The Yr.no forecast for the farm. When it can't be had, say so: never stand-in weather.
+async function farmWeather(req: any, location = 'Farm'): Promise<WeatherData> {
+  const { lat, lon } = await farmLocation(req);
+  const yrData = await fetchYrWeather(lat, lon);
+  const weather = yrData && parseYrWeather(yrData, location);
+  if (!weather) throw new WeatherUnavailable(503, 'Weather is unavailable right now: the Yr.no forecast could not be reached');
+  return weather;
+}
+
+function sendWeatherError(res: any, error: unknown, message: string) {
+  if (error instanceof WeatherUnavailable) return res.status(error.status).json({ error: error.message });
+  console.error(message, error);
+  res.status(500).json({ error: message });
+}
 
 // Get current weather for a location
 router.get('/current/:location', async (req, res) => {
   try {
     const { location } = req.params;
     
-    // In production, this would call MetService API
-    // const response = await fetch(`${METSERVICE_API_BASE}/current?location=${encodeURIComponent(location)}&apikey=${METSERVICE_API_KEY}`);
-    // const data = await response.json();
-    
-    // For demo, return mock data
-    const weatherData = getMockWeatherData(location);
+    const weatherData = await farmWeather(req, location);
     
     // Add farm-specific recommendations
     const recommendations = generateFarmRecommendations(weatherData);
@@ -266,8 +242,7 @@ router.get('/current/:location', async (req, res) => {
       lastUpdated: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('Error fetching weather data:', error);
-    res.status(500).json({ error: 'Failed to fetch weather data' });
+    sendWeatherError(res, error, 'Failed to fetch weather data');
   }
 });
 
@@ -277,7 +252,7 @@ router.get('/forecast/:location', async (req, res) => {
     const { location } = req.params;
     const { days = 7 } = req.query;
     
-    const weatherData = getMockWeatherData(location);
+    const weatherData = await farmWeather(req, location);
     const forecastDays = Math.min(parseInt(days as string), 14);
     
     res.json({
@@ -286,8 +261,7 @@ router.get('/forecast/:location', async (req, res) => {
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('Error fetching weather forecast:', error);
-    res.status(500).json({ error: 'Failed to fetch weather forecast' });
+    sendWeatherError(res, error, 'Failed to fetch weather forecast');
   }
 });
 
@@ -296,7 +270,7 @@ router.get('/alerts/:location', async (req, res) => {
   try {
     const { location } = req.params;
     
-    const weatherData = getMockWeatherData(location);
+    const weatherData = await farmWeather(req, location);
     
     res.json({
       location,
@@ -305,8 +279,7 @@ router.get('/alerts/:location', async (req, res) => {
       lastChecked: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('Error fetching weather alerts:', error);
-    res.status(500).json({ error: 'Failed to fetch weather alerts' });
+    sendWeatherError(res, error, 'Failed to fetch weather alerts');
   }
 });
 
@@ -315,7 +288,7 @@ router.get('/agricultural/:location', async (req, res) => {
   try {
     const { location } = req.params;
     
-    const weatherData = getMockWeatherData(location);
+    const weatherData = await farmWeather(req, location);
     
     // Calculate growing degree days
     const baseTemp = 10; // Base temperature for most crops
@@ -347,8 +320,7 @@ router.get('/agricultural/:location', async (req, res) => {
       lastUpdated: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('Error fetching agricultural weather:', error);
-    res.status(500).json({ error: 'Failed to fetch agricultural weather data' });
+    sendWeatherError(res, error, 'Failed to fetch agricultural weather data');
   }
 });
 
@@ -357,7 +329,7 @@ router.get('/impact/:location', async (req, res) => {
   try {
     const { location } = req.params;
     
-    const weatherData = getMockWeatherData(location);
+    const weatherData = await farmWeather(req, location);
     
     const impact = {
       milking: {
@@ -398,8 +370,7 @@ router.get('/impact/:location', async (req, res) => {
       lastUpdated: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('Error calculating weather impact:', error);
-    res.status(500).json({ error: 'Failed to calculate weather impact' });
+    sendWeatherError(res, error, 'Failed to calculate weather impact');
   }
 });
 
@@ -526,16 +497,10 @@ const WEATHER_SENSITIVE_CATEGORIES = ['fencing', 'spraying', 'pasture', 'mainten
 // Get reschedule suggestions for weather-sensitive tasks
 router.post('/reschedule-suggestions', async (req, res) => {
   try {
-    const { tasks, lat = DEFAULT_LAT, lon = DEFAULT_LON } = req.body;
+    const { tasks } = req.body;
     
     // Get weather forecast
-    let weatherData: WeatherData;
-    const yrData = await fetchYrWeather(lat, lon);
-    if (yrData) {
-      weatherData = parseYrWeather(yrData, 'Farm Location');
-    } else {
-      weatherData = getMockWeatherData('Farm Location');
-    }
+    const weatherData = await farmWeather(req);
     
     const suggestions: any[] = [];
     
@@ -604,23 +569,15 @@ router.post('/reschedule-suggestions', async (req, res) => {
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('Error generating reschedule suggestions:', error);
-    res.status(500).json({ error: 'Failed to generate reschedule suggestions' });
+    sendWeatherError(res, error, 'Failed to generate reschedule suggestions');
   }
 });
 
 // Get weather-based task alerts
 router.get('/task-alerts', async (req, res) => {
   try {
-    const { lat = DEFAULT_LAT, lon = DEFAULT_LON } = req.query;
     
-    let weatherData: WeatherData;
-    const yrData = await fetchYrWeather(Number(lat), Number(lon));
-    if (yrData) {
-      weatherData = parseYrWeather(yrData, 'Farm Location');
-    } else {
-      weatherData = getMockWeatherData('Farm Location');
-    }
+    const weatherData = await farmWeather(req);
     
     const alerts: any[] = [];
     const today = new Date().toISOString().split('T')[0];
@@ -701,8 +658,7 @@ router.get('/task-alerts', async (req, res) => {
       lastUpdated: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('Error fetching task alerts:', error);
-    res.status(500).json({ error: 'Failed to fetch task alerts' });
+    sendWeatherError(res, error, 'Failed to fetch task alerts');
   }
 });
 
@@ -710,15 +666,9 @@ router.get('/task-alerts', async (req, res) => {
 router.get('/best-days/:taskType', async (req, res) => {
   try {
     const { taskType } = req.params;
-    const { lat = DEFAULT_LAT, lon = DEFAULT_LON, days = 7 } = req.query;
+    const { days = 7 } = req.query;
     
-    let weatherData: WeatherData;
-    const yrData = await fetchYrWeather(Number(lat), Number(lon));
-    if (yrData) {
-      weatherData = parseYrWeather(yrData, 'Farm Location');
-    } else {
-      weatherData = getMockWeatherData('Farm Location');
-    }
+    const weatherData = await farmWeather(req);
     
     const forecast = weatherData.forecast.slice(0, Number(days));
     
@@ -781,8 +731,7 @@ router.get('/best-days/:taskType', async (req, res) => {
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('Error finding best days:', error);
-    res.status(500).json({ error: 'Failed to find best days' });
+    sendWeatherError(res, error, 'Failed to find best days');
   }
 });
 

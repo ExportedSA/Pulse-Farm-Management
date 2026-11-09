@@ -39,8 +39,6 @@ import taskTemplatesRouter from "./routes/task-templates";
 import notificationsRouter from "./routes/notifications";
 import timeTrackingRouter from "./routes/time-tracking";
 import equipmentRouter from "./routes/equipment";
-import taskDependenciesRouter from "./routes/task-dependencies";
-import complianceTagsRouter from "./routes/compliance-tags";
 import weightRouter from "./routes/weight";
 import tasksRouter from "./routes/tasks";
 import timesheetsRouter from "./routes/timesheets";
@@ -61,8 +59,6 @@ import lineageRouter from "./routes/lineage";
 import herdReportsRouter from "./routes/herd-reports";
 import pastureWalksRouter from "./routes/pasture-walks";
 // import rosterRouter from "./routes/roster"; // Duplicate - already imported on line 25
-import financialAnalyticsRouter from "./routes/financial-analytics";
-import benchmarkingRouter from "./routes/benchmarking";
 import healthRouter from "./routes/health";
 import reportsRouter from "./routes/reports";
 import externalApisRouter from "./routes/external-apis";
@@ -160,15 +156,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ===== HEALTH ANALYTICS =====
   app.use("/api/analytics/health", requireAuth, healthAnalyticsRouter);
-
-  // ===== FINANCIAL ANALYTICS =====
-  // These routers declare full /api/... paths, so guard their prefix rather than every request
-  app.use("/api/financial-analytics", requireAuth);
-  app.use(financialAnalyticsRouter);
-
-  // ===== BENCHMARKING =====
-  app.use("/api/benchmarking", requireAuth);
-  app.use(benchmarkingRouter);
 
   // ===== REPORTS & PDF GENERATION =====
   app.use("/api/reports", requireAuth);
@@ -357,12 +344,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Equipment routes
   app.use("/api/equipment", requireAuth, equipmentRouter);
-  
-  // Task Dependencies routes
-  app.use("/api/task-dependencies", requireAuth, taskDependenciesRouter);
-  
-  // Compliance Tags routes
-  app.use("/api/compliance-tags", requireAuth, complianceTagsRouter);
   
   // Admin visitor routes (authentication required)
   app.use("/api/visitor/admin", requireAuth, visitorRouter);
