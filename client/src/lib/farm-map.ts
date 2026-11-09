@@ -36,7 +36,12 @@ export interface RatePlan {
   };
 }
 export interface AreaBreakdown { grossHa: number; excludedHa: number; netHa: number; exclusions: { id: string; name: string; bufferM: number; ha: number }[] }
-export interface MapState { layers: MapLayer[]; paddocks: MapPaddock[]; features: MapFeature[]; views: MapView[]; exclusions: Exclusion[]; plans: PlanSummary[] }
+// A hazard from the register that isn't resolved; geometry is null until it's drawn on the map
+export interface MapHazard {
+  id: string; title: string; type: string; riskLevel: number | null; status: string; location: string | null;
+  controls: string | null; reviewDue: string | null; radiusM: number | null; geometry: GeoJSON.Geometry | null;
+}
+export interface MapState { layers: MapLayer[]; paddocks: MapPaddock[]; features: MapFeature[]; views: MapView[]; exclusions: Exclusion[]; plans: PlanSummary[]; hazards: MapHazard[] }
 
 export const EXCLUSION_ACTIVITIES = [
   { key: "all", label: "Everything" },

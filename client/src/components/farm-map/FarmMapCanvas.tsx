@@ -6,8 +6,9 @@ import "@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css";
 import * as turf from "@turf/turf";
 import { BASEMAPS, LAYER_RECORD_TYPES, forgetGoogleSession, googleSession, googleTileUrl, type MapState, type MapLayer } from "@/lib/farm-map";
 import { DEFAULT_CENTER } from "@/components/records/AreaDrawer";
+import { poiType } from "@shared/safety";
 
-export type Selection = { type: "paddock" | "feature" | "record" | "exclusion" | "zone" | "job"; id: string };
+export type Selection = { type: "paddock" | "feature" | "record" | "exclusion" | "zone" | "job" | "hazard"; id: string };
 
 // Extra shapes drawn over the map (exclusions, plan zones, gaps, overlaps); selectable when sel is set
 export interface Overlay {
@@ -20,6 +21,11 @@ export interface Overlay {
   // Only drawn while this layer is shown (calculations never depend on it)
   layerId?: string;
   rank: number;
+  // A point shown as a badge with this short mark (hazards), and its circle radius if it has one
+  marker?: { text: string; colour: string; hazard?: boolean };
+  radiusM?: number | null;
+  // The label shows only while map labels are switched on
+  labelWithToggle?: boolean;
 }
 export type DrawShape = "Polygon" | "Line" | "Marker" | "Circle" | "Rectangle";
 export type Mode =
@@ -55,6 +61,8 @@ interface Props {
   editRadius: number | null;
   editRevision: number;
   focus: Focus | null;
+  // Names on points of interest and hazards
+  showLabels: boolean;
   onPick: (sel: Selection | null) => void;
   onDrawn: (shape: Drawn) => void;
   onEditChange: (geometry: GeoJSON.Geometry, radiusM: number | null) => void;
@@ -68,6 +76,11 @@ const HIGHLIGHT = "#ffd43b";
 const GEOMAN_SHAPE: Record<DrawShape, string> = { Polygon: "Polygon", Line: "Line", Marker: "Marker", Circle: "Circle", Rectangle: "Rectangle" };
 
 const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+
+function markIcon(text: string, colour: string, opts: { hazard?: boolean; selected?: boolean } = {}) {
+  const cls = `map-mark${opts.hazard ? " hazard" : ""}${opts.selected ? " selected" : ""}`;
+  return L.divIcon({ className: "", html: `<div class="${cls}" style="background:${colour}"><span>${esc(text)}</span></div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
+}
 
 function geometryToLeaflet(g: GeoJSON.Geometry, style: L.PathOptions, radiusM?: number | null): L.Layer {
   if (g.type === "Point") {
@@ -229,9 +242,19 @@ export function FarmMapCanvas(props: Props) {
     // Exclusions, plan zones, gaps and overlaps
     for (const o of props.overlays) {
       if (o.layerId && !visible[o.layerId]) continue;
+      if (o.sel && editing && o.sel.type === editing.type && o.sel.id === editing.id) continue;
       const selected = !!o.sel && isSelected(o.sel.type, o.sel.id);
-      const shape = geometryToLeaflet(o.geometry, { ...o.style, interactive: false, ...(selected ? { color: HIGHLIGHT, weight: ((o.style.weight as number) ?? 2) + 2 } : {}) });
-      if (o.label) (shape as L.Path).bindTooltip(esc(o.label), { permanent: true, direction: "center", className: "paddock-label" });
+      const showLabel = !!o.label && (!o.labelWithToggle || props.showLabels);
+      if (o.marker && o.geometry.type === "Point") {
+        const [lng, lat] = o.geometry.coordinates;
+        if (o.radiusM) group.addLayer(L.circle([lat, lng], { ...o.style, radius: o.radiusM, interactive: false }));
+        const m = L.marker([lat, lng], { icon: markIcon(o.marker.text, o.marker.colour, { hazard: o.marker.hazard, selected }), interactive: false, keyboard: false });
+        if (showLabel) m.bindTooltip(esc(o.label!), { permanent: true, direction: "right", offset: [12, 0], className: "mark-label" });
+        group.addLayer(m);
+        continue;
+      }
+      const shape = geometryToLeaflet(o.geometry, { ...o.style, interactive: false, ...(selected ? { color: HIGHLIGHT, weight: ((o.style.weight as number) ?? 2) + 2 } : {}) }, o.radiusM);
+      if (showLabel) (shape as L.Path).bindTooltip(esc(o.label!), { permanent: true, direction: "center", className: o.labelWithToggle ? "mark-label" : "paddock-label" });
       group.addLayer(shape);
     }
 
@@ -245,11 +268,20 @@ export function FarmMapCanvas(props: Props) {
     for (const f of state.features) {
       const layer = layerById.get(f.layerId);
       if (!layer || !visible[layer.id] || (editing?.type === "feature" && editing.id === f.id)) continue;
+      if (layer.key === "poi" && f.kind === "point") {
+        const t = poiType(f.properties?.poiType);
+        const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates;
+        const m = L.marker([lat, lng], { icon: markIcon(t.mark, t.colour, { selected: isSelected("feature", f.id) }), interactive: false, keyboard: false });
+        const text = f.name || t.label;
+        if (props.showLabels) m.bindTooltip(esc(text), { permanent: true, direction: "right", offset: [12, 0], className: "mark-label" });
+        group.addLayer(m);
+        continue;
+      }
       const shape = geometryToLeaflet(f.geometry, styleOf(layer, isSelected("feature", f.id)), f.kind === "circle" ? f.radiusM : null);
       if (f.name && f.kind === "point") (shape as L.Path).bindTooltip(esc(f.name), { direction: "top" });
       group.addLayer(shape);
     }
-  }, [props.state, props.visible, props.records, props.selection, props.mode, props.pending, props.overlays]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [props.state, props.visible, props.records, props.selection, props.mode, props.pending, props.overlays, props.showLabels]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tap to select; where shapes overlap, offer a list to choose from
   useEffect(() => {
@@ -283,8 +315,14 @@ export function FarmMapCanvas(props: Props) {
         }
       }
       for (const o of p.overlays) {
-        if (!o.sel || (o.layerId && !shown(o.layerId)) || !o.geometry.type.includes("Polygon")) continue;
-        if (turf.booleanPointInPolygon(pt, o.geometry as any)) hits.push({ sel: o.sel, label: o.pickLabel ?? o.label ?? o.key, rank: o.rank });
+        if (!o.sel || (o.layerId && !shown(o.layerId))) continue;
+        const g = o.geometry as any;
+        const hit = g.type === "Point"
+          ? turf.distance(pt, turf.point(g.coordinates), { units: "meters" }) <= Math.max(tol, o.radiusM ?? 0)
+          : g.type.includes("LineString")
+            ? turf.pointToLineDistance(pt, g.type === "LineString" ? turf.lineString(g.coordinates) : turf.multiLineString(g.coordinates) as any, { units: "meters" }) <= tol
+            : g.type.includes("Polygon") && turf.booleanPointInPolygon(pt, g);
+        if (hit) hits.push({ sel: o.sel, label: o.pickLabel ?? o.label ?? o.key, rank: o.rank });
       }
       const paddockLayer = p.state.layers.find(l => l.key === "paddocks");
       if (paddockLayer && shown(paddockLayer.id)) {

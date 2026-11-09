@@ -4,6 +4,9 @@ import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+// A farm's rows default to the farm of the request saving them (set per request; see server/db.ts)
+const currentFarm = sql`NULLIF(current_setting('app.farm_id', true), '')::uuid`;
+
 // ===== ENUMS =====
 
 export const animalSexEnum = pgEnum('animal_sex', ['female', 'male']);
@@ -101,13 +104,14 @@ export const users = pgTable('users', {
 // Products (Medicines/Treatments)
 export const products = pgTable('products', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   name: varchar('name', { length: 255 }).notNull(),
   withdrawalDays: integer('withdrawal_days'),
   milkWithdrawalDays: integer('milk_withdrawal_days'),
   meatWithdrawalDays: integer('meat_withdrawal_days'),
   useByDays: integer('use_by_days'),
   treatmentPlan: text('treatment_plan'),
-  barcode: varchar('barcode', { length: 100 }).unique(),
+  barcode: varchar('barcode', { length: 100 }), // unique within a farm (migration 0026)
   stockQuantity: integer('stock_quantity').default(0).notNull(),
   stockExpiryDate: varchar('stock_expiry_date', { length: 10 }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -151,6 +155,7 @@ export type InsertFarmMember = typeof farmMembers.$inferInsert;
 // Product Batches (Stock/Inventory Records - formerly RecordItem)
 export const productBatches = pgTable('product_batches', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   productId: uuid('product_id').references(() => products.id).notNull(),
   productName: varchar('product_name', { length: 255 }).notNull(),
   batchNo: varchar('batch_no', { length: 100 }).notNull(),
@@ -168,6 +173,7 @@ export const productBatches = pgTable('product_batches', {
 // Batch Lifecycle Events (Immutable audit trail for batch state changes)
 export const batchLifecycleEvents = pgTable('batch_lifecycle_events', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   batchId: uuid('batch_id').references(() => productBatches.id).notNull(),
   eventType: batchLifecycleEventTypeEnum('event_type').notNull(),
   userId: uuid('user_id').references(() => users.id),
@@ -185,6 +191,7 @@ export const batchLifecycleEvents = pgTable('batch_lifecycle_events', {
 // Conditions (Health conditions)
 export const conditions = pgTable('conditions', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // empty for the built-in entries every farm shares
   name: varchar('name', { length: 255 }).notNull(),
   requiresBodyPart: boolean('requires_body_part').default(false),
   bodyPartType: bodyPartTypeEnum('body_part_type'),
@@ -195,20 +202,20 @@ export const conditions = pgTable('conditions', {
 // Animals (Herd)
 export const animals = pgTable('animals', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id').references(() => farms.id),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   // Tag Identification
   visualId: varchar('visual_id', { length: 50 }), // VID - Visual ID (farm tag number)
-  lifetimeId: varchar('lifetime_id', { length: 50 }).unique(), // LID - Lifetime ID (NAIT birth tag)
+  lifetimeId: varchar('lifetime_id', { length: 50 }), // LID - Lifetime ID (NAIT birth tag)
   naitTag: varchar('nait_tag', { length: 50 }), // NAIT location number (NOT unique - shared by all animals at location)
-  eid: varchar('eid', { length: 50 }).unique(), // Electronic ID for RFID tags
-  cowId: varchar('cow_id', { length: 50 }).unique(), // Legacy Visual ID field
+  eid: varchar('eid', { length: 50 }), // Electronic ID for RFID tags
+  cowId: varchar('cow_id', { length: 50 }), // Legacy Visual ID field
   birthId: jsonb('birth_id').$type<{ participantCode: string; year: string; number: string }>(),
   ahbId: varchar('ahb_id', { length: 50 }), // Animal Health Board ID
   name: varchar('name', { length: 100 }), // Animal name
   breed: varchar('breed', { length: 100 }),
   breedType: varchar('breed_type', { length: 100 }), // e.g., "Holstein Friesian", "Jersey", "Crossbred"
   origin: varchar('origin', { length: 255 }), // Source farm or purchase info
-  nationalId: varchar('national_id', { length: 50 }).unique(), // National compliance ID (alias for NAIT)
+  nationalId: varchar('national_id', { length: 50 }), // National compliance ID (alias for NAIT)
   dateOfBirth: varchar('date_of_birth', { length: 10 }),
   yearBorn: integer('year_born'),
   sex: animalSexEnum('sex'),
@@ -367,6 +374,7 @@ export const animals = pgTable('animals', {
 // Animal Health Records (Consolidated health event tracking)
 export const animalHealthRecords = pgTable('animal_health_records', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   animalId: uuid('animal_id').references(() => animals.id).notNull(),
   recordedById: uuid('recorded_by_id').references(() => users.id).notNull(),
   date: date('date').notNull(),
@@ -398,6 +406,7 @@ export const tagChangeReasonEnum = pgEnum('tag_change_reason', [
 // Animal Tag History - tracks all tag changes
 export const animalTagHistory = pgTable('animal_tag_history', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   animalId: uuid('animal_id').references(() => animals.id).notNull(),
   tagType: tagTypeEnum('tag_type').notNull(),
   oldValue: varchar('old_value', { length: 50 }),
@@ -416,6 +425,7 @@ export const animalTagHistory = pgTable('animal_tag_history', {
 // Weight Records (Health Tracking)
 export const weightRecords = pgTable('weight_records', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   animalId: uuid('animal_id').references(() => animals.id).notNull(),
   weight: numeric('weight', { precision: 8, scale: 2 }).notNull(), // Weight in kg
   date: date('date').notNull(),
@@ -429,6 +439,7 @@ export const weightRecords = pgTable('weight_records', {
 // Weight Targets (Group-based goals)
 export const weightTargets = pgTable('weight_targets', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   groupId: uuid('group_id').references(() => animalGroups.id).notNull(),
   targetWeight: numeric('target_weight', { precision: 8, scale: 2 }).notNull(),
   targetAgeMonths: integer('target_age_months').notNull(),
@@ -444,6 +455,7 @@ export const weightTargets = pgTable('weight_targets', {
 // Vaccination Schedules (Planned preventive health programs)
 export const vaccinationSchedules = pgTable('vaccination_schedules', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   groupId: uuid('group_id').references(() => animalGroups.id).notNull(),
   programType: vaccinationProgramTypeEnum('program_type').notNull(),
   vaccineProductId: uuid('vaccine_product_id').references(() => products.id).notNull(),
@@ -467,6 +479,7 @@ export const vaccinationSchedules = pgTable('vaccination_schedules', {
 // Health Scores (Lameness, Temperature, SCC, Rumination tracking)
 export const healthScores = pgTable('health_scores', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   animalId: uuid('animal_id').references(() => animals.id).notNull(),
   recordDate: date('record_date').notNull(),
   // Lameness scoring (1-5 scale)
@@ -497,6 +510,7 @@ export const healthScores = pgTable('health_scores', {
 // Herd Test Results (Individual animal milk testing from LIC/Minda)
 export const herdTestResults = pgTable('herd_test_results', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   animalId: uuid('animal_id').references(() => animals.id).notNull(),
   testDate: date('test_date').notNull(),
   // Milk production
@@ -525,6 +539,7 @@ export const herdTestResults = pgTable('herd_test_results', {
 // Mortality Records (Death tracking with cause analysis)
 export const mortalityRecords = pgTable('mortality_records', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   animalId: uuid('animal_id').references(() => animals.id).notNull(),
   deathDate: date('death_date').notNull(),
   cause: mortalityCauseEnum('cause').notNull(),
@@ -550,6 +565,7 @@ export const mortalityRecords = pgTable('mortality_records', {
 // Health Alerts (Auto-flagging sick animals)
 export const healthAlerts = pgTable('health_alerts', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   animalId: uuid('animal_id').references(() => animals.id).notNull(),
   alertType: varchar('alert_type', { length: 50 }).notNull(), // 'high_scc', 'fever', 'lameness', 'low_rumination', 'weight_loss'
   severity: healthAlertSeverityEnum('severity').notNull(),
@@ -574,8 +590,9 @@ export const healthAlerts = pgTable('health_alerts', {
 // Bulls/Sires (Bull management and fertility tracking)
 export const bulls = pgTable('bulls', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   name: varchar('name', { length: 255 }).notNull(),
-  code: varchar('code', { length: 50 }).unique(), // Bull code for AI straws
+  code: varchar('code', { length: 50 }), // Bull code for AI straws
   breed: varchar('breed', { length: 100 }),
   dateOfBirth: date('date_of_birth'),
   // Ownership
@@ -606,6 +623,7 @@ export const bulls = pgTable('bulls', {
 // Breeding Records (Comprehensive breeding tracking)
 export const breedingRecords = pgTable('breeding_records', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   animalId: uuid('animal_id').references(() => animals.id).notNull(),
   bullId: uuid('bull_id').references(() => bulls.id),
   breedingDate: date('breeding_date').notNull(),
@@ -635,6 +653,7 @@ export const breedingRecords = pgTable('breeding_records', {
 // Calving Records (Detailed calving tracking)
 export const calvingRecords = pgTable('calving_records', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   damId: uuid('dam_id').references(() => animals.id).notNull(),
   sireId: uuid('sire_id').references(() => bulls.id),
   breedingRecordId: uuid('breeding_record_id').references(() => breedingRecords.id),
@@ -664,6 +683,7 @@ export const calvingRecords = pgTable('calving_records', {
 // Lactation Records (Days in milk and dry-off tracking)
 export const lactationRecords = pgTable('lactation_records', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   animalId: uuid('animal_id').references(() => animals.id).notNull(),
   lactationNumber: integer('lactation_number').notNull(), // 1st, 2nd, 3rd lactation
   // Calving that started this lactation
@@ -693,6 +713,7 @@ export const lactationRecords = pgTable('lactation_records', {
 // Heat Detection Records (Predicted and observed heats)
 export const heatRecords = pgTable('heat_records', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   animalId: uuid('animal_id').references(() => animals.id).notNull(),
   detectionDate: date('detection_date').notNull(),
   detectionTime: varchar('detection_time', { length: 10 }), // HH:MM format
@@ -743,6 +764,7 @@ export const prescriptionStatusEnum = pgEnum('prescription_status', [
 // Veterinarians (External vet contacts)
 export const veterinarians = pgTable('veterinarians', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   name: varchar('name', { length: 255 }).notNull(),
   clinicName: varchar('clinic_name', { length: 255 }),
   email: varchar('email', { length: 255 }),
@@ -767,6 +789,7 @@ export const veterinarians = pgTable('veterinarians', {
 // Vet Visits (Appointments and completed visits)
 export const vetVisits = pgTable('vet_visits', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   veterinarianId: uuid('veterinarian_id').references(() => veterinarians.id),
   // Scheduling
   scheduledDate: date('scheduled_date').notNull(),
@@ -807,6 +830,7 @@ export const vetVisits = pgTable('vet_visits', {
 // Lab Results (Blood tests, milk tests, fecal tests, etc.)
 export const labResults = pgTable('lab_results', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   animalId: uuid('animal_id').references(() => animals.id),
   vetVisitId: uuid('vet_visit_id').references(() => vetVisits.id),
   // Test details
@@ -842,6 +866,7 @@ export const labResults = pgTable('lab_results', {
 // Prescriptions (Vet prescriptions for treatments)
 export const prescriptions = pgTable('prescriptions', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   animalId: uuid('animal_id').references(() => animals.id),
   vetVisitId: uuid('vet_visit_id').references(() => vetVisits.id),
   veterinarianId: uuid('veterinarian_id').references(() => veterinarians.id),
@@ -886,6 +911,7 @@ export const prescriptions = pgTable('prescriptions', {
 // Vet Cost Summary (Aggregated costs for reporting)
 export const vetCostRecords = pgTable('vet_cost_records', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   // Period
   periodStart: date('period_start').notNull(),
   periodEnd: date('period_end').notNull(),
@@ -913,6 +939,7 @@ export const vetCostRecords = pgTable('vet_cost_records', {
 // Treatment Templates (Quick treatment presets)
 export const treatmentTemplates = pgTable('treatment_templates', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   name: varchar('name', { length: 255 }).notNull(),
   description: text('description'),
   // Treatment details
@@ -940,6 +967,7 @@ export const treatmentTemplates = pgTable('treatment_templates', {
 // Voice Notes (Hands-free recording)
 export const voiceNotes = pgTable('voice_notes', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   // Association
   animalId: uuid('animal_id').references(() => animals.id),
   treatmentId: uuid('treatment_id').references(() => animalTreatments.id),
@@ -963,6 +991,7 @@ export const voiceNotes = pgTable('voice_notes', {
 // Photo Attachments (Document conditions)
 export const photoAttachments = pgTable('photo_attachments', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   // Association
   animalId: uuid('animal_id').references(() => animals.id),
   treatmentId: uuid('treatment_id').references(() => animalTreatments.id),
@@ -988,6 +1017,7 @@ export const photoAttachments = pgTable('photo_attachments', {
 // Batch Treatments (Treat multiple animals at once)
 export const batchTreatments = pgTable('batch_treatments', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   // Batch details
   batchName: varchar('batch_name', { length: 255 }),
   treatmentDate: varchar('treatment_date', { length: 10 }).notNull(),
@@ -1015,6 +1045,7 @@ export const batchTreatments = pgTable('batch_treatments', {
 // EID Scan Sessions (Scanner integration tracking)
 export const eidScanSessions = pgTable('eid_scan_sessions', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   // Session details
   sessionName: varchar('session_name', { length: 255 }),
   startedAt: timestamp('started_at').defaultNow().notNull(),
@@ -1040,7 +1071,7 @@ export const eidScanSessions = pgTable('eid_scan_sessions', {
 // Pastures (Paddocks)
 export const pastures = pgTable('pastures', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id').references(() => farms.id),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   name: varchar('name', { length: 255 }).notNull(),
   paddockNumber: integer('paddock_number'),
   area: integer('area'),
@@ -1067,7 +1098,7 @@ export const pastures = pgTable('pastures', {
 // Farm Hazards (Interactive Mapping)
 export const farmHazards = pgTable('farm_hazards', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id').references(() => farms.id),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   type: varchar('type', { length: 50 }).notNull(), // 'chemical', 'machinery', 'terrain', 'water', 'electrical', 'biosecurity'
   severity: varchar('severity', { length: 20 }).notNull(), // 'low', 'medium', 'high', 'critical'
   title: varchar('title', { length: 255 }).notNull(),
@@ -1096,7 +1127,7 @@ export const farmHazards = pgTable('farm_hazards', {
 // Health & safety incidents (injuries, near misses, property damage, ...)
 export const safetyIncidents = pgTable('safety_incidents', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   type: varchar('type', { length: 50 }).notNull(), // injury | near_miss | property_damage | environmental | other
   description: text('description').notNull(),
   severity: varchar('severity', { length: 20 }).notNull(), // minor | moderate | major | critical
@@ -1114,6 +1145,7 @@ export type SafetyIncident = typeof safetyIncidents.$inferSelect;
 // Animal Treatments (Core RVM records)
 export const animalTreatments = pgTable('animal_treatments', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   animalId: uuid('animal_id').references(() => animals.id),
   staffMemberId: uuid('staff_member_id').references(() => users.id).notNull(),
   staffMember: varchar('staff_member', { length: 255 }).notNull(),
@@ -1163,6 +1195,7 @@ export const animalTreatments = pgTable('animal_treatments', {
 // Treatment Events (Immutable audit trail for RVM phase transitions)
 export const treatmentEvents = pgTable('treatment_events', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   treatmentId: uuid('treatment_id').references(() => animalTreatments.id, { onDelete: 'restrict' }).notNull(),
   eventType: varchar('event_type', { length: 50 }).notNull(), // 'created', 'dose_given', 'phase_change', 'completed', etc.
   phase: varchar('phase', { length: 50 }), // 'awaiting', 'treatment', 'withholding', 'monitoring', 'return_to_vat'
@@ -1176,6 +1209,7 @@ export const treatmentEvents = pgTable('treatment_events', {
 // Milk Withholdings (Active withdrawal tracking)
 export const milkWithholdings = pgTable('milk_withholdings', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   animalId: uuid('animal_id').references(() => animals.id).notNull(),
   treatmentId: uuid('treatment_id').references(() => animalTreatments.id).notNull(),
   startDate: varchar('start_date', { length: 10 }).notNull(),
@@ -1188,6 +1222,7 @@ export const milkWithholdings = pgTable('milk_withholdings', {
 // Reproduction Events (Heat, AI, Pregnancy, Calving)
 export const reproductionEvents = pgTable('reproduction_events', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   animalId: uuid('animal_id').references(() => animals.id).notNull(),
   eventType: reproEventTypeEnum('event_type').notNull(),
   eventDate: varchar('event_date', { length: 10 }).notNull(),
@@ -1210,6 +1245,7 @@ export const reproductionEvents = pgTable('reproduction_events', {
 // NAIT Records (Compliance tracking)
 export const naitRecords = pgTable('nait_records', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   animalId: uuid('animal_id').references(() => animals.id).notNull(),
   naitTag: varchar('nait_tag', { length: 50 }).notNull(),
   registrationDate: varchar('registration_date', { length: 10 }).notNull(),
@@ -1222,6 +1258,7 @@ export const naitRecords = pgTable('nait_records', {
 // NAIT Queue (Pending submissions)
 export const naitQueue = pgTable('nait_queue', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   animalId: uuid('animal_id').references(() => animals.id),
   actionType: varchar('action_type', { length: 50 }).notNull(), // 'register', 'transfer', 'death', etc.
   payload: jsonb('payload').notNull(),
@@ -1246,7 +1283,8 @@ export const syncCursors = pgTable('sync_cursors', {
 // Settings (Application settings - not user-specific)
 export const settings = pgTable('settings', {
   id: uuid('id').primaryKey().defaultRandom(),
-  key: varchar('key', { length: 100 }).notNull().unique(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
+  key: varchar('key', { length: 100 }).notNull(), // unique within a farm (migration 0026)
   value: jsonb('value').notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -1272,6 +1310,7 @@ export const userPreferences = pgTable('user_preferences', {
 // Notification Logs (Phase 6D: Track sent notifications)
 export const notificationLogs = pgTable('notification_logs', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   alertId: uuid('alert_id').references(() => alerts.id, { onDelete: 'set null' }),
   notificationType: varchar('notification_type', { length: 20 }).notNull(), // 'email', 'push', 'sms'
@@ -1288,7 +1327,7 @@ export const notificationLogs = pgTable('notification_logs', {
 export const notifications = pgTable('notifications', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
-  farmId: uuid('farm_id').references(() => farms.id),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   type: varchar('type', { length: 50 }).notNull(), // e.g. animal_health, task_due, weather_alert
   title: varchar('title', { length: 255 }).notNull(),
   message: text('message').notNull(),
@@ -1327,7 +1366,7 @@ export type FarmRecordType = typeof FARM_RECORD_TYPES[number];
 // Type-specific fields (product, rate, docket number...) live in `details`.
 export const farmRecords = pgTable('farm_records', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   type: varchar('type', { length: 30 }).notNull(),
   title: varchar('title', { length: 255 }).notNull(),
   notes: text('notes'),
@@ -1356,7 +1395,7 @@ export type FarmRecord = typeof farmRecords.$inferSelect;
 // Farm-wide labels (fencing, medical, H&S...) that can be put on anything
 export const tags = pgTable('tags', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   name: varchar('name', { length: 60 }).notNull(),
   slug: varchar('slug', { length: 60 }).notNull(),
   color: varchar('color', { length: 20 }),
@@ -1369,7 +1408,7 @@ export const tags = pgTable('tags', {
 export type Tag = typeof tags.$inferSelect;
 
 // Kinds of thing a tag or attachment can belong to
-export const TAGGABLE_TYPES = ['record', 'job', 'task', 'animal', 'chat_message', 'attachment', 'docket'] as const;
+export const TAGGABLE_TYPES = ['record', 'job', 'task', 'animal', 'chat_message', 'attachment', 'docket', 'hazard', 'safety_document'] as const;
 export type TaggableType = typeof TAGGABLE_TYPES[number];
 
 export const taggings = pgTable('taggings', {
@@ -1385,7 +1424,7 @@ export const taggings = pgTable('taggings', {
 // Photos, voice notes and documents attached to any record, job, task, animal or message
 export const attachments = pgTable('attachments', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   entityType: varchar('entity_type', { length: 30 }).notNull(),
   entityId: uuid('entity_id').notNull(),
   kind: varchar('kind', { length: 20 }).notNull(), // photo | voice | document
@@ -1430,6 +1469,7 @@ export type InputProduct = typeof inputProducts.$inferSelect;
 // Activity Logs (Phase 6E: Audit trail for user actions)
 export const activityLogs = pgTable('activity_logs', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
   userName: varchar('user_name', { length: 255 }).notNull(),
   action: varchar('action', { length: 100 }).notNull(), // 'create', 'update', 'delete', 'login', 'logout'
@@ -1447,6 +1487,7 @@ export const activityLogs = pgTable('activity_logs', {
 // Alerts (Automated farm management alerts)
 export const alerts = pgTable('alerts', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   type: alertTypeEnum('type').notNull(),
   severity: alertSeverityEnum('severity').default('medium').notNull(),
   animalId: uuid('animal_id').references(() => animals.id),
@@ -1467,6 +1508,7 @@ export const alerts = pgTable('alerts', {
 // Animal Groups (Phase 4: Animal Intelligence - Groups/Herds Management)
 export const animalGroups = pgTable('animal_groups', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   name: varchar('name', { length: 255 }).notNull(),
   description: text('description'),
   color: varchar('color', { length: 7 }), // Hex color for UI badges (e.g., "#4d9f5f")
@@ -1483,6 +1525,7 @@ export const animalGroups = pgTable('animal_groups', {
 // Animal Group Members (Junction table for many-to-many)
 export const animalGroupMembers = pgTable('animal_group_members', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   groupId: uuid('group_id').references(() => animalGroups.id, { onDelete: 'cascade' }).notNull(),
   animalId: uuid('animal_id').references(() => animals.id, { onDelete: 'cascade' }).notNull(),
   addedBy: uuid('added_by').references(() => users.id),
@@ -1496,6 +1539,7 @@ export const animalGroupMembers = pgTable('animal_group_members', {
 // Pasture Movements (Phase 5: Pasture Performance - Rotation tracking)
 export const pastureMovements = pgTable('pasture_movements', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   animalId: uuid('animal_id').references(() => animals.id, { onDelete: 'cascade' }).notNull(),
   fromPastureId: uuid('from_pasture_id').references(() => pastures.id),
   toPastureId: uuid('to_pasture_id').references(() => pastures.id).notNull(),
@@ -1509,6 +1553,7 @@ export const pastureMovements = pgTable('pasture_movements', {
 // Pasture Health Records (Phase 5.3: Health Tracking History)
 export const pastureHealthRecords = pgTable('pasture_health_records', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   pastureId: uuid('pasture_id').references(() => pastures.id, { onDelete: 'cascade' }).notNull(),
   recordedAt: timestamp('recorded_at').defaultNow().notNull(),
   recordedBy: varchar('recorded_by', { length: 255 }).notNull(), // User ID or name
@@ -1522,6 +1567,7 @@ export const pastureHealthRecords = pgTable('pasture_health_records', {
 // Pasture Walk Sessions - Group multiple paddock measurements
 export const pastureWalkSessions = pgTable('pasture_walk_sessions', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   walkDate: date('walk_date').notNull(),
   walkTime: varchar('walk_time', { length: 10 }), // HH:MM format
   recordedBy: uuid('recorded_by').references(() => users.id),
@@ -1540,6 +1586,7 @@ export const pastureWalkSessions = pgTable('pasture_walk_sessions', {
 // Pasture Cover Measurements - Individual paddock readings
 export const pastureCoverMeasurements = pgTable('pasture_cover_measurements', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   sessionId: uuid('session_id').references(() => pastureWalkSessions.id, { onDelete: 'cascade' }),
   pastureId: uuid('pasture_id').references(() => pastures.id, { onDelete: 'cascade' }).notNull(),
   measurementDate: date('measurement_date').notNull(),
@@ -1746,6 +1793,7 @@ export const reproductionEventsRelations = relations(reproductionEvents, ({ one 
 // Visitor Management (Phase 1 - Competitive Advantage)
 export const visitors = pgTable('visitors', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   name: varchar('name', { length: 255 }).notNull(),
   company: varchar('company', { length: 255 }).notNull(),
   email: varchar('email', { length: 255 }),
@@ -1759,6 +1807,7 @@ export const visitors = pgTable('visitors', {
 
 export const visitorSignIns = pgTable('visitor_sign_ins', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   visitorId: uuid('visitor_id').references(() => visitors.id).notNull(),
   farmName: varchar('farm_name', { length: 255 }).notNull(),
   locationCode: varchar('location_code', { length: 50 }).notNull(),
@@ -1780,7 +1829,8 @@ export const visitorSignIns = pgTable('visitor_sign_ins', {
 // Vehicle Registry (Phase 1 Extension)
 export const vehicleTypes = pgTable('vehicle_types', {
   id: uuid('id').primaryKey().defaultRandom(),
-  name: varchar('name', { length: 100 }).notNull().unique(),
+  farmId: uuid('farm_id').references(() => farms.id), // empty for the built-in entries every farm shares
+  name: varchar('name', { length: 100 }).notNull(), // unique within a farm (migration 0026)
   category: varchar('category', { length: 50 }).notNull(), // 'light', 'heavy', 'machinery', 'motorcycle'
   description: text('description'),
   inspectionFrequencyDays: integer('inspection_frequency_days').default(7).notNull(),
@@ -1793,12 +1843,13 @@ export const vehicleTypes = pgTable('vehicle_types', {
 
 export const vehicles = pgTable('vehicles', {
   id: uuid('id').primaryKey().defaultRandom(),
-  registration: varchar('registration', { length: 20 }).notNull().unique(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
+  registration: varchar('registration', { length: 20 }).notNull(), // unique within a farm (migration 0026)
   make: varchar('make', { length: 100 }).notNull(),
   model: varchar('model', { length: 100 }).notNull(),
   year: integer('year').notNull(),
   typeId: uuid('type_id').references(() => vehicleTypes.id).notNull(),
-  vin: varchar('vin', { length: 20 }).unique(),
+  vin: varchar('vin', { length: 20 }), // unique within a farm (migration 0026)
   engineNumber: varchar('engine_number', { length: 50 }),
   color: varchar('color', { length: 50 }),
   fuelType: varchar('fuel_type', { length: 20 }),
@@ -1829,6 +1880,7 @@ export const vehicles = pgTable('vehicles', {
 
 export const vehicleInspectionTemplates = pgTable('vehicle_inspection_templates', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   typeId: uuid('type_id').references(() => vehicleTypes.id).notNull(),
   name: varchar('name', { length: 255 }).notNull(),
   description: text('description'),
@@ -1839,6 +1891,7 @@ export const vehicleInspectionTemplates = pgTable('vehicle_inspection_templates'
 
 export const vehicleInspectionItems = pgTable('vehicle_inspection_items', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   templateId: uuid('template_id').references(() => vehicleInspectionTemplates.id).notNull(),
   category: varchar('category', { length: 100 }).notNull(), // 'safety', 'mechanical', 'electrical', 'exterior', 'documentation'
   itemName: varchar('item_name', { length: 255 }).notNull(),
@@ -1857,6 +1910,7 @@ export const vehicleInspectionItems = pgTable('vehicle_inspection_items', {
 
 export const vehicleInspections = pgTable('vehicle_inspections', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   vehicleId: uuid('vehicle_id').references(() => vehicles.id).notNull(),
   templateId: uuid('template_id').references(() => vehicleInspectionTemplates.id).notNull(),
   inspectionDate: timestamp('inspection_date').defaultNow().notNull(),
@@ -1878,6 +1932,7 @@ export const vehicleInspections = pgTable('vehicle_inspections', {
 
 export const vehicleInspectionResults = pgTable('vehicle_inspection_results', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   inspectionId: uuid('inspection_id').references(() => vehicleInspections.id).notNull(),
   itemId: uuid('item_id').references(() => vehicleInspectionItems.id).notNull(),
   status: varchar('status', { length: 20 }).notNull(), // 'pass', 'fail', 'not_applicable'
@@ -1896,6 +1951,7 @@ export const vehicleInspectionResults = pgTable('vehicle_inspection_results', {
 
 export const vehicleMaintenanceRecords = pgTable('vehicle_maintenance_records', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   vehicleId: uuid('vehicle_id').references(() => vehicles.id).notNull(),
   type: varchar('type', { length: 50 }).notNull(), // 'service', 'repair', 'inspection', 'modification'
   description: text('description').notNull(),
@@ -1930,6 +1986,7 @@ export const taskPinPriorityEnum = pgEnum('task_pin_priority', [
 
 export const taskPins = pgTable('task_pins', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   title: varchar('title', { length: 255 }).notNull(),
   description: text('description'),
   latitude: numeric('latitude', { precision: 10, scale: 8 }), // optional: hazards are often logged without GPS
@@ -1969,7 +2026,7 @@ export const stockTransactionTypeEnum = pgEnum('stock_transaction_type', [
 
 export const stockTransactions = pgTable('stock_transactions', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id').references(() => farms.id),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   // Lines from one ASD / movement share a movement id; its photos attach to that id
   movementId: uuid('movement_id'),
   // The Document record (in Records) that holds the ASD photo
@@ -2003,7 +2060,7 @@ export const stockTransactions = pgTable('stock_transactions', {
 // Stocktake: how many of a class were counted on farm on a date
 export const stockCounts = pgTable('stock_counts', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   stockClass: varchar('stock_class', { length: 50 }).notNull(),
   count: integer('count').notNull(),
   countedAt: date('counted_at').notNull(),
@@ -2270,6 +2327,7 @@ export const visitorSignInsRelations = relations(visitorSignIns, ({ one }) => ({
 
 export const qrCodes = pgTable('qr_codes', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   code: varchar('code', { length: 50 }).unique().notNull(),
   locationName: varchar('location_name', { length: 255 }).notNull(),
   farmName: varchar('farm_name', { length: 255 }).notNull(),
@@ -2825,6 +2883,7 @@ export const expenseCategoryEnum = pgEnum('expense_category', [
 
 export const expenses = pgTable('expenses', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   date: date('date').notNull(),
   category: expenseCategoryEnum('category').notNull(),
   description: varchar('description', { length: 255 }).notNull(),
@@ -2851,6 +2910,7 @@ export const insertExpenseSchema = createInsertSchema(expenses).omit({
 // Killsheet data for tracking animal processing/sales
 export const killsheets = pgTable('killsheets', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   date: date('date').notNull(),
   processorName: varchar('processor_name', { length: 255 }).notNull(),
   lotNumber: varchar('lot_number', { length: 100 }),
@@ -2881,6 +2941,7 @@ export const insertKillsheetSchema = createInsertSchema(killsheets).omit({
 // Killsheet line items (individual animals or groups)
 export const killsheetItems = pgTable('killsheet_items', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   killsheetId: uuid('killsheet_id').references(() => killsheets.id).notNull(),
   animalId: uuid('animal_id').references(() => animals.id),
   tagNumber: varchar('tag_number', { length: 50 }),
@@ -2912,6 +2973,7 @@ export type InsertKillsheetItem = z.infer<typeof insertKillsheetItemSchema>;
 // ===== MILK PRODUCTION TRACKING (Phase 5) =====
 export const milkRecords = pgTable('milk_records', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   date: date('date').notNull(),
   herdId: uuid('herd_id'), // Optional reference to herd
   totalVolume: numeric('total_volume', { precision: 10, scale: 2 }).notNull(), // Litres
@@ -2939,6 +3001,7 @@ export const insertMilkRecordSchema = createInsertSchema(milkRecords).omit({
 // Milk Quality Alerts
 export const milkQualityAlerts = pgTable('milk_quality_alerts', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   date: date('date').notNull(),
   alertType: varchar('alert_type', { length: 50 }).notNull(), // 'high_scc', 'low_fat', 'low_protein', 'temperature'
   severity: varchar('severity', { length: 20 }).notNull(), // 'low', 'medium', 'high', 'critical'
@@ -2966,6 +3029,7 @@ export type InsertMilkQualityAlert = z.infer<typeof insertMilkQualityAlertSchema
 // ===== BUDGETING & FORECASTING (Phase 5) =====
 export const budgets = pgTable('budgets', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   name: varchar('name', { length: 200 }).notNull(),
   description: text('description'),
   startDate: date('start_date').notNull(),
@@ -2986,6 +3050,7 @@ export const budgets = pgTable('budgets', {
 
 export const budgetCategories = pgTable('budget_categories', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   budgetId: uuid('budget_id').references(() => budgets.id, { onDelete: 'cascade' }),
   name: varchar('name', { length: 100 }).notNull(),
   type: varchar('type', { length: 20 }).notNull(), // income, expense
@@ -3000,6 +3065,7 @@ export const budgetCategories = pgTable('budget_categories', {
 
 export const forecasts = pgTable('forecasts', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   name: varchar('name', { length: 200 }).notNull(),
   description: text('description'),
   forecastType: varchar('forecast_type', { length: 50 }).notNull(), // cash_flow, production, financial
@@ -3015,6 +3081,7 @@ export const forecasts = pgTable('forecasts', {
 
 export const forecastData = pgTable('forecast_data', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   forecastId: uuid('forecast_id').references(() => forecasts.id, { onDelete: 'cascade' }),
   period: date('period').notNull(),
   category: varchar('category', { length: 100 }),
@@ -3076,6 +3143,7 @@ export const complianceStandards = pgTable('compliance_standards', {
 
 export const complianceChecks = pgTable('compliance_checks', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   standardId: uuid('standard_id').references(() => complianceStandards.id),
   checkDate: date('check_date').notNull(),
   status: varchar('status', { length: 20 }).notNull(), // compliant, non_compliant, not_applicable, pending_review
@@ -3092,6 +3160,7 @@ export const complianceChecks = pgTable('compliance_checks', {
 
 export const complianceAudits = pgTable('compliance_audits', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   auditType: varchar('audit_type', { length: 50 }).notNull(), // internal, external, nzfap
   auditDate: date('audit_date').notNull(),
   auditor: varchar('auditor', { length: 200 }),
@@ -3109,6 +3178,7 @@ export const complianceAudits = pgTable('compliance_audits', {
 
 export const complianceDocuments = pgTable('compliance_documents', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   title: varchar('title', { length: 200 }).notNull(),
   description: text('description'),
   documentType: varchar('document_type', { length: 50 }).notNull(), // policy, procedure, record, certificate
@@ -3165,6 +3235,7 @@ export const channelContextTypeEnum = pgEnum('channel_context_type', ['job', 'an
 // Chat Channels (Direct messages and group chats)
 export const chatChannels = pgTable('chat_channels', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   name: varchar('name', { length: 255 }), // null for direct messages, name for group chats
   type: varchar('type', { length: 20 }).notNull().default('direct'), // 'direct', 'group', 'context'
   contextType: channelContextTypeEnum('context_type'), // 'job', 'animal', 'equipment' for context channels
@@ -3181,6 +3252,7 @@ export const chatChannels = pgTable('chat_channels', {
 // Chat Channel Members (Many-to-many relationship between users and channels)
 export const chatChannelMembers = pgTable('chat_channel_members', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   channelId: uuid('channel_id').references(() => chatChannels.id, { onDelete: 'cascade' }).notNull(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   role: varchar('role', { length: 20 }).default('member').notNull(), // 'admin', 'member'
@@ -3194,6 +3266,7 @@ export const chatChannelMembers = pgTable('chat_channel_members', {
 // Chat Messages
 export const chatMessages = pgTable('chat_messages', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   channelId: uuid('channel_id').references(() => chatChannels.id, { onDelete: 'cascade' }).notNull(),
   userId: uuid('user_id').references(() => users.id).notNull(),
   body: text('body').notNull(),
@@ -3211,6 +3284,7 @@ export const chatMessages = pgTable('chat_messages', {
 // Message Read Receipts
 export const chatMessageReads = pgTable('chat_message_reads', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   messageId: uuid('message_id').references(() => chatMessages.id, { onDelete: 'cascade' }).notNull(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   readAt: timestamp('read_at').defaultNow().notNull(),
@@ -3221,6 +3295,7 @@ export const chatMessageReads = pgTable('chat_message_reads', {
 // Message Pins (Pinned messages in channels)
 export const chatMessagePins = pgTable('chat_message_pins', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   channelId: uuid('channel_id').references(() => chatChannels.id, { onDelete: 'cascade' }).notNull(),
   messageId: uuid('message_id').references(() => chatMessages.id, { onDelete: 'cascade' }).notNull(),
   pinnedBy: uuid('pinned_by').references(() => users.id).notNull(),
@@ -3412,7 +3487,8 @@ export type ReminderSettings = {
 // Staff Profiles (Extended user information for farm workers)
 export const staffProfiles = pgTable('staff_profiles', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull().unique(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(), // unique within a farm (migration 0026)
   employeeId: varchar('employee_id', { length: 50 }),
   position: varchar('position', { length: 100 }),
   department: varchar('department', { length: 100 }),
@@ -3432,6 +3508,7 @@ export const staffProfiles = pgTable('staff_profiles', {
 // Staff Certifications (Training records, licenses, qualifications)
 export const staffCertifications = pgTable('staff_certifications', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   staffProfileId: uuid('staff_profile_id').references(() => staffProfiles.id, { onDelete: 'cascade' }).notNull(),
   name: varchar('name', { length: 255 }).notNull(),
   type: varchar('type', { length: 100 }), // license, certification, training, qualification
@@ -3450,6 +3527,7 @@ export const staffCertifications = pgTable('staff_certifications', {
 // Contractors (External service providers)
 export const contractors = pgTable('contractors', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   companyName: varchar('company_name', { length: 255 }).notNull(),
   contactName: varchar('contact_name', { length: 255 }),
   email: varchar('email', { length: 255 }),
@@ -3474,6 +3552,7 @@ export const contractors = pgTable('contractors', {
 // Contractor Documents (Required documents for pre-qualification)
 export const contractorDocuments = pgTable('contractor_documents', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   contractorId: uuid('contractor_id').references(() => contractors.id, { onDelete: 'cascade' }).notNull(),
   documentType: varchar('document_type', { length: 100 }).notNull(), // insurance, h&s_plan, license, certification
   documentName: varchar('document_name', { length: 255 }).notNull(),
@@ -3493,7 +3572,7 @@ export const rosterStatusEnum = pgEnum('roster_status', ['scheduled', 'confirmed
 // Roster Entries (Shift scheduling for staff)
 export const rosterEntries = pgTable('roster_entries', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   staffProfileId: uuid('staff_profile_id').references(() => staffProfiles.id, { onDelete: 'cascade' }).notNull(),
   
   // Shift timing
@@ -3532,7 +3611,7 @@ export const rosterEntries = pgTable('roster_entries', {
 // Staff leave requests (annual, sick, ...), approved or rejected by farm owners/managers
 export const leaveRequests = pgTable('leave_requests', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   staffProfileId: uuid('staff_profile_id').references(() => staffProfiles.id).notNull(),
   startDate: date('start_date').notNull(),
   endDate: date('end_date').notNull(),
@@ -3553,7 +3632,7 @@ export const timesheetStatusEnum = pgEnum('timesheet_status', ['draft', 'pending
 // Timesheets (Time tracking for staff)
 export const timesheets = pgTable('timesheets', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id').references(() => farms.id),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   staffProfileId: uuid('staff_profile_id').references(() => staffProfiles.id, { onDelete: 'cascade' }).notNull(),
   date: date('date').notNull(),
   startTime: varchar('start_time', { length: 10 }).notNull(), // HH:MM format
@@ -3577,6 +3656,7 @@ export const timesheets = pgTable('timesheets', {
 // Contractor Work Records (Track contractor work on farm)
 export const contractorWorkRecords = pgTable('contractor_work_records', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   contractorId: uuid('contractor_id').references(() => contractors.id, { onDelete: 'cascade' }).notNull(),
   date: date('date').notNull(),
   description: text('description').notNull(),
@@ -3740,7 +3820,7 @@ export type InsertContractorWorkRecord = z.infer<typeof insertContractorWorkReco
 // Recurring Task Templates - defines the pattern for recurring tasks
 export const recurringTaskTemplates = pgTable('recurring_task_templates', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id'), // Optional farm reference for multi-farm support
+  farmId: uuid('farm_id').notNull().default(currentFarm), // Optional farm reference for multi-farm support
   
   // Task details
   title: varchar('title', { length: 255 }).notNull(),
@@ -3792,7 +3872,7 @@ export const recurringTaskTemplates = pgTable('recurring_task_templates', {
 export const recurringTaskInstances = pgTable('recurring_task_instances', {
   id: uuid('id').primaryKey().defaultRandom(),
   templateId: uuid('template_id').references(() => recurringTaskTemplates.id, { onDelete: 'cascade' }).notNull(),
-  farmId: uuid('farm_id'), // Optional farm reference for multi-farm support
+  farmId: uuid('farm_id').notNull().default(currentFarm), // Optional farm reference for multi-farm support
   
   // Task details (copied from template, can be modified)
   title: varchar('title', { length: 255 }).notNull(),
@@ -3902,7 +3982,7 @@ export const taskPriorityEnum = pgEnum('task_priority', ['low', 'medium', 'high'
 // Jobs - groups related tasks together
 export const jobs = pgTable('jobs', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   
   // Job details
   title: varchar('title', { length: 255 }).notNull(),
@@ -3960,7 +4040,7 @@ export const jobs = pgTable('jobs', {
 // One "your jobs today" message per person per farm per day
 export const jobDigests = pgTable('job_digests', {
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
-  farmId: uuid('farm_id').references(() => farms.id, { onDelete: 'cascade' }).notNull(),
+  farmId: uuid('farm_id').references(() => farms.id, { onDelete: 'cascade' }).notNull().default(currentFarm),
   day: date('day').notNull(),
   sentAt: timestamp('sent_at').defaultNow().notNull(),
 }, (table) => ({
@@ -3969,6 +4049,7 @@ export const jobDigests = pgTable('job_digests', {
 
 export const jobAssignments = pgTable('job_assignments', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   jobId: uuid('job_id').references(() => jobs.id, { onDelete: 'cascade' }).notNull(),
   userId: uuid('user_id').references(() => users.id).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -3979,7 +4060,7 @@ export const jobAssignments = pgTable('job_assignments', {
 // Tasks - individual work items, can be standalone or part of a job
 export const tasks = pgTable('tasks', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   jobId: uuid('job_id').references(() => jobs.id, { onDelete: 'set null' }), // Optional: task can be standalone
   
   // Task details
@@ -4112,11 +4193,11 @@ export const equipmentStatusEnum = pgEnum('equipment_status', ['operational', 'm
 
 export const equipment = pgTable('equipment', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id').notNull(),
+  farmId: uuid('farm_id').notNull().default(currentFarm),
   name: varchar('name', { length: 255 }).notNull(),
   type: varchar('type', { length: 100 }).notNull(), // e.g., "Tractor", "Milk Pump", "Drone", "Irrigation System"
   model: varchar('model', { length: 100 }), // Model number or identifier
-  serialNumber: varchar('serial_number', { length: 100 }).unique(),
+  serialNumber: varchar('serial_number', { length: 100 }), // unique within a farm (migration 0026)
   manufacturer: varchar('manufacturer', { length: 100 }),
   yearManufactured: integer('year_manufactured'),
   purchaseDate: date('purchase_date'),
@@ -4136,6 +4217,7 @@ export const equipment = pgTable('equipment', {
 // Equipment Service History
 export const equipmentServiceHistory = pgTable('equipment_service_history', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   equipmentId: uuid('equipment_id').references(() => equipment.id, { onDelete: 'cascade' }).notNull(),
   serviceDate: date('service_date').notNull(),
   serviceType: varchar('service_type', { length: 100 }).notNull(), // e.g., "Routine Maintenance", "Repair", "Inspection"
@@ -4150,7 +4232,7 @@ export const equipmentServiceHistory = pgTable('equipment_service_history', {
 // Recurring maintenance plans per piece of equipment (several per item, e.g. oil + belts)
 export const equipmentMaintenanceSchedules = pgTable('equipment_maintenance_schedules', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   equipmentId: uuid('equipment_id').references(() => equipment.id, { onDelete: 'cascade' }).notNull(),
   maintenanceType: varchar('maintenance_type', { length: 100 }).notNull(), // e.g. "Oil change"
   frequency: varchar('frequency', { length: 20 }).notNull(), // weekly | monthly | quarterly | yearly
@@ -4185,13 +4267,13 @@ export const deviceStatusEnum = pgEnum('device_status', ['online', 'offline', 'e
 // IoT Devices for farm monitoring
 export const devices = pgTable('devices', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id').notNull(),
+  farmId: uuid('farm_id').notNull().default(currentFarm),
   equipmentId: uuid('equipment_id').references(() => equipment.id, { onDelete: 'set null' }), // Optional link to equipment
   
   // Device identification
   name: varchar('name', { length: 255 }).notNull(),
   type: deviceTypeEnum('type').notNull(),
-  serialNumber: varchar('serial_number', { length: 100 }).unique(),
+  serialNumber: varchar('serial_number', { length: 100 }), // unique within a farm (migration 0026)
   manufacturer: varchar('manufacturer', { length: 100 }),
   model: varchar('model', { length: 100 }),
   firmwareVersion: varchar('firmware_version', { length: 50 }),
@@ -4230,6 +4312,7 @@ export const devices = pgTable('devices', {
 // Device Data Logs - Historical sensor readings
 export const deviceDataLogs = pgTable('device_data_logs', {
   id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id), // filled from its parent by the database
   deviceId: uuid('device_id').references(() => devices.id, { onDelete: 'cascade' }).notNull(),
   
   // Reading data
@@ -4314,7 +4397,7 @@ export const transactionTypeEnum = pgEnum('transaction_type', ['revenue', 'expen
 // Financial Transactions - Core table for all financial records
 export const financialTransactions = pgTable('financial_transactions', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id'), // For multi-farm support
+  farmId: uuid('farm_id').notNull().default(currentFarm), // For multi-farm support
   
   // Transaction details
   type: transactionTypeEnum('type').notNull(),
@@ -4358,7 +4441,7 @@ export const financialTransactions = pgTable('financial_transactions', {
 // Milk production records (for revenue tracking)
 export const milkProduction = pgTable('milk_production', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id'),
+  farmId: uuid('farm_id').notNull().default(currentFarm),
   
   // Production date
   productionDate: date('production_date').notNull(),
@@ -4394,7 +4477,7 @@ export const milkProduction = pgTable('milk_production', {
 // Scheduled reports configuration
 export const scheduledReports = pgTable('scheduled_reports', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id'),
+  farmId: uuid('farm_id').notNull().default(currentFarm),
   
   // Report details
   name: varchar('name', { length: 255 }).notNull(),
@@ -4430,7 +4513,7 @@ export const scheduledReports = pgTable('scheduled_reports', {
 // Report generation history
 export const reportHistory = pgTable('report_history', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id'),
+  farmId: uuid('farm_id').notNull().default(currentFarm),
   scheduledReportId: uuid('scheduled_report_id').references(() => scheduledReports.id),
   
   // Report details

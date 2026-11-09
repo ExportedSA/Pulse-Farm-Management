@@ -127,7 +127,7 @@
 
 | Route Group (Backend) | Frontend Page/Component | Status |
 |----------------------|------------------------|--------|
-| `routes/compliance.ts` | `compliance-page.tsx`, `compliance-docs.tsx` (documents tab shows sample documents) | Patch |
+| `routes/compliance.ts`, `domain/safety.ts` | `compliance-page.tsx` (hazard register, incidents, safety documents), `hazard-map-print-page.tsx`, farm map Hazards and Points of interest layers | Live |
 | `routes/nait.ts` | `nait-compliance-page.tsx`, `nait-records.tsx` | Live |
 | `routes/nait.core.ts` | (NAIT API integration) | Stub |
 | `nzfap-routes.ts` | `nzfap-compliance-page.tsx` | Live |

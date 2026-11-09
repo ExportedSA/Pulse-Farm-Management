@@ -1,8 +1,8 @@
 import express, { type Request, Response } from "express";
 import { storage } from "./storage";
-import { db } from "./db";
+import { db, systemDb, withFarmDb } from "./db";
 import { visitors, visitorSignIns } from "@shared/schema";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { 
   type InsertVisitor, 
   type InsertVisitorSignIn, 
@@ -45,8 +45,28 @@ const qrCodeCreateSchema = z.object({
 
 // ===== PUBLIC VISITOR ROUTES (NO AUTHENTICATION REQUIRED) =====
 
+// A visitor isn't signed in, so the farm comes from the QR code (or the sign-in) they use;
+// the handler then runs limited to that farm
+const farmOfCode = async (code: string) =>
+  ((await systemDb.execute(sql`SELECT farm_id FROM qr_codes WHERE code = ${code}`)) as any).rows?.[0]?.farm_id ?? null;
+const farmOfSignIn = async (id: string) =>
+  z.string().uuid().safeParse(id).success
+    ? ((await systemDb.execute(sql`SELECT farm_id FROM visitor_sign_ins WHERE id = ${id}`)) as any).rows?.[0]?.farm_id ?? null
+    : null;
+const atFarmOf = (find: (req: Request) => Promise<string | null>, handler: (req: Request, res: Response) => Promise<unknown>) =>
+  async (req: Request, res: Response) => {
+    try {
+      const farmId = await find(req);
+      if (!farmId) return res.status(404).json({ error: "QR code not found or inactive" });
+      await withFarmDb(farmId, () => handler(req, res));
+    } catch (error) {
+      console.error("Visitor request failed:", error);
+      if (!res.headersSent) res.status(500).json({ error: "Internal server error" });
+    }
+  };
+
 // Get QR code details by code (public endpoint)
-router.get("/qr/:code", async (req: Request, res: Response) => {
+router.get("/qr/:code", atFarmOf(req => farmOfCode(req.params.code), async (req: Request, res: Response) => {
   try {
     const { code } = req.params;
     
@@ -87,10 +107,10 @@ router.get("/qr/:code", async (req: Request, res: Response) => {
     console.error("Error fetching QR code:", error);
     res.status(500).json({ error: "Internal server error" });
   }
-});
+}));
 
 // Visitor sign-in (public endpoint)
-router.post("/signin/:locationCode", async (req: Request, res: Response) => {
+router.post("/signin/:locationCode", atFarmOf(req => farmOfCode(req.params.locationCode), async (req: Request, res: Response) => {
   try {
     const { locationCode } = req.params;
     
@@ -201,10 +221,10 @@ router.post("/signin/:locationCode", async (req: Request, res: Response) => {
     console.error("Error during visitor sign-in:", error);
     res.status(500).json({ error: "Internal server error" });
   }
-});
+}));
 
 // Visitor sign-out (public endpoint)
-router.post("/signout/:signInId", async (req: Request, res: Response) => {
+router.post("/signout/:signInId", atFarmOf(req => farmOfSignIn(req.params.signInId), async (req: Request, res: Response) => {
   try {
     const { signInId } = req.params;
     
@@ -227,7 +247,7 @@ router.post("/signout/:signInId", async (req: Request, res: Response) => {
     console.error("Error during visitor sign-out:", error);
     res.status(500).json({ error: "Internal server error" });
   }
-});
+}));
 
 // ===== ADMIN VISITOR ROUTES (AUTHENTICATION REQUIRED) =====
 

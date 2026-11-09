@@ -31,10 +31,8 @@ import {
   ValidationError,
 } from "../domain/equipment";
 import { getOrCreateEquipmentChannel } from "../domain/chat";
+import { listFarmUserIds } from "../domain/farms";
 import { chatWebSocket } from "../websocket";
-import { db } from "../db";
-import { users } from "@shared/schema";
-import { eq } from "drizzle-orm";
 import logger from "../config/logger";
 
 const router = Router();
@@ -274,12 +272,8 @@ router.post("/:id/log-service", requireAuth, async (req, res) => {
 
     // Emit WebSocket event for new maintenance log
     try {
-      const farmUsers = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.isActive, true));
-      
-      const userIds = farmUsers.map(u => u.id).filter(uid => uid !== userId);
+      // Only this farm's people hear about its equipment
+      const userIds = (await listFarmUserIds(farmId)).filter(uid => uid !== userId);
       if (userIds.length > 0) {
         chatWebSocket.broadcastNewMaintenanceLog(userIds, id, serviceRecord, updatedEquipment);
       }
@@ -334,12 +328,7 @@ router.patch("/:id", requireAuth, async (req, res) => {
     // Emit WebSocket event if status changed
     if (data.status && data.status !== previousStatus) {
       try {
-        const farmUsers = await db
-          .select({ id: users.id })
-          .from(users)
-          .where(eq(users.isActive, true));
-        
-        const userIds = farmUsers.map(u => u.id).filter(uid => uid !== userId);
+        const userIds = (await listFarmUserIds(farmId)).filter(uid => uid !== userId);
         if (userIds.length > 0) {
           chatWebSocket.broadcastEquipmentStatusChanged(userIds, equipmentRecord, previousStatus);
         }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -326,42 +326,7 @@ export default function SettingsPage() {
         </TabsContent>
 
         <TabsContent value="farm">
-          <Card>
-            <CardHeader>
-              <CardTitle>Farm Profile</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div>
-                  <Label htmlFor="farm-name">Farm Name</Label>
-                  <Input
-                    id="farm-name"
-                    placeholder="Enter farm name"
-                    defaultValue="My Dairy Farm"
-                    data-testid="input-farm-name"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="farm-location">Location</Label>
-                  <Input
-                    id="farm-location"
-                    placeholder="Enter farm location"
-                    data-testid="input-farm-location"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="farm-contact">Contact Email</Label>
-                  <Input
-                    id="farm-contact"
-                    type="email"
-                    placeholder="contact@farm.com"
-                    data-testid="input-farm-contact"
-                  />
-                </div>
-                <Button data-testid="button-save-farm-profile">Save Profile</Button>
-              </div>
-            </CardContent>
-          </Card>
+          <FarmProfile />
         </TabsContent>
       </Tabs>
 
@@ -585,5 +550,107 @@ export default function SettingsPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+type FarmProfileData = {
+  name: string; location: string | null; address: string | null; naitNumber: string | null;
+  contactEmail: string | null; contactPhone: string | null; role: string;
+  settings: { emergency?: Record<string, string | null> } | null;
+};
+
+const FARM_FIELDS: { key: keyof FarmProfileData; label: string; placeholder?: string; type?: string }[] = [
+  { key: "name", label: "Farm name" },
+  { key: "location", label: "District or area", placeholder: "e.g. near Morrinsville" },
+  { key: "address", label: "Postal or physical address" },
+  { key: "naitNumber", label: "NAIT location number" },
+  { key: "contactEmail", label: "Contact email", type: "email" },
+  { key: "contactPhone", label: "Contact phone", type: "tel" },
+];
+const EMERGENCY_FIELDS = [
+  { key: "address111", label: "Address to give 111", placeholder: "The road address an ambulance would use" },
+  { key: "rapidNumber", label: "RAPID number", placeholder: "The rural address number at the gate" },
+  { key: "medicalCentre", label: "Nearest medical centre" },
+  { key: "medicalPhone", label: "Medical centre phone", type: "tel" },
+];
+
+// The farm's own details, kept on the farm (each farm using Pulse has its own)
+function FarmProfile() {
+  const { toast } = useToast();
+  const { data: farm, isLoading } = useQuery<FarmProfileData>({
+    queryKey: ["/api/farms/current"],
+    queryFn: async () => {
+      const res = await fetch("/api/farms/current", { credentials: "include" });
+      if (!res.ok) throw new Error("Couldn't load the farm");
+      return res.json();
+    },
+  });
+  const [fields, setFields] = useState<Record<string, string>>({});
+  const [emergency, setEmergency] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!farm) return;
+    setFields(Object.fromEntries(FARM_FIELDS.map(f => [f.key, (farm[f.key] as string | null) ?? ""])));
+    setEmergency(Object.fromEntries(EMERGENCY_FIELDS.map(f => [f.key, farm.settings?.emergency?.[f.key] ?? ""])));
+  }, [farm]);
+  const canEdit = farm?.role === "owner" || farm?.role === "manager";
+  const save = async () => {
+    if (!fields.name?.trim()) return toast({ title: "The farm needs a name", variant: "destructive" });
+    setSaving(true);
+    try {
+      const blankToNull = (o: Record<string, string>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, v.trim() || null]));
+      const res = await fetch("/api/farms/current", {
+        method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...blankToNull(fields), name: fields.name.trim(), emergency: blankToNull(emergency) }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? "Couldn't save");
+      await queryClient.invalidateQueries({ queryKey: ["/api/farms/current"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/farms"] });
+      toast({ title: "Farm profile saved" });
+    } catch (err: any) {
+      toast({ title: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+  if (isLoading) return <Card><CardContent className="p-6 text-sm text-muted-foreground">Loading the farm…</CardContent></Card>;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Farm profile</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-6 max-w-2xl">
+          <div className="grid sm:grid-cols-2 gap-4">
+            {FARM_FIELDS.map(f => (
+              <div key={f.key} className={f.key === "address" ? "sm:col-span-2" : undefined}>
+                <Label htmlFor={`farm-${f.key}`}>{f.label}</Label>
+                <Input id={`farm-${f.key}`} type={f.type ?? "text"} placeholder={f.placeholder} disabled={!canEdit}
+                  value={fields[f.key] ?? ""} onChange={e => setFields(v => ({ ...v, [f.key]: e.target.value }))} data-testid={`input-farm-${f.key}`} />
+              </div>
+            ))}
+          </div>
+          <div className="space-y-3">
+            <div>
+              <h3 className="font-semibold">Emergency details</h3>
+              <p className="text-sm text-muted-foreground">Printed on the hazard map for visitors, contractors and new staff.</p>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-4">
+              {EMERGENCY_FIELDS.map(f => (
+                <div key={f.key} className={f.key === "address111" ? "sm:col-span-2" : undefined}>
+                  <Label htmlFor={`emergency-${f.key}`}>{f.label}</Label>
+                  <Input id={`emergency-${f.key}`} type={f.type ?? "text"} placeholder={f.placeholder} disabled={!canEdit}
+                    value={emergency[f.key] ?? ""} onChange={e => setEmergency(v => ({ ...v, [f.key]: e.target.value }))} />
+                </div>
+              ))}
+            </div>
+          </div>
+          {canEdit
+            ? <Button onClick={save} disabled={saving} data-testid="button-save-farm-profile">{saving ? "Saving…" : "Save profile"}</Button>
+            : <p className="text-sm text-muted-foreground">Only the farm's owner or a manager can change these.</p>}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

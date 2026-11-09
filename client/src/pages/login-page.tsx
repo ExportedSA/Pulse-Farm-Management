@@ -81,7 +81,7 @@ export default function LoginPage() {
                       <Input
                         {...field}
                         type="email"
-                        placeholder="owner@demo.com"
+                        placeholder="you@example.com"
                         autoComplete="email"
                         data-testid="input-login-email"
                       />
@@ -122,7 +122,7 @@ export default function LoginPage() {
             </form>
           </Form>
 
-          <div className="mt-6 pt-6 border-t border-gray-200">
+          {import.meta.env.DEV && <div className="mt-6 pt-6 border-t border-gray-200">
             <p className="text-sm text-gray-500 text-center">
               Demo credentials for testing:
             </p>
@@ -131,7 +131,7 @@ export default function LoginPage() {
               <p className="text-center font-mono">manager@demo.com / password123</p>
               <p className="text-center font-mono">worker@demo.com / password123</p>
             </div>
-          </div>
+          </div>}
         </CardContent>
       </Card>
     </div>

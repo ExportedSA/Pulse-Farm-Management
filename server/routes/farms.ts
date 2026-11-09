@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { db } from '../db';
 import { farms, farmMembers, users } from '@shared/schema';
 import { and, eq } from 'drizzle-orm';
-import { getUserId } from '../middleware/auth';
+import { getFarmId, getUserId, generateToken, AUTH_COOKIE, authCookieOptions } from '../middleware/auth';
 import { listUserFarms, getFarmRole, createFarmForUser, type FarmRole } from '../domain/farms';
 
 const router = Router();
@@ -73,6 +73,50 @@ router.post('/', async (req, res) => {
   }
 });
 
+// The farm's emergency details, printed on the hazard map
+const emergencySchema = z.object({
+  address111: z.string().max(300).nullish(),
+  rapidNumber: z.string().max(50).nullish(),
+  medicalCentre: z.string().max(200).nullish(),
+  medicalPhone: z.string().max(50).nullish(),
+});
+
+// GET /api/farms/current - The farm the user is working in
+router.get('/current', async (req, res) => {
+  try {
+    const farmId = getFarmId(req);
+    const role = farmId ? await getFarmRole(getUserId(req)!, farmId) : undefined;
+    if (!farmId || !role) return res.status(404).json({ error: 'No farm selected' });
+    const [farm] = await db.select().from(farms).where(eq(farms.id, farmId));
+    res.json({ ...farm, role });
+  } catch (error) {
+    console.error('Error fetching current farm:', error);
+    res.status(500).json({ error: 'Failed to fetch farm' });
+  }
+});
+
+// PATCH /api/farms/current - Owners and managers change the farm's details and emergency details
+router.patch('/current', async (req, res) => {
+  try {
+    const farmId = getFarmId(req);
+    const role = farmId ? await getFarmRole(getUserId(req)!, farmId) : undefined;
+    if (!farmId || !role) return res.status(404).json({ error: 'No farm selected' });
+    if (!MANAGE_ROLES.includes(role)) return res.status(403).json({ error: 'Only farm owners and managers can change the farm profile' });
+    const { emergency, ...fields } = farmFieldsSchema.omit({ settings: true }).partial()
+      .extend({ emergency: emergencySchema.optional() }).parse(req.body);
+    const [current] = await db.select({ settings: farms.settings }).from(farms).where(eq(farms.id, farmId));
+    const settings = emergency ? { ...(current?.settings ?? {}), emergency: { ...(current?.settings?.emergency ?? {}), ...emergency } } : current?.settings;
+    const [farm] = await db.update(farms).set({ ...fields, settings, updatedAt: new Date() }).where(eq(farms.id, farmId)).returning();
+    res.json({ ...farm, role });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Validation failed', details: error.errors });
+    }
+    console.error('Error updating current farm:', error);
+    res.status(500).json({ error: 'Failed to update farm' });
+  }
+});
+
 // GET /api/farms/:farmId
 router.get('/:farmId', async (req, res) => {
   try {
@@ -104,6 +148,22 @@ router.put('/:farmId', async (req, res) => {
     }
     console.error('Error updating farm:', error);
     res.status(500).json({ success: false, error: 'Failed to update farm' });
+  }
+});
+
+// POST /api/farms/:farmId/switch - Work in another of the user's farms. The farm is part of the
+// sign-in token (every request is limited to it), so this issues a new one.
+router.post('/:farmId/switch', async (req, res) => {
+  try {
+    const membership = await loadMembership(req, res);
+    if (!membership) return;
+    const user = (req as any).user;
+    const token = generateToken({ userId: user.userId, name: user.name, email: user.email, role: user.role, farmId: membership.farmId });
+    res.cookie(AUTH_COOKIE, token, authCookieOptions);
+    res.json({ success: true, data: { farmId: membership.farmId, role: membership.role } });
+  } catch (error) {
+    console.error('Error switching farm:', error);
+    res.status(500).json({ success: false, error: 'Failed to switch farm' });
   }
 });
 

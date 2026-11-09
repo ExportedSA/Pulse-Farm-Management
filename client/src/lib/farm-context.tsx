@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, ReactNode } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth-context";
@@ -19,7 +19,7 @@ interface FarmContextType {
   farms: Farm[];
   currentFarm: Farm | null;
   isLoading: boolean;
-  switchFarm: (farmId: string) => void;
+  switchFarm: (farmId: string) => Promise<void>;
   addFarm: (farm: Omit<Farm, 'id'>) => void;
   updateFarm: (id: string, updates: Partial<Farm>) => void;
   removeFarm: (id: string) => void;
@@ -27,22 +27,16 @@ interface FarmContextType {
 
 const FarmContext = createContext<FarmContextType | undefined>(undefined);
 
-const CURRENT_FARM_KEY = "pulse_current_farm";
 const FARMS_QUERY_KEY = ["/api/farms"];
+const CURRENT_QUERY_KEY = ["/api/farms/current"];
 
-// Earlier builds kept made-up farms in localStorage; they are not real farms
+// Earlier builds kept made-up farms, and the chosen farm, in localStorage. The farm being worked
+// in is now part of the sign-in (the server limits every request to it), so neither is used.
 try {
   localStorage.removeItem("pulse_farms");
+  localStorage.removeItem("pulse_current_farm");
 } catch {
   // Storage unavailable (private mode); nothing to clean up
-}
-
-function getStoredCurrentFarmId(): string | null {
-  try {
-    return localStorage.getItem(CURRENT_FARM_KEY);
-  } catch {
-    return null;
-  }
 }
 
 // Size, type and colour aren't farm columns yet; they live in the farm's settings
@@ -71,7 +65,6 @@ function toFarmBody(farm: Partial<Farm>) {
 
 export function FarmProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAuth();
-  const [currentFarmId, setCurrentFarmId] = useState<string | null>(getStoredCurrentFarmId);
 
   const { data, isLoading } = useQuery<{ success: boolean; data: any[] }>({
     queryKey: FARMS_QUERY_KEY,
@@ -80,16 +73,17 @@ export function FarmProvider({ children }: { children: ReactNode }) {
   });
   const farms = (data?.data ?? []).map(toFarm);
 
-  // Persist current farm to localStorage
-  useEffect(() => {
-    try {
-      if (currentFarmId) localStorage.setItem(CURRENT_FARM_KEY, currentFarmId);
-    } catch {
-      // Storage unavailable; the choice just won't be remembered
-    }
-  }, [currentFarmId]);
-
-  const currentFarm = farms.find(f => f.id === currentFarmId) || farms[0] || null;
+  // The farm the server is working in for this sign-in
+  const { data: current } = useQuery<{ id: string }>({
+    queryKey: CURRENT_QUERY_KEY,
+    enabled: isAuthenticated,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const res = await fetch("/api/farms/current", { credentials: "include" });
+      return res.ok ? res.json() : null;
+    },
+  });
+  const currentFarm = farms.find(f => f.id === current?.id) || farms[0] || null;
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: FARMS_QUERY_KEY });
 
@@ -107,12 +101,12 @@ export function FarmProvider({ children }: { children: ReactNode }) {
     onSuccess: refresh,
   });
 
-  const switchFarm = (farmId: string) => {
-    const farm = farms.find(f => f.id === farmId);
-    if (farm) {
-      setCurrentFarmId(farmId);
-      window.dispatchEvent(new CustomEvent('farm-switched', { detail: { farmId } }));
-    }
+  // Switching gets a sign-in for the other farm, then everything on screen is reloaded for it
+  const switchFarm = async (farmId: string) => {
+    if (!farms.some(f => f.id === farmId) || farmId === currentFarm?.id) return;
+    await apiRequest(`/api/farms/${farmId}/switch`, "POST", {});
+    await queryClient.resetQueries();
+    window.dispatchEvent(new CustomEvent('farm-switched', { detail: { farmId } }));
   };
 
   const addFarm = (farmData: Omit<Farm, 'id'>) => {
@@ -127,10 +121,12 @@ export function FarmProvider({ children }: { children: ReactNode }) {
     if (farms.length <= 1) {
       return; // Don't allow removing the last farm
     }
-    archiveMutation.mutate(id);
-    if (currentFarmId === id) {
-      setCurrentFarmId(farms.find(f => f.id !== id)?.id || null);
-    }
+    archiveMutation.mutate(id, {
+      onSuccess: () => {
+        const next = farms.find(f => f.id !== id);
+        if (currentFarm?.id === id && next) switchFarm(next.id);
+      },
+    });
   };
 
   const value: FarmContextType = {

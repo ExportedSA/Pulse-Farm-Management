@@ -226,6 +226,7 @@ export default function Home() {
       const tempCondition: Condition = {
         ...condition,
         id: uid(),
+        farmId: null,
         createdAt: new Date(new Date().toISOString()) as any,
         updatedAt: new Date(new Date().toISOString()) as any,
         requiresBodyPart: condition.requiresBodyPart ?? null,

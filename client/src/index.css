@@ -427,3 +427,41 @@
 .leaflet-tooltip.paddock-label::before {
   display: none;
 }
+
+/* Points of interest and hazard points on the farm map: a round badge with a short mark */
+.map-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 9999px;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font: 700 10px/1 system-ui, sans-serif;
+  letter-spacing: -0.02em;
+}
+.map-mark.hazard {
+  border-radius: 4px;
+  transform: rotate(45deg);
+}
+.map-mark.hazard > span {
+  transform: rotate(-45deg);
+}
+.map-mark.selected {
+  border-color: #ffd43b;
+  box-shadow: 0 0 0 3px #ffd43b;
+}
+.leaflet-tooltip.mark-label {
+  background: rgba(255, 255, 255, 0.92);
+  border: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  color: #111;
+  font-weight: 600;
+  font-size: 11px;
+  padding: 1px 5px;
+}
+.leaflet-tooltip.mark-label::before {
+  display: none;
+}

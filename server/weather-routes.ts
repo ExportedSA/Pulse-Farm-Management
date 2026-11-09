@@ -48,6 +48,9 @@ const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
 
 interface WeatherData {
   location: string;
+  // Where the forecast is for
+  lat?: number;
+  lon?: number;
   temperature: number;
   humidity: number;
   windSpeed: number;
@@ -217,7 +220,7 @@ async function farmWeather(req: any, location = 'Farm'): Promise<WeatherData> {
   const yrData = await fetchYrWeather(lat, lon);
   const weather = yrData && parseYrWeather(yrData, location);
   if (!weather) throw new WeatherUnavailable(503, 'Weather is unavailable right now: the Yr.no forecast could not be reached');
-  return weather;
+  return Object.assign(weather, { lat, lon });
 }
 
 function sendWeatherError(res: any, error: unknown, message: string) {
@@ -302,6 +305,8 @@ router.get('/agricultural/:location', async (req, res) => {
     
     res.json({
       location,
+      lat: weatherData.lat,
+      lon: weatherData.lon,
       current: {
         temperature: weatherData.temperature,
         humidity: weatherData.humidity,

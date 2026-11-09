@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import { excelService } from '../services/excel-service';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, getFarmId } from '../middleware/auth';
 import { db } from '../db';
 import { 
   animals, 
@@ -18,6 +18,14 @@ import {
 import { eq, and, gte, lte, sql, desc, count, sum, inArray } from 'drizzle-orm';
 import logger from '../config/logger';
 
+// Reports carry the name of the farm they're for (never one sent by the browser)
+async function farmNameOf(req: Request): Promise<string> {
+  const farmId = getFarmId(req);
+  if (!farmId) return 'Farm';
+  const [row] = ((await db.execute(sql`SELECT name FROM farms WHERE id = ${farmId}`)) as any).rows ?? [];
+  return row?.name ?? 'Farm';
+}
+
 const router = Router();
 
 // Extend jsPDF type for autoTable
@@ -31,7 +39,8 @@ declare module 'jspdf' {
 // Generate PDF report
 router.post('/api/reports/generate-pdf', async (req: Request, res: Response) => {
   try {
-    const { reportType, dateRange, sections, farmName = 'Demo Farm' } = req.body;
+    const { reportType, dateRange, sections } = req.body;
+    const farmName = await farmNameOf(req);
     
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -159,7 +168,8 @@ router.get('/api/reports/download/:reportType', async (req: Request, res: Respon
 // Generate Excel report
 router.post('/api/reports/generate-excel', async (req: Request, res: Response) => {
   try {
-    const { reportType, dateRange, farmName = 'Demo Farm' } = req.body;
+    const { reportType, dateRange } = req.body;
+    const farmName = await farmNameOf(req);
     
     let workbook;
     
@@ -268,6 +278,7 @@ router.post('/api/reports/generate-excel', async (req: Request, res: Response) =
 router.get('/api/reports/download-excel/:reportType', async (req: Request, res: Response) => {
   try {
     const { reportType } = req.params;
+    const farmName = await farmNameOf(req);
     
     // Generate a simple workbook for direct download
     const workbook = excelService.generateWorkbook({
@@ -283,7 +294,7 @@ router.get('/api/reports/download-excel/:reportType', async (req: Request, res: 
         data: [
           { metric: 'Report Type', value: reportType },
           { metric: 'Generated Date', value: new Date().toLocaleDateString('en-NZ') },
-          { metric: 'Farm', value: 'Demo Farm' },
+          { metric: 'Farm', value: farmName },
         ],
       }],
     });

@@ -1,6 +1,9 @@
 import { runComplianceChecks, getComplianceSummary } from './domain/complianceChecks';
 import logger from './config/logger';
 import { runJobReminders } from './domain/job-reminders';
+import { systemDb, withFarmDb } from './db';
+import { farms } from '@shared/schema';
+import { eq } from 'drizzle-orm';
 
 // Schedule intervals (in milliseconds)
 const ONE_HOUR = 60 * 60 * 1000;
@@ -26,9 +29,17 @@ async function executeComplianceChecks(): Promise<void> {
 
   try {
     logger.info('Starting scheduled compliance checks');
-    
-    const result = await runComplianceChecks();
-    
+
+    // One farm at a time, each limited to its own rows
+    const farmIds = (await systemDb.select({ id: farms.id }).from(farms).where(eq(farms.isActive, true))).map(f => f.id);
+    const runs = [];
+    for (const farmId of farmIds) runs.push(await withFarmDb(farmId, () => runComplianceChecks(farmId)));
+    const result = {
+      totalTasksCreated: runs.reduce((n, r) => n + r.totalTasksCreated, 0),
+      checks: runs.flatMap(r => r.checks),
+      success: runs.every(r => r.success),
+    };
+
     const duration = Date.now() - startTime;
     logger.info({
       duration: `${duration}ms`,

@@ -7,8 +7,8 @@ import { areaHectares, pointsToPolygon, type AreaGeometry, type Position } from 
 
 export const SATELLITE_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 export const SATELLITE_ATTRIBUTION = "Imagery © Esri";
-// Waikato, used until the farm has mapped records or the device shares its location
-export const DEFAULT_CENTER: [number, number] = [-37.787, 175.279];
+// The middle of New Zealand, used until the farm has mapped records or the device shares its location
+export const DEFAULT_CENTER: [number, number] = [-41.0, 174.0];
 
 interface AreaDrawerProps {
   value: AreaGeometry | null;

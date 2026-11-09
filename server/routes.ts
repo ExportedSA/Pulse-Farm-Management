@@ -1,7 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { pool } from "./db";
+import { pool, farmDbContext } from "./db";
 import passport from "passport";
 import { sanitizeUser, sanitizeUsers } from "./auth-utils";
 import { requireAuth, optionalAuth, getFarmId, getUserId } from "./middleware/auth";
@@ -99,6 +99,26 @@ import {
   insertAlertSchema,
 } from "@shared/schema";
 
+// API paths open without signing in: signing in, health checks, and a visitor signing in at
+// the farm gate by QR code
+const PUBLIC_API = [/^\/auth(\/|$)/, /^\/health(\/db)?$/, /^\/visitor\/(qr|signin|signout)\//];
+
+// The farm a request works in: the one in the user's token, while they're still an active
+// member of it. Checked at most once a minute per user and farm.
+const membership = new Map<string, { ok: boolean; at: number }>();
+async function memberFarm(req: Request): Promise<string | null> {
+  const farmId = getFarmId(req);
+  const userId = getUserId(req);
+  if (!farmId || !userId) return null;
+  const key = `${userId}:${farmId}`;
+  const cached = membership.get(key);
+  if (cached && Date.now() - cached.at < 60_000) return cached.ok ? farmId : null;
+  const { rowCount } = await pool.query(
+    "SELECT 1 FROM farm_members WHERE farm_id = $1 AND user_id = $2 AND is_active", [farmId, userId]);
+  membership.set(key, { ok: !!rowCount, at: Date.now() });
+  return rowCount ? farmId : null;
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize Sentry for error tracking
   initSentry();
@@ -131,10 +151,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ===== STATIC FILE SERVING (Local only, disabled when S3 is configured) =====
   // Signed-in members only: a farm's files are for that farm
-  app.use("/uploads", optionalAuth, uploadsGuard, uploadsMiddleware);
+  app.use("/uploads", optionalAuth, farmDbContext(memberFarm), uploadsGuard, uploadsMiddleware);
 
   // Contractors reach only the jobs shared with them (checked before every other API route)
   app.use("/api", optionalAuth, contractorGuard);
+
+  // Everything else under /api needs a signed-in user, and runs on a connection limited to
+  // the user's farm (row-level security), so no route can read or change another farm's rows
+  app.use("/api", (req, res, next) => PUBLIC_API.some(p => p.test(req.path)) ? next() : requireAuth(req as any, res, next));
+  app.use("/api", farmDbContext(memberFarm));
 
   // ===== PHASE 4: ANIMAL GROUPS =====
   app.use("/api/groups", requireAuth, groupsRouter);
@@ -350,9 +375,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ===== USERS (Protected) =====
   
-  app.get("/api/users", requireAuth, async (req, res) => {
+  // People are listed and managed per farm: a farm sees and changes only its own members
+  const farmMemberIds = async (farmId: string) =>
+    new Set((await pool.query("SELECT user_id FROM farm_members WHERE farm_id = $1 AND is_active", [farmId])).rows.map((r: any) => r.user_id as string));
+  const canManagePeople = async (req: Request) => {
+    const role = await getFarmRole(getUserId(req)!, getFarmId(req)!);
+    return role === "owner" || role === "manager";
+  };
+
+  app.get("/api/users", async (req, res) => {
     try {
-      const users = await storage.getUsers();
+      const farmId = getFarmId(req);
+      if (!farmId) return res.json([]);
+      const members = await farmMemberIds(farmId);
+      const users = (await storage.getUsers()).filter(u => members.has(u.id));
       res.json(sanitizeUsers(users));
     } catch (error) {
       console.error("Failed to fetch users:", error);
@@ -360,8 +396,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/users/:id", requireAuth, async (req, res) => {
+  app.get("/api/users/:id", async (req, res) => {
     try {
+      const farmId = getFarmId(req);
+      if (!farmId || !(await farmMemberIds(farmId)).has(req.params.id)) {
+        return res.status(404).json({ error: "User not found" });
+      }
       const user = await storage.getUser(req.params.id);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
@@ -373,12 +413,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/users", requireAuth, async (req, res) => {
+  // A new person is created as a member of the current farm
+  app.post("/api/users", async (req, res) => {
     try {
+      const farmId = getFarmId(req);
+      if (!farmId || !(await canManagePeople(req))) {
+        return res.status(403).json({ error: "Only the farm's owner or a manager can add people" });
+      }
       const data = insertUserSchema.parse(req.body);
       const user = await storage.createUser(data);
+      const role = ["manager", "worker", "viewer", "contractor"].includes((data as any).role) ? (data as any).role : "worker";
+      await pool.query("INSERT INTO farm_members (farm_id, user_id, role) VALUES ($1, $2, $3)", [farmId, user.id, role]);
       storage.createActivityLog({
-        userId: (req.user as any)?.id ?? null,
+        userId: getUserId(req) ?? null,
         userName: (req.user as any)?.name || (req.user as any)?.email || "System",
         action: "create",
         resourceType: "user",
@@ -401,13 +448,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.put("/api/users/:id", async (req, res) => {
     try {
+      const farmId = getFarmId(req);
+      const self = req.params.id === getUserId(req);
+      if (!farmId || !(await farmMemberIds(farmId)).has(req.params.id)) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      if (!self && !(await canManagePeople(req))) {
+        return res.status(403).json({ error: "Only the farm's owner or a manager can change other people" });
+      }
       const data = insertUserSchema.partial().parse(req.body);
       const user = await storage.updateUser(req.params.id, data);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
       storage.createActivityLog({
-        userId: (req.user as any)?.id ?? null,
+        userId: getUserId(req) ?? null,
         userName: (req.user as any)?.name || (req.user as any)?.email || "System",
         action: "update",
         resourceType: "user",
@@ -428,20 +483,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Removing someone takes them off this farm; their account and any other farms stay
   app.delete("/api/users/:id", async (req, res) => {
     try {
-      const existing = await storage.getUser(req.params.id);
-      if (!existing) {
+      const farmId = getFarmId(req);
+      if (!farmId || !(await farmMemberIds(farmId)).has(req.params.id)) {
         return res.status(404).json({ error: "User not found" });
       }
-      await storage.deleteUser(req.params.id);
+      if (!(await canManagePeople(req))) {
+        return res.status(403).json({ error: "Only the farm's owner or a manager can remove people" });
+      }
+      if (req.params.id === getUserId(req)) {
+        return res.status(400).json({ error: "You can't remove yourself from the farm" });
+      }
+      const existing = await storage.getUser(req.params.id);
+      await pool.query("UPDATE farm_members SET is_active = false WHERE farm_id = $1 AND user_id = $2", [farmId, req.params.id]);
       storage.createActivityLog({
-        userId: (req.user as any)?.id ?? null,
+        userId: getUserId(req) ?? null,
         userName: (req.user as any)?.name || (req.user as any)?.email || "System",
         action: "delete",
         resourceType: "user",
-        resourceId: existing.id,
-        details: { name: existing.name, email: existing.email, role: (existing as any).role },
+        resourceId: req.params.id,
+        details: { name: existing?.name, email: existing?.email, removedFromFarm: farmId },
         ipAddress: req.ip,
         userAgent: req.get("user-agent") || null,
       }).catch((err: any) => {
@@ -1171,8 +1234,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ===== USER PREFERENCES (Phase 6A) =====
 
+  // Each person reads and saves only their own preferences
   app.get("/api/user-preferences/:userId", async (req, res) => {
     try {
+      if (req.params.userId !== getUserId(req)) return res.status(404).json({ error: "Preferences not found" });
       const preferences = await storage.getUserPreferences(req.params.userId);
       if (!preferences) {
         return res.status(404).json({ error: "Preferences not found" });
@@ -1186,7 +1251,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/user-preferences", async (req, res) => {
     try {
-      const preferences = await storage.upsertUserPreferences(req.body);
+      const preferences = await storage.upsertUserPreferences({ ...req.body, userId: getUserId(req)! });
       res.json(preferences);
     } catch (error: any) {
       console.error("Failed to save user preferences:", error);
@@ -1621,9 +1686,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       userId: (req as any).user?.id,
     });
     
+    // The database refused a row from, or a link to, another farm (row-level security / farm guard)
+    const code = (err as any)?.code;
+    if (code === 'P0403' || code === '42501') {
+      return res.status(403).json({ error: 'That belongs to another farm' });
+    }
+
     // Don't expose error details in production
     const isDevelopment = process.env.NODE_ENV !== 'production';
-    
+
     res.status(500).json({
       error: isDevelopment ? err.message : 'Internal Server Error',
       ...(isDevelopment && { stack: err.stack }),

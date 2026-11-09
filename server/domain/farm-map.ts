@@ -30,6 +30,10 @@ export const DEFAULT_LAYERS: { key: string; name: string; color: string; fillOpa
   { key: 'topping', name: 'Topping', color: '#1971c2', fillOpacity: 0.3 },
   { key: 'mowing', name: 'Mowing', color: '#0c8599', fillOpacity: 0.3 },
   { key: 'features', name: 'Farm features', color: '#ffd43b', fillOpacity: 0.2 },
+  // Health & safety: hazards come from the hazard register (drawn where they are); points of
+  // interest are features on their own layer (first aid, assembly point, fuel store, ...)
+  { key: 'hazards', name: 'Hazards', color: '#e03131', fillOpacity: 0.25 },
+  { key: 'poi', name: 'Points of interest', color: '#1971c2', fillOpacity: 0.2 },
 ];
 
 export const rowsOf = (r: any) => (r?.rows ?? r) as any[];
@@ -148,7 +152,13 @@ export async function mapState(farmId: string) {
   const views = rowsOf(await db.execute(sql`
     SELECT id, name, center_lat::float AS lat, center_lng::float AS lng, zoom::float, basemap, layers, created_at AS "createdAt"
     FROM map_views WHERE farm_id = ${farmId} ORDER BY name`));
-  return { layers, paddocks, features, views };
+  // Hazards that aren't resolved, with where they are (those not yet mapped have no geometry)
+  const hazards = rowsOf(await db.execute(sql`
+    SELECT id, title, type, risk_level AS "riskLevel", status, location, mitigation_description AS controls,
+           next_inspection_date AS "reviewDue", radius_m::float AS "radiusM", ST_AsGeoJSON(geom, 7)::json AS geometry
+    FROM farm_hazards WHERE farm_id = ${farmId} AND status <> 'resolved'
+    ORDER BY risk_level DESC NULLS LAST, title`)).map(h => ({ ...h, reviewDue: h.reviewDue ? String(h.reviewDue).slice(0, 10) : null }));
+  return { layers, paddocks, features, views, hazards };
 }
 
 /**

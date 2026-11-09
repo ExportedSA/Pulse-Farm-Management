@@ -7,11 +7,12 @@ import {
   chatMessages, 
   chatMessageReads, 
   chatMessagePins,
-  users 
+  users,
+  farmMembers
 } from '@shared/schema';
 import { eq, and, desc, like, or, sql, ne, isNull } from 'drizzle-orm';
 import { chatWebSocket } from '../websocket';
-import { getUserId } from '../middleware/auth';
+import { getUserId, getFarmId } from '../middleware/auth';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -719,6 +720,8 @@ router.get('/users/search', async (req, res) => {
         role: users.role,
       })
       .from(users)
+      // People on this farm only
+      .innerJoin(farmMembers, and(eq(farmMembers.userId, users.id), eq(farmMembers.farmId, getFarmId(req)!), eq(farmMembers.isActive, true)))
       .where(
         and(
           eq(users.isActive, true),

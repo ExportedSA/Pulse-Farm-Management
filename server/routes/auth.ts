@@ -6,7 +6,7 @@ import { eq } from 'drizzle-orm';
 import { hashPassword } from '../password';
 import { generateToken, generateRefreshToken, verifyToken, requireAuth, AUTH_COOKIE, authCookieOptions, type AuthenticatedRequest } from '../middleware/auth';
 import { sanitizeUser } from '../auth-utils';
-import { getUserFarm } from '../domain/farms';
+import { getUserFarm, getFarmRole } from '../domain/farms';
 
 const router = Router();
 
@@ -207,8 +207,10 @@ router.post('/refresh', async (req, res) => {
       });
     }
 
-    // The user's default farm (first active membership)
-    const userFarm = await getUserFarm(user.id);
+    // Stay on the farm the token was for while the user is still a member of it, otherwise
+    // their default farm (first active membership)
+    const keepFarm = payload.farmId && (await getFarmRole(user.id, payload.farmId)) ? { id: payload.farmId } : undefined;
+    const userFarm = keepFarm ?? await getUserFarm(user.id);
 
     // Generate new tokens
     const tokenPayload = {

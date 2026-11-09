@@ -1,14 +1,21 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db";
-import { farmHazards, safetyIncidents } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { safetyIncidents } from "@shared/schema";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { requireAuth, requireFarm, getUserId, getFarmId } from "../middleware/auth";
 import { getFarmRole } from "../domain/farms";
 import { triggerComplianceChecks, getComplianceStatus } from "../scheduler";
 import { seasonOf } from "../domain/season";
 import { complianceReadiness, auditPack, toCsv, PACK_SECTIONS } from "../domain/compliance-pack";
 import logger from "../config/logger";
+import { uploadAttachments } from "../middleware/upload";
+import { saveAttachments, toApiAttachment } from "../domain/attachments";
+import { MapError } from "../domain/farm-map";
+import {
+  DOCUMENT_KEYS, HAZARD_KEYS, STATUS_KEYS, createDocument, createHazard, documentExists, getHazard, listDocuments, listHazards,
+  updateDocument, updateHazard, type HazardInput,
+} from "../domain/safety";
 
 const router = Router();
 router.use(requireAuth, requireFarm);
@@ -33,79 +40,158 @@ function validationError(res: any, error: unknown) {
 // HAZARDS
 // ============================================
 
-// Get the farm's hazards
+const hazardInput = z.object({
+  title: z.string().trim().min(1).max(255),
+  type: z.enum(HAZARD_KEYS),
+  description: z.string().max(4000).nullish(),
+  riskLevel: z.coerce.number().int().min(1).max(5),
+  controls: z.string().max(4000).nullish(),
+  location: z.string().max(255).nullish(),
+  status: z.enum(STATUS_KEYS).optional(),
+  reviewDue: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  assignedTo: z.string().uuid().nullish(),
+  geometry: z.object({ type: z.string(), coordinates: z.any() }).nullish(),
+  radiusM: z.coerce.number().positive().max(100000).nullish(),
+});
+
+const roleOf = (req: any) => getFarmRole(getUserId(req)!, getFarmId(req)!);
+// Anyone working on the farm can report a hazard; owners and managers keep the register
+const canReport = (role?: string) => role === 'owner' || role === 'manager' || role === 'worker';
+const canManage = (role?: string) => role === 'owner' || role === 'manager';
+
+function safetyError(res: any, error: unknown, message: string) {
+  if (validationError(res, error)) return;
+  if (error instanceof MapError) return res.status(error.status).json({ error: error.message });
+  console.error(message, error);
+  res.status(500).json({ error: message });
+}
+
+function withUploads(req: any, res: any, next: any) {
+  uploadAttachments(req, res, (err: any) => (err ? res.status(400).json({ error: err.message }) : next()));
+}
+
+// The hazard register: active and monitored hazards, or ?all=1 for resolved ones too
 router.get("/hazards", async (req, res) => {
   try {
-    const hazards = await db.select()
-      .from(farmHazards)
-      .where(eq(farmHazards.farmId, getFarmId(req)!))
-      .orderBy(desc(farmHazards.createdAt));
-
-    res.json(hazards);
+    res.json(await listHazards(getFarmId(req)!, { includeResolved: req.query.all === '1' }));
   } catch (error) {
-    console.error("Failed to fetch hazards:", error);
-    res.status(500).json({ error: "Failed to fetch hazards" });
+    safetyError(res, error, "Failed to fetch hazards");
   }
 });
 
-// Create new hazard
+router.get("/hazards/:id", async (req, res) => {
+  try {
+    const hazard = await getHazard(getFarmId(req)!, req.params.id);
+    if (!hazard) return res.status(404).json({ error: "Hazard not found" });
+    res.json(hazard);
+  } catch (error) {
+    safetyError(res, error, "Failed to fetch hazard");
+  }
+});
+
+// Report a hazard, optionally drawn on the farm map
 router.post("/hazards", async (req, res) => {
   try {
-    const data = z.object({
-      title: z.string().min(1).max(255),
-      description: z.string().optional(),
-      type: z.string().min(1).max(50),
-      riskLevel: z.coerce.number().int().min(1).max(5).default(3),
-      severity: z.enum(["low", "medium", "high", "critical"]).optional(),
-      location: z.string().max(255).optional(),
-      latitude: z.coerce.number().optional(),
-      longitude: z.coerce.number().optional(),
-    }).parse(req.body);
-
-    const [hazard] = await db.insert(farmHazards).values({
-      farmId: getFarmId(req)!,
-      title: data.title,
-      description: data.description,
-      type: data.type,
-      severity: data.severity ?? (data.riskLevel <= 2 ? 'low' : data.riskLevel <= 3 ? 'medium' : 'high'),
-      riskLevel: data.riskLevel,
-      location: data.location,
-      latitude: data.latitude?.toString(),
-      longitude: data.longitude?.toString(),
-      status: 'active',
-      mitigationRequired: data.riskLevel > 2,
-      reportedBy: getUserId(req)!,
-    }).returning();
-
-    res.status(201).json(hazard);
+    if (!canReport(await roleOf(req))) return res.status(403).json({ error: "Viewers and contractors can't add hazards. Tell the farm about it." });
+    const data = hazardInput.parse(req.body);
+    res.status(201).json(await createHazard(getFarmId(req)!, getUserId(req)!, data as HazardInput));
   } catch (error) {
-    if (validationError(res, error)) return;
-    console.error("Failed to create hazard:", error);
-    res.status(500).json({ error: "Failed to create hazard" });
+    safetyError(res, error, "Failed to create hazard");
   }
 });
 
-// Resolve hazard
+// Change a hazard: its details, controls, status, review date or where it is on the map
+router.patch("/hazards/:id", async (req, res) => {
+  try {
+    if (!canManage(await roleOf(req))) return res.status(403).json({ error: "Only owners and managers can change the hazard register" });
+    await updateHazard(getFarmId(req)!, getUserId(req)!, req.params.id, hazardInput.partial().parse(req.body) as Partial<HazardInput>);
+    res.json(await getHazard(getFarmId(req)!, req.params.id));
+  } catch (error) {
+    safetyError(res, error, "Failed to update hazard");
+  }
+});
+
 router.post("/hazards/:id/resolve", async (req, res) => {
   try {
-    const [resolvedHazard] = await db.update(farmHazards)
-      .set({
-        status: 'resolved',
-        resolvedBy: getUserId(req)!,
-        resolvedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(and(eq(farmHazards.id, req.params.id), eq(farmHazards.farmId, getFarmId(req)!)))
-      .returning();
-
-    if (!resolvedHazard) {
-      return res.status(404).json({ error: "Hazard not found" });
-    }
-
-    res.json(resolvedHazard);
+    if (!canManage(await roleOf(req))) return res.status(403).json({ error: "Only owners and managers can resolve hazards" });
+    await updateHazard(getFarmId(req)!, getUserId(req)!, req.params.id, { status: 'resolved' });
+    res.json(await getHazard(getFarmId(req)!, req.params.id));
   } catch (error) {
-    console.error("Failed to resolve hazard:", error);
-    res.status(500).json({ error: "Failed to resolve hazard" });
+    safetyError(res, error, "Failed to resolve hazard");
+  }
+});
+
+// Photos of a hazard
+router.post("/hazards/:id/photos", withUploads, async (req, res) => {
+  try {
+    if (!canReport(await roleOf(req))) return res.status(403).json({ error: "Viewers and contractors can't add photos here" });
+    const hazard = await getHazard(getFarmId(req)!, req.params.id);
+    if (!hazard) return res.status(404).json({ error: "Hazard not found" });
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    if (files.length === 0) return res.status(400).json({ error: "Attach at least one photo" });
+    const saved = await saveAttachments(getFarmId(req)!, 'hazard', hazard.id, files, getUserId(req)!);
+    res.status(201).json(saved.map(toApiAttachment));
+  } catch (error) {
+    safetyError(res, error, "Failed to add photos");
+  }
+});
+
+// ============================================
+// SAFETY DOCUMENTS
+// ============================================
+
+const documentInput = z.object({
+  title: z.string().trim().min(1).max(200),
+  docType: z.enum(DOCUMENT_KEYS),
+  reviewDue: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  notes: z.string().max(4000).nullish(),
+});
+
+// The fields come as JSON in "data" when files are sent with them
+const bodyOf = (req: any) => (typeof req.body?.data === 'string' ? JSON.parse(req.body.data) : req.body);
+
+router.get("/documents", async (req, res) => {
+  try {
+    res.json(await listDocuments(getFarmId(req)!, { includeArchived: req.query.all === '1' }));
+  } catch (error) {
+    safetyError(res, error, "Failed to fetch documents");
+  }
+});
+
+router.post("/documents", withUploads, async (req, res) => {
+  try {
+    if (!canManage(await roleOf(req))) return res.status(403).json({ error: "Only owners and managers can add safety documents" });
+    const farmId = getFarmId(req)!;
+    const created = await createDocument(farmId, getUserId(req)!, documentInput.parse(bodyOf(req)));
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    if (files.length) await saveAttachments(farmId, 'safety_document', created.id, files, getUserId(req)!);
+    res.status(201).json(created);
+  } catch (error) {
+    safetyError(res, error, "Failed to add document");
+  }
+});
+
+router.patch("/documents/:id", async (req, res) => {
+  try {
+    if (!canManage(await roleOf(req))) return res.status(403).json({ error: "Only owners and managers can change safety documents" });
+    await updateDocument(getFarmId(req)!, req.params.id, documentInput.partial().extend({ archived: z.boolean().optional() }).parse(req.body));
+    res.json({ ok: true });
+  } catch (error) {
+    safetyError(res, error, "Failed to update document");
+  }
+});
+
+router.post("/documents/:id/files", withUploads, async (req, res) => {
+  try {
+    if (!canManage(await roleOf(req))) return res.status(403).json({ error: "Only owners and managers can add files" });
+    const farmId = getFarmId(req)!;
+    if (!(await documentExists(farmId, req.params.id))) return res.status(404).json({ error: "Document not found" });
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    if (files.length === 0) return res.status(400).json({ error: "Attach at least one file" });
+    const saved = await saveAttachments(farmId, 'safety_document', req.params.id, files, getUserId(req)!);
+    res.status(201).json(saved.map(toApiAttachment));
+  } catch (error) {
+    safetyError(res, error, "Failed to add files");
   }
 });
 
@@ -138,13 +224,20 @@ router.post("/incidents", async (req, res) => {
       severity: z.enum(["minor", "moderate", "major", "critical"]),
       occurredAt: z.coerce.date().refine(d => d <= new Date(), "Can't be in the future"),
       location: z.string().max(255).optional(),
+      latitude: z.coerce.number().min(-90).max(90).optional(),
+      longitude: z.coerce.number().min(-180).max(180).optional(),
     }).parse(req.body);
+    const { latitude, longitude, ...fields } = data;
 
     const [incident] = await db.insert(safetyIncidents).values({
-      ...data,
+      ...fields,
       farmId: getFarmId(req)!,
       reportedBy: getUserId(req)!,
     }).returning();
+    // Where it happened, when it was marked on the map
+    if (latitude != null && longitude != null) {
+      await db.execute(sql`UPDATE safety_incidents SET geom = ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)::geography WHERE id = ${incident.id}`);
+    }
     res.status(201).json(incident);
   } catch (error) {
     if (validationError(res, error)) return;

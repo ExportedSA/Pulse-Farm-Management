@@ -3,8 +3,8 @@ import { Link } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as turf from "@turf/turf";
 import {
-  ArrowDown, ArrowUp, Circle as CircleIcon, CloudOff, Download, Eye, EyeOff, Layers, Lock, MapPin, Merge, Minus, Pencil, Plus,
-  Redo2, Ruler, Save, Scissors, Search, Spline, Square, Trash2, Undo2, Unlock, Upload, X,
+  AlertTriangle, ArrowDown, ArrowUp, Circle as CircleIcon, CloudOff, Download, Eye, EyeOff, Layers, Lock, MapPin, Merge, Minus, Pencil, Plus,
+  Redo2, Ruler, Save, Scissors, Search, Spline, Square, Tag, Trash2, Undo2, Unlock, Upload, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,8 @@ import { JobsSection, NewJobForm, jobOverlays, JOBS_KEY, type JobDraft } from "@
 import { JobPanel, NewSprayForm, RestrictionWarning, restrictionOverlays } from "@/components/farm-map/SprayPanels";
 import { NewWorkForm, footprintOverlays, runPreview } from "@/components/farm-map/WorkPanels";
 import { useApplicationOutbox } from "@/lib/application-outbox";
+import { HazardForm, HazardPanel, HazardsSection, hazardOverlays } from "@/components/farm-map/SafetyPanels";
+import { POI_TYPES, poiType, safety } from "@/lib/safety";
 import { ACTIVITY_LABELS, WORK_ACTIVITIES, jobsApi, type Activity, type Job, type JobSummary } from "@/lib/jobs";
 
 const DRAFT_KEY = "pulse-farm-map-draft";
@@ -40,7 +42,7 @@ const PREFS_KEY = "pulse-farm-map-prefs";
 
 // forPaddockId: the outline for a paddock that has none yet
 // layerKey: the layer the drawing tool was opened for (farm boundary, fence lines)
-type Pending = Drawn & { target: "paddock" | "feature"; forPaddockId?: string; layerKey?: string };
+type Pending = Drawn & { target: "paddock" | "feature" | "hazard"; forPaddockId?: string; layerKey?: string };
 interface EditSession { target: Selection; original: GeoJSON.Geometry; originalRadius: number | null; history: { g: GeoJSON.Geometry; r: number | null }[]; index: number }
 type SaveState = "saved" | "unsaved" | "saving" | "offline";
 
@@ -66,10 +68,11 @@ export default function FarmMapPage() {
   // Contractors record the work on jobs shared with them; only farm staff start jobs
   const canCreate = canRecord && currentFarm?.role !== "contractor";
   const isContractor = currentFarm?.role === "contractor";
+  const canReportHazard = canEdit || currentFarm?.role === "worker";
   const { data: state, isLoading, error } = useQuery({ queryKey: FARM_MAP_KEY, queryFn: farmMap.state });
 
   // Per-person settings kept on this device: basemap and which layers are shown
-  const prefs = useMemo(() => readJson<{ basemap?: string; visible?: Record<string, boolean> }>(`${PREFS_KEY}:${currentFarm?.id}`) ?? {}, [currentFarm?.id]);
+  const prefs = useMemo(() => readJson<{ basemap?: string; visible?: Record<string, boolean>; labels?: boolean }>(`${PREFS_KEY}:${currentFarm?.id}`) ?? {}, [currentFarm?.id]);
   // Everyone starts on the farm's best imagery (Google satellite when set up); a choice made on this device is kept
   const [basemap, setBasemap] = useState(() => (prefs.basemap && BASEMAPS.find(b => b.key === prefs.basemap)?.available ? prefs.basemap : defaultBasemap()));
   const [visible, setVisible] = useState<Record<string, boolean>>(prefs.visible ?? {});
@@ -77,7 +80,9 @@ export default function FarmMapPage() {
     if (!state) return;
     setVisible(v => Object.fromEntries(state.layers.map(l => [l.id, v[l.id] ?? l.visible])));
   }, [state]);
-  useEffect(() => { writeJson(`${PREFS_KEY}:${currentFarm?.id}`, { basemap, visible }); }, [basemap, visible, currentFarm?.id]);
+  // Names on points of interest and hazards
+  const [showLabels, setShowLabels] = useState(prefs.labels ?? true);
+  useEffect(() => { writeJson(`${PREFS_KEY}:${currentFarm?.id}`, { basemap, visible, labels: showLabels }); }, [basemap, visible, showLabels, currentFarm?.id]);
 
   const [season, setSeason] = useState(currentSeason);
   const [range, setRange] = useState(() => seasonRange(currentSeason()));
@@ -95,7 +100,7 @@ export default function FarmMapPage() {
   const [saveState, setSaveState] = useState<SaveState>(navigator.onLine ? "saved" : "offline");
   const [search, setSearch] = useState("");
   const [panel, setPanel] = useState<"left" | "right" | null>(null);
-  const [drawTarget, setDrawTarget] = useState<"paddock" | "feature" | "exclusion" | "zone" | "job" | "run">("paddock");
+  const [drawTarget, setDrawTarget] = useState<"paddock" | "feature" | "exclusion" | "zone" | "job" | "run" | "hazard">("paddock");
   // Exclusions and rate plans
   const [exclusionStart, setExclusionStart] = useState(false);
   const [exclusionDraft, setExclusionDraft] = useState<ExclusionDraft | null>(null);
@@ -163,7 +168,7 @@ export default function FarmMapPage() {
   // Exclusions (on their layer), the open plan's zones, gaps and overlaps, and the exclusion being set up
   const overlays = useMemo<Overlay[]>(() => {
     if (!state) return [];
-    const out = [...exclusionOverlays(state), ...planOverlays(openPlan), ...(jobDraft ? [] : jobOverlays(jobs, state.layers)), ...restrictionOverlays(jobs, state.layers), ...footprintOverlays(openJob), ...runPreview(jobDraft),
+    const out = [...hazardOverlays(state), ...exclusionOverlays(state), ...planOverlays(openPlan), ...(jobDraft ? [] : jobOverlays(jobs, state.layers)), ...restrictionOverlays(jobs, state.layers), ...footprintOverlays(openJob), ...runPreview(jobDraft),
       ...(openJob?.gps ? [{ key: "gps", geometry: openJob.gps.geometry, rank: 7, label: "GPS evidence", style: { color: "#111111", weight: 3, fillColor: "#111111", fillOpacity: 0.15 } }] : [])];
     for (const l of jobDraft?.lines ?? []) {
       const g = l.geometry ?? state.paddocks.find(p => p.id === l.pastureId)?.geometry;
@@ -173,6 +178,22 @@ export default function FarmMapPage() {
     if (draftShape) out.push({ key: "preview", geometry: draftShape, rank: 9, style: { color: "#e03131", weight: 2, dashArray: "6 4", fillColor: "#e03131", fillOpacity: 0.3 } });
     return out;
   }, [state, openPlan, exclusionDraft, preview, jobs, jobDraft, openJob]);
+
+  // A link from the hazard register opens that hazard (?hazard=<id>), or starts placing it (&place=1)
+  const linked = useRef(false);
+  useEffect(() => {
+    if (!state || linked.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("hazard");
+    const h = id ? state.hazards?.find(x => x.id === id) : undefined;
+    if (!h) return;
+    linked.current = true;
+    framed.current = true;
+    setSelection({ type: "hazard", id: h.id });
+    setPanel("right");
+    if (h.geometry) setFocus({ rev: Date.now(), bounds: turf.bbox(h.geometry.type === "Point" ? turf.buffer(turf.point((h.geometry as GeoJSON.Point).coordinates), 0.15) as any : h.geometry) as [number, number, number, number] });
+    else if (params.get("place") === "1") startDraw("hazard", "Marker", h.id);
+  }, [state]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Frame the farm the first time the map loads
   const framed = useRef(false);
@@ -206,6 +227,7 @@ export default function FarmMapPage() {
   const selectedPaddock = selection?.type === "paddock" ? state?.paddocks.find(p => p.id === selection.id) : undefined;
   const selectedFeature = selection?.type === "feature" ? state?.features.find(f => f.id === selection.id) : undefined;
   const selectedRecord = selection?.type === "record" ? records.find(r => r.id === selection.id) : undefined;
+  const selectedHazard = selection?.type === "hazard" ? state?.hazards?.find(h => h.id === selection.id) : undefined;
   const paddocksLocked = !!layerByKey("paddocks")?.locked;
 
   // ----- Tools -----
@@ -234,14 +256,15 @@ export default function FarmMapPage() {
   };
 
   const [drawLayerKey, setDrawLayerKey] = useState<string | undefined>();
-  const startDraw = (target: "paddock" | "feature" | "exclusion" | "zone" | "job" | "run", shape: DrawShape, forPaddockId?: string, layerKey?: string) => {
-    if (!canEdit && target !== "job" && target !== "run") return toast.error("Only owners and managers can change the farm map");
+  const startDraw = (target: "paddock" | "feature" | "exclusion" | "zone" | "job" | "run" | "hazard", shape: DrawShape, forPaddockId?: string, layerKey?: string) => {
+    if (target === "hazard" ? !canReportHazard : !canEdit && target !== "job" && target !== "run") return toast.error("Only owners and managers can change the farm map");
     if (target === "paddock" && paddocksLocked) return toast.error("The paddocks layer is locked. Unlock it in Layers first.");
     if (target !== "zone" && target !== "job" && target !== "run") cancelAll(); else { setMode({ kind: "view" }); setPending(null); setEdit(null); }
     setDrawTarget(target);
     setDrawFor(forPaddockId ?? null);
     setDrawLayerKey(layerKey);
     if (!forPaddockId && target !== "zone" && target !== "job" && target !== "run") setSelection(null);
+    if (target === "hazard" && forPaddockId) setSelection({ type: "hazard", id: forPaddockId });
     setMode({ kind: "draw", shape });
     setPanel("right");
   };
@@ -263,6 +286,17 @@ export default function FarmMapPage() {
       setJobDraft(d => d && ({ ...d, lines: [...d.lines, { key: crypto.randomUUID(), pastureId: pd?.id ?? null, geometry: shape.geometry, name: pd ? `${pd.name} (part)` : "Drawn area", rateUnit: "kg/ha" }] }));
       return;
     }
+    if (drawTarget === "hazard") {
+      // Placing a hazard already in the register, or drawing a new one to describe
+      if (drawFor) {
+        const id = drawFor;
+        const ok = await run(() => safety.updateHazard(id, { geometry: shape.geometry, radiusM: shape.kind === "circle" ? shape.radiusM ?? null : null }), "Hazard placed on the map");
+        if (ok) setSelection({ type: "hazard", id });
+        return;
+      }
+      setPending({ ...shape, target: "hazard" });
+      return;
+    }
     if (drawTarget === "exclusion") {
       setExclusionStart(false);
       setExclusionDraft({ sourceKind: shape.kind === "polygon" ? "area" : "around", geometry: shape.geometry });
@@ -281,8 +315,10 @@ export default function FarmMapPage() {
 
   const startEdit = (target: Selection) => {
     if (!state || !canEdit) return;
-    const geometry = target.type === "paddock" ? state.paddocks.find(p => p.id === target.id)?.geometry : state.features.find(f => f.id === target.id)?.geometry;
-    const radius = target.type === "feature" ? state.features.find(f => f.id === target.id)?.radiusM ?? null : null;
+    const geometry = target.type === "paddock" ? state.paddocks.find(p => p.id === target.id)?.geometry
+      : target.type === "hazard" ? state.hazards.find(h => h.id === target.id)?.geometry : state.features.find(f => f.id === target.id)?.geometry;
+    const radius = target.type === "feature" ? state.features.find(f => f.id === target.id)?.radiusM ?? null
+      : target.type === "hazard" ? state.hazards.find(h => h.id === target.id)?.radiusM ?? null : null;
     if (!geometry) return toast.error("This has no shape to edit yet");
     setEdit({ target, original: geometry, originalRadius: radius, history: [{ g: geometry, r: radius }], index: 0 });
     setMode({ kind: "edit", target });
@@ -325,6 +361,8 @@ export default function FarmMapPage() {
     const current = edit.history[edit.index];
     const ok = edit.target.type === "paddock"
       ? await run(() => farmMap.setBoundary(edit.target.id, { geometry: current.g, note: editNote || "Boundary edited" }), "Boundary saved. Earlier records keep the old one.")
+      : edit.target.type === "hazard"
+      ? await run(() => safety.updateHazard(edit.target.id, { geometry: current.g, radiusM: current.r }), "Hazard moved")
       : await run(() => farmMap.updateFeature(edit.target.id, { geometry: current.g, radiusM: current.r, version: state?.features.find(f => f.id === edit.target.id)?.version }), "Shape saved");
     if (ok !== undefined) {
       setEdit(null);
@@ -376,6 +414,8 @@ export default function FarmMapPage() {
         .map(p => ({ sel: { type: "paddock" as const, id: p.id }, label: `Paddock ${p.paddockNumber ?? ""} ${p.name}`, geometry: p.geometry })),
       ...state.features.filter(f => (f.name ?? "").toLowerCase().includes(q))
         .map(f => ({ sel: { type: "feature" as const, id: f.id }, label: `${f.name} · ${layers.find(l => l.id === f.layerId)?.name}`, geometry: f.geometry })),
+      ...(state.hazards ?? []).filter(h => h.title.toLowerCase().includes(q))
+        .map(h => ({ sel: { type: "hazard" as const, id: h.id }, label: `${h.title} · hazard`, geometry: h.geometry })),
       ...records.filter(r => `${r.properties.title} ${r.properties.label}`.toLowerCase().includes(q))
         .map(r => ({ sel: { type: "record" as const, id: r.id }, label: `${r.properties.title} · ${r.properties.occurredAt.slice(0, 10)}`, geometry: r.geometry })),
     ].slice(0, 12);
@@ -483,6 +523,7 @@ export default function FarmMapPage() {
             jobs={jobs} canRecord={canCreate}
             onOpenJob={id => { cancelAll(); setPlanId(null); setJobId(id); setSelection({ type: "job", id }); setPanel("right"); goTo(jobs.find(j => j.id === id)?.lines?.[0]?.geometry); }}
             onNewJob={activity => startJob({ activity, lines: [] })}
+            onSelectHazard={id => { const h = state.hazards.find(x => x.id === id); onPick({ type: "hazard", id }); if (h?.geometry) goTo(h.geometry); }}
           />
         </aside>
 
@@ -494,7 +535,7 @@ export default function FarmMapPage() {
             pending={pending}
             overlays={overlays}
             editRadius={edit ? edit.history[edit.index].r : null}
-            editRevision={editRevision} focus={focus}
+            editRevision={editRevision} focus={focus} showLabels={showLabels}
             onPick={onPick} onDrawn={onDrawn} onEditChange={onEditChange} onMeasure={setMeasure}
             onSplitLine={onSplitLine} onMove={setMapView} onAttribution={setAttribution}
           />
@@ -506,9 +547,14 @@ export default function FarmMapPage() {
                 <Button size="sm" variant={mode.kind === "draw" && drawTarget === "paddock" ? "default" : "ghost"} onClick={() => startDraw("paddock", "Polygon")} title="Draw a paddock"><Square className="h-4 w-4 mr-1" />Paddock</Button>
                 <Button size="sm" variant={mode.kind === "draw" && drawLayerKey === "boundary" ? "default" : "ghost"} onClick={() => startDraw("feature", "Polygon", undefined, "boundary")} title="Draw the farm boundary"><Square className="h-4 w-4 mr-1" />Boundary</Button>
                 <Button size="sm" variant={mode.kind === "draw" && drawLayerKey === "fences" ? "default" : "ghost"} onClick={() => startDraw("feature", "Line", undefined, "fences")} title="Draw a fence line"><Spline className="h-4 w-4 mr-1" />Fence</Button>
-                <ToolMenu disabled={!canEdit} active={mode.kind === "draw" && drawTarget === "feature"} onPick={shape => startDraw("feature", shape)} />
+                <ToolMenu disabled={!canEdit} active={mode.kind === "draw" && drawTarget === "feature" && drawLayerKey !== "poi"} onPick={shape => startDraw("feature", shape)} />
+                <Button size="sm" variant={mode.kind === "draw" && drawLayerKey === "poi" ? "default" : "ghost"} onClick={() => startDraw("feature", "Marker", undefined, "poi")} title="Mark a point of interest: first aid kit, assembly point, fuel store…"><MapPin className="h-4 w-4 mr-1" />Point of interest</Button>
               </>
             )}
+            {canReportHazard && (
+              <ToolMenu label="Hazard" icon={AlertTriangle} disabled={false} active={mode.kind === "draw" && drawTarget === "hazard"} onPick={shape => startDraw("hazard", shape)} />
+            )}
+            <Button size="sm" variant={showLabels ? "secondary" : "ghost"} onClick={() => setShowLabels(v => !v)} aria-pressed={showLabels} title="Show names on points of interest and hazards"><Tag className="h-4 w-4 mr-1" />Labels</Button>
             <Button size="sm" variant={mode.kind === "measure" ? "default" : "ghost"} onClick={() => { if (mode.kind === "measure") { setMode({ kind: "view" }); setMeasure(null); } else { cancelAll(); setMode({ kind: "measure" }); setPanel("right"); } }} title="Measure distance and area">
               <Ruler className="h-4 w-4 mr-1" />Measure
             </Button>
@@ -532,6 +578,8 @@ export default function FarmMapPage() {
                 : mode.kind === "draw" && drawTarget === "job" ? `Draw the area that was (or will be) ${jobDraft?.activity === "spray" ? "sprayed" : "spread"}. Tap the first corner to finish. Exclusions are taken off on save.`
                 : mode.kind === "draw" && drawTarget === "zone" ? "Draw the zone. Corners snap to the paddock edge and other zones. Tap the first corner to finish."
                 : mode.kind === "split" ? "Draw a line across the paddock, from outside one edge to outside the other. Tap the last point again to finish."
+                : mode.kind === "draw" && drawTarget === "hazard" ? (mode.shape === "Marker" ? "Tap where the hazard is." : mode.shape === "Line" ? "Tap along the hazard, e.g. a power line or bank. Tap the last point again to finish." : mode.shape === "Circle" ? "Tap the centre of the hazard, then drag out how far around it to keep clear." : "Tap each corner of the hazard area. Tap the first corner to close it.")
+                : mode.shape === "Marker" && drawLayerKey === "poi" ? "Tap where it is."
                 : mode.shape === "Polygon" && drawLayerKey === "boundary" ? "Tap each corner of the farm boundary. Tap the first corner to close it. Corners snap to paddock edges."
                 : mode.shape === "Polygon" ? "Tap each corner. Tap the first corner to close the shape. Corners snap to nearby paddocks."
                 : mode.shape === "Line" && drawLayerKey === "fences" ? "Tap each corner post along the fence. Points snap to paddock edges and other fences. Tap the last point again to finish."
@@ -554,7 +602,9 @@ export default function FarmMapPage() {
           panel === "right" || pending || edit || mode.kind !== "view" || exclusionStart || exclusionDraft || planId || newPlan || jobDraft || jobId ? "block" : "hidden md:block")}>
           <button className="md:hidden absolute right-2 top-2" onClick={() => setPanel(null)} aria-label="Close panel"><X className="h-4 w-4" /></button>
 
-          {pending ? (
+          {pending?.target === "hazard" ? (
+            <HazardForm pending={pending} onDiscard={() => setPending(null)} onSaved={id => { setPending(null); setSelection({ type: "hazard", id }); }} />
+          ) : pending ? (
             <PendingForm
               pending={pending} layers={layers} canEdit={canEdit}
               onDiscard={() => setPending(null)}
@@ -567,7 +617,7 @@ export default function FarmMapPage() {
             />
           ) : edit ? (
             <div className="space-y-3">
-              <h2 className="font-semibold">Editing {edit.target.type === "paddock" ? state.paddocks.find(p => p.id === edit.target.id)?.name : state.features.find(f => f.id === edit.target.id)?.name ?? "shape"}</h2>
+              <h2 className="font-semibold">Editing {edit.target.type === "paddock" ? state.paddocks.find(p => p.id === edit.target.id)?.name : edit.target.type === "hazard" ? state.hazards.find(h => h.id === edit.target.id)?.title : state.features.find(f => f.id === edit.target.id)?.name ?? "shape"}</h2>
               <p className="text-sm text-muted-foreground">Drag corners to move them. Tap a small midpoint to add a corner. Right-click (or long-press) a corner to remove it. Corners snap to neighbouring paddocks.</p>
               <EditMeasure geometry={edit.history[edit.index].g} radius={edit.history[edit.index].r} />
               {edit.target.type === "paddock" && (
@@ -660,6 +710,11 @@ export default function FarmMapPage() {
               onAddJob={activity => startJob({ activity, lines: selectedPaddock.geometry ? [lineFor(selectedPaddock.id)] : [] })}
               onOpenJob={id => { setJobId(id); setSelection({ type: "job", id }); }}
             />
+          ) : selectedHazard ? (
+            <HazardPanel key={selectedHazard.id} hazard={selectedHazard} canManage={canEdit} canReport={canReportHazard}
+              onEditShape={() => startEdit({ type: "hazard", id: selectedHazard.id })}
+              onPlace={() => startDraw("hazard", "Marker", selectedHazard.id)}
+              onClosed={() => setSelection(null)} />
           ) : selectedFeature ? (
             <FeaturePanel feature={selectedFeature} layers={layers} canEdit={canEdit} onEdit={() => startEdit({ type: "feature", id: selectedFeature.id })} run={run} onDeleted={() => setSelection(null)} />
           ) : selectedRecord ? (
@@ -770,7 +825,7 @@ function MapHistory() {
   );
 }
 
-function ToolMenu({ active, disabled, onPick }: { active: boolean; disabled: boolean; onPick: (s: DrawShape) => void }) {
+function ToolMenu({ active, disabled, onPick, label = "Draw", icon: Icon = Pencil }: { active: boolean; disabled: boolean; onPick: (s: DrawShape) => void; label?: string; icon?: any }) {
   const [open, setOpen] = useState(false);
   const tools: { shape: DrawShape; label: string; icon: any }[] = [
     { shape: "Polygon", label: "Area (polygon)", icon: Square },
@@ -781,7 +836,7 @@ function ToolMenu({ active, disabled, onPick }: { active: boolean; disabled: boo
   ];
   return (
     <div className="relative">
-      <Button size="sm" variant={active ? "default" : "ghost"} disabled={disabled} onClick={() => setOpen(o => !o)}><Pencil className="h-4 w-4 mr-1" />Draw</Button>
+      <Button size="sm" variant={active ? "default" : "ghost"} disabled={disabled} onClick={() => setOpen(o => !o)}><Icon className="h-4 w-4 mr-1" />{label}</Button>
       {open && (
         <div className="absolute top-full left-0 mt-1 w-44 rounded-md border bg-popover shadow-lg z-[700]">
           {tools.map(t => (
@@ -808,13 +863,14 @@ function PendingForm({ pending, layers, canEdit, onSave, onDiscard }: {
   onSave: (v: { name: string; paddockNumber: number | null; layerId?: string; notes?: string; properties?: Record<string, unknown> }) => void; onDiscard: () => void;
 }) {
   const asPaddock = pending.target === "paddock" && pending.kind === "polygon";
-  const usable = layers.filter(l => !["paddocks", "exclusions", "variable_rate", "restrictions"].includes(l.key) && !l.locked);
+  const usable = layers.filter(l => !["paddocks", "exclusions", "variable_rate", "restrictions", "hazards"].includes(l.key) && !l.locked);
   const [name, setName] = useState(pending.layerKey === "boundary" ? "Farm boundary" : "");
   const [num, setNum] = useState("");
   const [layerId, setLayerId] = useState(() => usable.find(l => l.key === (pending.layerKey ?? (pending.kind === "polygon" ? "fertiliser" : "features")))?.id ?? usable[0]?.id ?? "");
   const layerKey = usable.find(l => l.id === layerId)?.key;
   const [fenceType, setFenceType] = useState(FENCE_TYPES[0]);
   const [wires, setWires] = useState("");
+  const [poi, setPoi] = useState<string>(POI_TYPES[0].key);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const target = pending.forPaddockId;
@@ -838,8 +894,10 @@ function PendingForm({ pending, layers, canEdit, onSave, onDiscard }: {
         if (asPaddock && !name.trim()) { toast.error("Give the paddock a name"); return; }
         if (!asPaddock && !layerId) { toast.error("Choose a layer"); return; }
         await onSave({
-          name: name.trim(), paddockNumber: num === "" ? null : Number(num), layerId, notes,
-          properties: layerKey === "fences" ? { fenceType, wires: wires === "" ? null : Number(wires) } : undefined,
+          // A point of interest left unnamed is called what it is ("First aid kit")
+          name: layerKey === "poi" && !name.trim() ? poiType(poi).label : name.trim(),
+          paddockNumber: num === "" ? null : Number(num), layerId, notes,
+          properties: layerKey === "fences" ? { fenceType, wires: wires === "" ? null : Number(wires) } : layerKey === "poi" ? { poiType: poi } : undefined,
         });
       } catch (err: any) {
         toast.error(err.message);
@@ -863,6 +921,14 @@ function PendingForm({ pending, layers, canEdit, onSave, onDiscard }: {
             </select>
           </div>
           <div className="space-y-1"><Label htmlFor="ft-name">Name</Label><Input id="ft-name" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Bore 2, Race to shed" /></div>
+          {layerKey === "poi" && (
+            <div className="space-y-1">
+              <Label htmlFor="ft-poi">What is it?</Label>
+              <select id="ft-poi" className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={poi} onChange={e => setPoi(e.target.value)}>
+                {POI_TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+              </select>
+            </div>
+          )}
           {layerKey === "fences" && (
             <div className="grid grid-cols-[1fr_5rem] gap-2">
               <div className="space-y-1"><Label htmlFor="ft-fence-type">Fence type</Label>
@@ -1094,12 +1160,13 @@ function FeaturePanel({ feature, layers, canEdit, onEdit, run, onDeleted }: {
   );
 }
 
-function LeftPanel({ state, canEdit, visible, setVisible, onSelectPaddock, mapView, basemap, onApplyView, run, onSelectExclusion, onAddExclusion, onOpenPlan, onNewPlan, jobs, canRecord, onOpenJob, onNewJob }: {
+function LeftPanel({ state, canEdit, visible, setVisible, onSelectPaddock, mapView, basemap, onApplyView, run, onSelectExclusion, onAddExclusion, onOpenPlan, onNewPlan, jobs, canRecord, onOpenJob, onNewJob, onSelectHazard }: {
   state: MapState; canEdit: boolean; visible: Record<string, boolean>; setVisible: (fn: (v: Record<string, boolean>) => Record<string, boolean>) => void;
   onSelectPaddock: (id: string) => void; mapView: { lat: number; lng: number; zoom: number } | null; basemap: string;
   onApplyView: (v: MapState["views"][number]) => void; run: <T>(w: () => Promise<T>, s?: string) => Promise<T | undefined>;
   onSelectExclusion: (id: string) => void; onAddExclusion: () => void; onOpenPlan: (id: string) => void; onNewPlan: () => void;
   jobs: JobSummary[]; canRecord: boolean; onOpenJob: (id: string) => void; onNewJob: (activity: Activity) => void;
+  onSelectHazard: (id: string) => void;
 }) {
   const [styling, setStyling] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -1121,8 +1188,10 @@ function LeftPanel({ state, canEdit, visible, setVisible, onSelectPaddock, mapVi
   const counts = useMemo(() => {
     const c = new Map<string, number>();
     state.features.forEach(f => c.set(f.layerId, (c.get(f.layerId) ?? 0) + 1));
+    const hazardLayer = state.layers.find(l => l.key === "hazards");
+    if (hazardLayer) c.set(hazardLayer.id, (state.hazards ?? []).filter(h => h.geometry).length);
     return c;
-  }, [state.features]);
+  }, [state.features, state.hazards, state.layers]);
   const layers = state.layers;
   const move = (i: number, dir: -1 | 1) => {
     const a = layers[i], b = layers[i + dir];
@@ -1194,6 +1263,7 @@ function LeftPanel({ state, canEdit, visible, setVisible, onSelectPaddock, mapVi
         <p className="text-xs text-muted-foreground">Showing and hiding is just for you. Activity layers show records from the dates above.</p>
       </section>
 
+      <HazardsSection hazards={state.hazards ?? []} canManage={canEdit} onSelect={onSelectHazard} />
       <BoundaryAndFences state={state} />
       <ExclusionsSection exclusions={state.exclusions} canEdit={canEdit} onSelect={onSelectExclusion} onAdd={onAddExclusion} />
 

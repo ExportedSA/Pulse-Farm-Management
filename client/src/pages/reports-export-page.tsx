@@ -180,7 +180,6 @@ export default function ReportsExportPage() {
           reportType: selectedTemplate.id,
           dateRange,
           sections: selectedSections,
-          farmName: 'Demo Farm',
         }),
       });
       
@@ -219,7 +218,6 @@ export default function ReportsExportPage() {
             start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
             end: new Date().toISOString().slice(0, 10),
           },
-          farmName: 'Demo Farm',
         }),
       });
       
