@@ -197,67 +197,10 @@ export default function JobsPage() {
   // Load task templates
   async function loadTemplates() {
     try {
-      // Mock templates - would come from API in production
-      const mockTemplates: TaskTemplate[] = [
-        {
-          id: 'tpl-1', name: 'Weekly Vehicle Inspection', description: 'Complete safety inspection of all farm vehicles',
-          category: 'maintenance', priority: 'medium', estimatedDuration: 60, defaultTime: '08:00',
-          checklistItems: [
-            { text: 'Check tire pressure and condition', required: true },
-            { text: 'Check oil and fluid levels', required: true },
-            { text: 'Test lights and indicators', required: true },
-            { text: 'Inspect brakes', required: true },
-            { text: 'Check safety equipment', required: false },
-          ],
-          suggestedRecurrence: 'weekly',
-        },
-        {
-          id: 'tpl-2', name: 'Morning Feed - All Paddocks', description: 'Distribute hay and supplements to all cattle',
-          category: 'feeding', priority: 'high', estimatedDuration: 90, defaultTime: '06:00',
-          checklistItems: [
-            { text: 'Check feed stock levels', required: true },
-            { text: 'Fill water troughs', required: true },
-            { text: 'Distribute supplements', required: false },
-            { text: 'Check for sick animals', required: true },
-          ],
-          suggestedRecurrence: 'daily',
-        },
-        {
-          id: 'tpl-3', name: 'Fence Line Inspection', description: 'Walk and inspect all fence lines for damage',
-          category: 'maintenance', priority: 'medium', estimatedDuration: 120, defaultTime: '09:00',
-          checklistItems: [
-            { text: 'Check for broken wires', required: true },
-            { text: 'Check post stability', required: true },
-            { text: 'Test electric fence voltage', required: true },
-            { text: 'Clear vegetation from fence line', required: false },
-          ],
-          suggestedRecurrence: 'weekly',
-        },
-        {
-          id: 'tpl-4', name: 'Water System Check', description: 'Inspect all water troughs and pipes',
-          category: 'maintenance', priority: 'high', estimatedDuration: 45, defaultTime: '07:00',
-          checklistItems: [
-            { text: 'Check trough water levels', required: true },
-            { text: 'Clean troughs if needed', required: false },
-            { text: 'Check for leaks', required: true },
-            { text: 'Test pump operation', required: true },
-          ],
-          suggestedRecurrence: 'daily',
-        },
-        {
-          id: 'tpl-5', name: 'Monthly Equipment Service', description: 'Scheduled maintenance for farm equipment',
-          category: 'maintenance', priority: 'medium', estimatedDuration: 180, defaultTime: '08:00',
-          checklistItems: [
-            { text: 'Change oil and filters', required: true },
-            { text: 'Grease all fittings', required: true },
-            { text: 'Check belts and hoses', required: true },
-            { text: 'Test all functions', required: true },
-            { text: 'Update service log', required: true },
-          ],
-          suggestedRecurrence: 'monthly',
-        },
-      ];
-      setTemplates(mockTemplates);
+      // The built-in starter templates, to fill in the form
+      const res = await fetch('/api/task-templates', { credentials: 'include' });
+      if (!res.ok) throw new Error(`Templates request failed (${res.status})`);
+      setTemplates(await res.json());
     } catch (err) {
       console.error('Failed to load templates:', err);
     }
@@ -374,11 +317,11 @@ export default function JobsPage() {
           recurrenceTime: newJob.startTime,
           recurrenceEndTime: newJob.endTime || null,
           startDate: newJob.startDate,
-          checklistItems: newJob.checklistItems,
+          checklistItems: newJob.checklistItems?.map(item => ({ id: item.id, text: item.text, required: item.required })),
           estimatedDuration: newJob.estimatedDuration,
         };
 
-        const response = await fetch('/api/recurring-tasks', {
+        const response = await fetch('/api/recurring-tasks/templates', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(recurringData),

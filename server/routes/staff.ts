@@ -64,53 +64,7 @@ router.get('/', async (req, res) => {
     })));
   } catch (error) {
     console.error('Error fetching staff:', error);
-    // Return mock data for demo
-    res.json([
-      {
-        id: 'staff-1',
-        userId: 'user-1',
-        employeeId: 'EMP001',
-        position: 'Farm Manager',
-        department: 'Management',
-        phone: '021 123 4567',
-        emergencyContact: 'Jane Smith',
-        emergencyPhone: '021 987 6543',
-        startDate: '2020-01-15',
-        employmentType: 'full_time',
-        hourlyRate: '35.00',
-        isActive: true,
-        user: { id: 'user-1', name: 'John Smith', email: 'john@pulse.farm', role: 'manager' },
-      },
-      {
-        id: 'staff-2',
-        userId: 'user-2',
-        employeeId: 'EMP002',
-        position: 'Stock Handler',
-        department: 'Operations',
-        phone: '021 234 5678',
-        emergencyContact: 'Bob Wilson',
-        emergencyPhone: '021 876 5432',
-        startDate: '2021-06-01',
-        employmentType: 'full_time',
-        hourlyRate: '28.00',
-        isActive: true,
-        user: { id: 'user-2', name: 'Sarah Johnson', email: 'sarah@pulse.farm', role: 'staff' },
-      },
-      {
-        id: 'staff-3',
-        userId: 'user-3',
-        employeeId: 'EMP003',
-        position: 'Seasonal Worker',
-        department: 'Operations',
-        phone: '021 345 6789',
-        startDate: '2024-09-01',
-        endDate: '2025-03-31',
-        employmentType: 'seasonal',
-        hourlyRate: '24.00',
-        isActive: true,
-        user: { id: 'user-3', name: 'Mike Wilson', email: 'mike@pulse.farm', role: 'worker' },
-      },
-    ]);
+    res.status(500).json({ error: 'Failed to fetch staff' });
   }
 });
 
@@ -425,22 +379,25 @@ router.put('/timesheets/:id/reject', async (req, res) => {
 router.get('/timesheets/summary', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    
-    // Return mock summary for demo
+    const rows = await db.execute(sql`
+      SELECT t.status, sp.department, COALESCE(t.total_hours, 0)::float AS hours, t.staff_profile_id
+      FROM timesheets t LEFT JOIN staff_profiles sp ON sp.id = t.staff_profile_id
+      WHERE (${startDate ?? null}::date IS NULL OR t.date >= ${startDate ?? null}::date)
+        AND (${endDate ?? null}::date IS NULL OR t.date <= ${endDate ?? null}::date)`);
+    const list = ((rows as any).rows ?? rows) as { status: string | null; department: string | null; hours: number; staff_profile_id: string }[];
+    const byDepartment: Record<string, number> = {};
+    for (const r of list) byDepartment[r.department || 'Unassigned'] = (byDepartment[r.department || 'Unassigned'] ?? 0) + r.hours;
     res.json({
-      totalHours: 156.5,
-      totalStaff: 3,
-      pendingApproval: 5,
-      approved: 42,
-      rejected: 2,
-      byDepartment: {
-        'Management': 40,
-        'Operations': 116.5,
-      },
+      totalHours: Math.round(list.reduce((n, r) => n + r.hours, 0) * 100) / 100,
+      totalStaff: new Set(list.map(r => r.staff_profile_id)).size,
+      pendingApproval: list.filter(r => r.status === 'pending').length,
+      approved: list.filter(r => r.status === 'approved').length,
+      rejected: list.filter(r => r.status === 'rejected').length,
+      byDepartment,
     });
   } catch (error) {
     console.error('Error fetching timesheet summary:', error);
-    res.status(500).json({ error: 'Failed to fetch summary' });
+    res.status(500).json({ error: 'Failed to fetch timesheet summary' });
   }
 });
 

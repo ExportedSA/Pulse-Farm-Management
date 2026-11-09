@@ -912,8 +912,7 @@ router.get('/channels/:id/unread', async (req, res) => {
     res.json({ channelId, unreadCount });
   } catch (error) {
     console.error('Error getting unread count:', error);
-    // Return 0 for demo purposes
-    res.json({ channelId: req.params.id, unreadCount: 0 });
+    res.status(500).json({ error: 'Failed to get unread count' });
   }
 });
 
@@ -932,13 +931,19 @@ router.get('/unread/all', async (req, res) => {
       return res.json({ channels: {}, totalUnread: 0 });
     }
 
-    const unreadCounts: Record<string, number> = {};
-    let totalUnread = 0;
-
-    // For demo, return mock data
-    channelsResult.forEach(({ channelId }) => {
-      unreadCounts[channelId] = 0;
-    });
+    // Per channel: messages from others since this person last read anything there
+    const counts = await db.execute(sql`
+      SELECT m.channel_id AS "channelId", count(*)::int AS n
+      FROM chat_messages m
+      JOIN chat_channel_members cm ON cm.channel_id = m.channel_id AND cm.user_id = ${userId}
+      WHERE m.user_id <> ${userId}
+        AND m.created_at > COALESCE((
+          SELECT max(r.read_at) FROM chat_message_reads r JOIN chat_messages rm ON rm.id = r.message_id
+          WHERE r.user_id = ${userId} AND rm.channel_id = m.channel_id), 'epoch')
+      GROUP BY m.channel_id`);
+    const unreadCounts: Record<string, number> = Object.fromEntries(channelsResult.map(({ channelId }) => [channelId, 0]));
+    for (const row of ((counts as any).rows ?? counts) as { channelId: string; n: number }[]) unreadCounts[row.channelId] = row.n;
+    const totalUnread = Object.values(unreadCounts).reduce((n, c) => n + c, 0);
 
     res.json({ channels: unreadCounts, totalUnread });
   } catch (error) {

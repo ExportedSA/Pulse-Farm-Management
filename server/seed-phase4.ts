@@ -4,6 +4,7 @@
  */
 
 import { db } from './db';
+import { inSeedFarm } from "./seed-farm";
 import { taskPins, expenses, killsheets } from '@shared/schema';
 
 async function seed() {
@@ -218,7 +219,7 @@ async function seed() {
   process.exit(0);
 }
 
-seed().catch((error) => {
+inSeedFarm(seed).catch((error) => {
   console.error('❌ Seed failed:', error);
   process.exit(1);
 });

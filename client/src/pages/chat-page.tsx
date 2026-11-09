@@ -277,12 +277,7 @@ export default function ChatPage() {
   const [threadMessages, setThreadMessages] = useState<Message[]>([]);
 
   // Online status - will be updated by WebSocket
-  const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([
-    { id: 'user-1', name: 'John Smith', status: 'online' },
-    { id: 'user-2', name: 'Sarah Johnson', status: 'away', lastSeen: new Date(Date.now() - 300000).toISOString() },
-    { id: 'user-3', name: 'Mike Wilson', status: 'busy' },
-    { id: 'user-4', name: 'Emily Brown', status: 'offline', lastSeen: new Date(Date.now() - 3600000).toISOString() },
-  ]);
+  const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
 
   // Typing user names (for display)
   const [typingUserNames, setTypingUserNames] = useState<{ [channelId: string]: string[] }>({});
@@ -921,7 +916,7 @@ export default function ChatPage() {
     if (!query.trim()) {
       setGifResults(TRENDING_GIFS);
     } else {
-      // Filter mock data by query
+      // Filter the built-in GIF list by the query
       const filtered = TRENDING_GIFS.filter(g => 
         g.title.toLowerCase().includes(query.toLowerCase())
       );
@@ -1825,8 +1820,8 @@ export default function ChatPage() {
   function openThread(message: Message) {
     setThreadParentMessage(message);
     setShowThread(true);
-    // Load thread messages (mock for now)
-    setThreadMessages([]);
+    // The replies to it among the channel's messages
+    setThreadMessages(messages.filter(m => m.replyTo?.id === message.id));
   }
 
   // Search messages

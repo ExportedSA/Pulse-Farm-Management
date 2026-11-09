@@ -110,6 +110,7 @@ const menuItems = [
       { title: "Tasks", url: "/app/tasks" },
       { title: "Jobs", url: "/app/jobs" },
       { title: "Jobs Board", url: "/app/kanban" },
+      { title: "Recurring Tasks", url: "/app/recurring-tasks" },
       { title: "Roster", url: "/app/roster" },
       { title: "Timesheets", url: "/app/timesheets" },
       { title: "Calendar", url: "/app/calendar" },

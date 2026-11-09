@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { db } from "./db";
 import { hashPassword } from "./password";
+import { inSeedFarm, seedUser } from "./seed-farm";
 import { 
   users, 
   chatChannels, 
@@ -28,11 +29,11 @@ import {
 } from "@shared/schema";
 import { eq } from "drizzle-orm";
 
-async function seed() {
+async function seed(farmId: string) {
   console.log("🌱 Starting database seed...");
 
   try {
-    // Clean existing data (in reverse order of dependencies)
+    // Clean this farm's existing data (in reverse order of dependencies); other farms are untouched
     console.log("🧹 Cleaning existing data...");
     await db.delete(chatMessages);
     await db.delete(chatChannelMembers);
@@ -45,39 +46,14 @@ async function seed() {
     await db.delete(animals);
     await db.delete(pastures);
     await db.delete(farmHazards);
-    await db.delete(users);
 
-    // Create demo users
+    // Demo people: reused if they've signed up already, and made members of this farm
     console.log("👥 Creating demo users...");
     const adminPassword = await hashPassword("password123");
     const staffPassword = await hashPassword("password123");
-
-    const [adminUser] = await db.insert(users).values({
-      name: "Farm Owner",
-      email: "owner@demo.com",
-      password: adminPassword,
-      role: "owner",
-      isActive: true,
-      lastLoginAt: new Date(),
-    } as InsertUser).returning();
-
-    const [staffUser] = await db.insert(users).values({
-      name: "Farm Worker",
-      email: "worker@demo.com",
-      password: staffPassword,
-      role: "worker",
-      isActive: true,
-      lastLoginAt: new Date(),
-    } as InsertUser).returning();
-
-    const [managerUser] = await db.insert(users).values({
-      name: "Farm Manager",
-      email: "manager@demo.com",
-      password: staffPassword,
-      role: "manager",
-      isActive: true,
-      lastLoginAt: new Date(),
-    } as InsertUser).returning();
+    const adminUser = await seedUser(farmId, { name: "Farm Owner", email: "owner@demo.com", password: adminPassword, role: "owner" });
+    const staffUser = await seedUser(farmId, { name: "Farm Worker", email: "worker@demo.com", password: staffPassword, role: "worker" });
+    const managerUser = await seedUser(farmId, { name: "Farm Manager", email: "manager@demo.com", password: staffPassword, role: "manager" });
 
     console.log(`✅ Created users: ${adminUser.name}, ${staffUser.name}, ${managerUser.name}`);
 
@@ -419,7 +395,7 @@ async function seed() {
 }
 
 // Run the seed
-seed().then(() => {
+inSeedFarm(seed).then(() => {
   console.log("\n🎉 Seed process finished. Exiting...");
   process.exit(0);
 }).catch((error) => {

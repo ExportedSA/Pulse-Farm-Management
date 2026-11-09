@@ -53,8 +53,6 @@ import JobsPage from "@/pages/jobs-page";
 import StaffManagementPage from "@/pages/staff-management-page";
 import ContractorManagementPage from "@/pages/contractor-management-page";
 import RecurringTasksPage from "@/pages/recurring-tasks-page";
-import TaskTemplatesPage from "@/pages/task-templates-page";
-import TaskCalendarPage from "@/pages/task-calendar-page";
 import FarmCalendarPage from "@/pages/farm-calendar-page";
 import WeatherPage from "@/pages/weather-page";
 import { NotificationCenter } from "@/components/NotificationCenter";
@@ -94,7 +92,6 @@ import HerdReportsPage from "@/pages/herd-reports-page";
 import PastureWalkPage from "@/pages/pasture-walk-page";
 import RosterSchedulingPage from "@/pages/roster-scheduling-page";
 import QRCodeManagementPage from "@/pages/qr-code-management-page";
-import AnimalPerformancePage from "@/pages/animal-performance-page";
 import ReportsExportPage from "@/pages/reports-export-page";
 import MultiFarmPage from "@/pages/multi-farm-page";
 import CSVImportPage from "@/pages/csv-import-page";
@@ -128,6 +125,7 @@ function Router() {
         <Route path="/app/dashboard" component={Dashboard} />
         <Route path="/app/chat" component={ChatPage} />
         <Route path="/app/jobs" component={JobsPage} />
+        <Route path="/app/recurring-tasks" component={RecurringTasksPage} />
         <Route path="/app/roster" component={RosterSchedulingPage} />
         <Route path="/app/timesheets" component={TimesheetsPage} />
         <Route path="/app/calendar" component={FarmCalendarPage} />
@@ -144,7 +142,6 @@ function Router() {
         <Route path="/app/operations/roster" component={RosterSchedulingPage} />
         <Route path="/app/safety" component={CompliancePage} />
         <Route path="/app/people" component={StaffManagementPage} />
-        <Route path="/app/animal-performance" component={AnimalPerformancePage} />
         <Route path="/app/reports" component={ReportsExportPage} />
         <Route path="/app/weather" component={WeatherPage} />
         <Route path="/app/farm-compliance" component={CompliancePackPage} />

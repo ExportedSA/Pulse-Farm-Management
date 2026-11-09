@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { users } from "@shared/schema";
+import { users, staffProfiles } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import sgMail from "@sendgrid/mail";
 import { Twilio } from "twilio";
@@ -144,11 +144,12 @@ async function getUserContactInfo(userId: string): Promise<{
       return {};
     }
 
-    // Note: Phone number would need to be added to the users table
-    // For now, we'll use a mock phone number for demonstration
+    // Texts go to the phone on the person's staff profile; no number, no text
+    const [profile] = await db.select({ phone: staffProfiles.phone }).from(staffProfiles)
+      .where(eq(staffProfiles.userId, userId)).limit(1);
     return {
       email: user.email || undefined,
-      phone: user.email ? `+6421${Math.floor(Math.random() * 10000000)}` : undefined,
+      phone: profile?.phone || undefined,
       name: user.name || undefined,
     };
   } catch (error) {

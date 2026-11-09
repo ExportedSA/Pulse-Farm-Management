@@ -31,7 +31,6 @@ import summaryRouter from "./routes/summary";
 import budgetingRouter from "./budgeting-routes";
 import nzfapRouter from "./nzfap-routes";
 import weatherRouter from "./weather-routes";
-import gallagherRouter from "./gallagher-routes";
 import staffRouter from "./routes/staff";
 import contractorsRouter from "./routes/contractors";
 import recurringTasksRouter from "./routes/recurring-tasks";
@@ -61,9 +60,6 @@ import pastureWalksRouter from "./routes/pasture-walks";
 // import rosterRouter from "./routes/roster"; // Duplicate - already imported on line 25
 import healthRouter from "./routes/health";
 import reportsRouter from "./routes/reports";
-import externalApisRouter from "./routes/external-apis";
-import iotRouter from "./routes/iot";
-import multiFarmRouter from "./routes/multi-farm";
 import farmsRouter from "./routes/farms";
 import recordsRouter from "./routes/records";
 import stockReconRouter from "./routes/stock-recon";
@@ -186,12 +182,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/reports", requireAuth);
   app.use(reportsRouter);
 
-  // ===== EXTERNAL API INTEGRATIONS (NAIT, Weather, LIC, Fonterra) =====
-  app.use(externalApisRouter);
-
-  // ===== IOT INTEGRATIONS =====
-  app.use(iotRouter);
-
   // ===== FARMS & MEMBERSHIP =====
   app.use("/api/farms", requireAuth, farmsRouter);
 
@@ -209,9 +199,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/tags", requireAuth, tagsRouter);
   app.use("/api/attachments", requireAuth, attachmentsRouter);
   app.use("/api/search", requireAuth, searchRouter);
-
-  // ===== MULTI-FARM MANAGEMENT (groups, comparisons) =====
-  app.use(multiFarmRouter);
 
   // ===== ANIMAL TAG MANAGEMENT =====
   app.use(/^\/api\/animals\/(tags\/bulk|[^/]+\/tags|[^/]+\/tag-history)/, requireAuth);
@@ -309,9 +296,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Weather Integration routes
   app.use("/api/weather", requireAuth, weatherRouter);
-  
-  // Gallagher Weigh Scale Integration routes
-  app.use("/api/gallagher", requireAuth, gallagherRouter);
   
   // Staff & Contractor Management routes
   app.use("/api/staff", requireAuth, staffRouter);
@@ -1655,6 +1639,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: "Failed to update setting" });
     }
   });
+
+  // Any other /api address doesn't exist (rather than falling through to the web app)
+  app.use("/api", (_req, res) => res.status(404).json({ error: "Not found" }));
 
   // ===== GLOBAL ERROR HANDLING =====
   

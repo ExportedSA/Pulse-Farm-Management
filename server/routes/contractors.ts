@@ -8,7 +8,7 @@ import {
   contractorWorkRecords,
   users,
 } from '@shared/schema';
-import { eq, and, desc, like, or, gte, lte } from 'drizzle-orm';
+import { eq, and, desc, like, or, gte, lte, sql } from 'drizzle-orm';
 
 const router = Router();
 
@@ -53,60 +53,7 @@ router.get('/', async (req, res) => {
     res.json(filtered);
   } catch (error) {
     console.error('Error fetching contractors:', error);
-    // Return mock data for demo
-    res.json([
-      {
-        id: 'contractor-1',
-        companyName: 'Smith Fencing Ltd',
-        contactName: 'Bob Smith',
-        email: 'bob@smithfencing.co.nz',
-        phone: '027 123 4567',
-        address: '123 Rural Road, Farmville',
-        serviceType: 'fencing',
-        insuranceProvider: 'FMG Insurance',
-        insurancePolicyNumber: 'INS-12345',
-        insuranceExpiryDate: '2025-06-30',
-        preQualificationStatus: 'approved',
-        preQualificationDate: '2024-01-15',
-        preQualificationExpiryDate: '2025-01-15',
-        rating: 5,
-        isActive: true,
-      },
-      {
-        id: 'contractor-2',
-        companyName: 'Pro Shearing Services',
-        contactName: 'Dave Wilson',
-        email: 'dave@proshearing.co.nz',
-        phone: '027 234 5678',
-        serviceType: 'shearing',
-        insuranceProvider: 'NZI',
-        insuranceExpiryDate: '2025-03-15',
-        preQualificationStatus: 'approved',
-        rating: 4,
-        isActive: true,
-      },
-      {
-        id: 'contractor-3',
-        companyName: 'Rural Vet Services',
-        contactName: 'Dr. Sarah Jones',
-        email: 'sarah@ruralvet.co.nz',
-        phone: '027 345 6789',
-        serviceType: 'veterinary',
-        preQualificationStatus: 'pending',
-        isActive: true,
-      },
-      {
-        id: 'contractor-4',
-        companyName: 'AgriTransport NZ',
-        contactName: 'Mike Brown',
-        email: 'mike@agritransport.co.nz',
-        phone: '027 456 7890',
-        serviceType: 'transport',
-        insuranceExpiryDate: '2024-12-01',
-        preQualificationStatus: 'expired',
-        isActive: false,
-      },
-    ]);
+    res.status(500).json({ error: 'Failed to fetch contractors' });
   }
 });
 
@@ -397,26 +344,26 @@ router.get('/status/expiring', async (req, res) => {
     const futureDate = new Date();
     futureDate.setDate(futureDate.getDate() + days);
 
-    // Return mock data for demo
-    res.json([
-      {
-        id: 'contractor-4',
-        companyName: 'AgriTransport NZ',
-        type: 'insurance',
-        expiryDate: '2024-12-01',
-        daysUntilExpiry: -5,
-      },
-      {
-        id: 'contractor-1',
-        companyName: 'Smith Fencing Ltd',
-        type: 'pre_qualification',
-        expiryDate: '2025-01-15',
-        daysUntilExpiry: 25,
-      },
-    ]);
+    const until = futureDate.toISOString().slice(0, 10);
+    const rows = await db.execute(sql`
+      SELECT c.id, c.company_name AS "companyName", 'insurance' AS type, c.insurance_expiry_date AS "expiryDate"
+      FROM contractors c WHERE c.insurance_expiry_date IS NOT NULL AND c.insurance_expiry_date <= ${until}::date
+      UNION ALL
+      SELECT c.id, c.company_name, 'pre_qualification', c.pre_qualification_expiry_date
+      FROM contractors c WHERE c.pre_qualification_expiry_date IS NOT NULL AND c.pre_qualification_expiry_date <= ${until}::date
+      UNION ALL
+      SELECT c.id, c.company_name, d.document_type, d.expiry_date
+      FROM contractor_documents d JOIN contractors c ON c.id = d.contractor_id
+      WHERE d.expiry_date IS NOT NULL AND d.expiry_date <= ${until}::date
+      ORDER BY 4`);
+    const today = new Date(new Date().toISOString().slice(0, 10));
+    res.json((((rows as any).rows ?? rows) as any[]).map(r => {
+      const expiry = String(r.expiryDate).slice(0, 10);
+      return { ...r, expiryDate: expiry, daysUntilExpiry: Math.round((new Date(expiry).getTime() - today.getTime()) / 86400000) };
+    }));
   } catch (error) {
     console.error('Error fetching expiring contractors:', error);
-    res.json([]);
+    res.status(500).json({ error: 'Failed to fetch expiring contractors' });
   }
 });
 
