@@ -45,6 +45,7 @@ attached_assets
 *.log
 *.sql
 !scripts/migrations/*.sql
+!scripts/baseline.sql
 *.db
 
 # Temp directories
