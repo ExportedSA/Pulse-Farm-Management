@@ -169,4 +169,25 @@ describe.skipIf(!live)('farm data isolation', () => {
     const n = (await one(sql`SELECT count(*)::int AS n FROM animal_treatments WHERE animal_id = ${bIds.animal}`)).n;
     expect(n).toBe(1);
   });
+
+  it('the farm guard checks every link between farm tables', async () => {
+    const rows = async (q: any) => ((await systemDb.execute(q)) as any).rows;
+    const links = await rows(sql`
+      SELECT c.relname AS child, a.attname AS col, p.relname AS parent
+      FROM pg_constraint k
+      JOIN pg_class c ON c.oid = k.conrelid
+      JOIN pg_class p ON p.oid = k.confrelid
+      JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = k.conkey[1]
+      WHERE k.contype = 'f' AND k.connamespace = 'public'::regnamespace AND array_length(k.conkey, 1) = 1
+        AND a.attname <> 'farm_id' AND p.relname <> 'farms' AND c.relname <> 'farm_members'
+        AND EXISTS (SELECT 1 FROM pg_attribute f WHERE f.attrelid = c.oid AND f.attname = 'farm_id' AND NOT f.attisdropped)
+        AND EXISTS (SELECT 1 FROM pg_attribute f WHERE f.attrelid = p.oid AND f.attname = 'farm_id' AND NOT f.attisdropped)`);
+    const checked = new Set<string>();
+    for (const g of await rows(sql`SELECT tgrelid::regclass::text AS t, encode(tgargs, 'hex') AS h FROM pg_trigger WHERE tgname = 'pulse_farm_guard'`)) {
+      const parts = Buffer.from(g.h, 'hex').toString('utf8').split('\0').filter(Boolean);
+      for (let i = 0; i < parts.length; i += 2) checked.add(`${g.t}.${parts[i + 1]} -> ${parts[i]}`);
+    }
+    expect(links.length).toBeGreaterThan(100);
+    expect(links.map((l: any) => `${l.child}.${l.col} -> ${l.parent}`).filter((l: string) => !checked.has(l))).toEqual([]);
+  });
 });
