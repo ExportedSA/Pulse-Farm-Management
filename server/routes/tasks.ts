@@ -232,7 +232,9 @@ router.get('/', requireAuth, async (req, res) => {
  * GET /api/tasks/:id
  * Get a single task
  */
-router.get('/:id', requireAuth, async (req, res) => {
+router.get('/:id', requireAuth, async (req, res, next) => {
+  // Not an id: leave it to the named routes declared further down (e.g. /jobs)
+  if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return next();
   try {
     const { id } = req.params;
     const farmId = (req.user as any).farmId;

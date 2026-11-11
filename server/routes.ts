@@ -70,9 +70,6 @@ import { catalogueRouter, applicationsRouter, docketsRouter, restrictionsRouter,
 import { tagsRouter, attachmentsRouter, searchRouter } from "./routes/farm-data";
 import animalTagsRouter from "./routes/animal-tags";
 // Phase overlay routes
-import medCoreRouter from "./routes/med.core";
-import medWithholdRouter from "./routes/med.withhold";
-import medWithholdIdsRouter from "./routes/med.withhold.ids";
 import milkRouter from "./milk-routes";
 import financialRouter from "./financial-routes";
 import syncCoreRouter from "./routes/sync.core";
@@ -204,10 +201,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(/^\/api\/animals\/(tags\/bulk|[^/]+\/tags|[^/]+\/tag-history)/, requireAuth);
   app.use(animalTagsRouter);
 
-  // ===== PHASE OVERLAY: MEDICINE & WITHHOLD =====
-  app.use("/api/med", requireAuth, medCoreRouter);
-  app.use("/api/med/withhold", requireAuth, medWithholdRouter);
-  app.use("/api/med/withhold-ids", requireAuth, medWithholdIdsRouter);
 
 
   // ===== PHASE OVERLAY: OFFLINE SYNC =====

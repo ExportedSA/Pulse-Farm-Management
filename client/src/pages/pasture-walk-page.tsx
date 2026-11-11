@@ -95,7 +95,7 @@ export default function PastureWalkPage() {
   // Rotation calculator settings
   const [rotationCalc, setRotationCalc] = useState({
     customGrowthRate: 0, // 0 = use measured, otherwise override
-    seasonalAdjustment: true,
+    seasonalAdjustment: false, // not offered: there's no source for "typical" monthly growth
   });
   const [showRotationCalc, setShowRotationCalc] = useState(false);
   
@@ -594,7 +594,7 @@ export default function PastureWalkPage() {
               {(() => {
                 // Calculate all metrics
                 const totalArea = farmCover?.paddocks.reduce((sum, p) => sum + (p.area || 0), 0) || 0;
-                const effectiveArea = totalArea || farmMetrics.effectiveArea || 100;
+                const effectiveArea = totalArea || farmMetrics.effectiveArea || 0;
                 const afc = farmCover?.summary.weightedAverageCover || farmCover?.summary.averageCover || 0;
                 const growthRate = farmCover?.summary.averageGrowthRate || 0;
                 const dailyDemand = farmMetrics.herdSize * farmMetrics.demandPerCow;
@@ -913,8 +913,8 @@ export default function PastureWalkPage() {
                 const totalSpringDays = differenceInDays(balanceDate, springStart);
                 const springProgress = Math.min(100, Math.max(0, (daysSinceSpringStart / totalSpringDays) * 100));
                 
-                const totalPaddocks = farmCover?.summary.totalPaddocks || pastures.length || 20;
-                const totalArea = farmCover?.paddocks.reduce((sum, p) => sum + (p.area || 0), 0) || farmMetrics.effectiveArea || 100;
+                const totalPaddocks = farmCover?.summary.totalPaddocks || pastures.length || 0;
+                const totalArea = farmCover?.paddocks.reduce((sum, p) => sum + (p.area || 0), 0) || farmMetrics.effectiveArea || 0;
                 const growthRate = farmCover?.summary.averageGrowthRate || 30;
                 const afc = farmCover?.summary.weightedAverageCover || 2200;
                 
@@ -926,7 +926,7 @@ export default function PastureWalkPage() {
                 const areaPerDay = (totalArea / Math.max(1, daysToFirstRound)).toFixed(2);
                 
                 // First round tracking
-                const firstRoundProgress = (rotationPlanner.paddocksGrazedFirstRound / totalPaddocks) * 100;
+                const firstRoundProgress = totalPaddocks > 0 ? (rotationPlanner.paddocksGrazedFirstRound / totalPaddocks) * 100 : 0;
                 const paddocksRemaining = totalPaddocks - rotationPlanner.paddocksGrazedFirstRound;
                 const daysPerPaddock = daysToFirstRound > 0 && paddocksRemaining > 0 
                   ? (daysToFirstRound / paddocksRemaining).toFixed(1) 
@@ -1182,14 +1182,14 @@ export default function PastureWalkPage() {
                                 <div className="flex justify-between">
                                   <span className="text-sm text-muted-foreground">Demand Rate</span>
                                   <span className="font-medium text-orange-600">
-                                    -{Math.round((farmMetrics.herdSize * farmMetrics.demandPerCow) / totalArea)} kg DM/ha/day
+                                    -{Math.round((totalArea > 0 ? (farmMetrics.herdSize * farmMetrics.demandPerCow) / totalArea : 0))} kg DM/ha/day
                                   </span>
                                 </div>
                                 <div className="flex justify-between border-t pt-2">
                                   <span className="text-sm font-medium">Net Balance</span>
-                                  <span className={`font-bold ${growthRate - ((farmMetrics.herdSize * farmMetrics.demandPerCow) / totalArea) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                    {growthRate - Math.round((farmMetrics.herdSize * farmMetrics.demandPerCow) / totalArea) >= 0 ? '+' : ''}
-                                    {Math.round(growthRate - ((farmMetrics.herdSize * farmMetrics.demandPerCow) / totalArea))} kg DM/ha/day
+                                  <span className={`font-bold ${growthRate - ((totalArea > 0 ? (farmMetrics.herdSize * farmMetrics.demandPerCow) / totalArea : 0)) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                    {growthRate - Math.round((totalArea > 0 ? (farmMetrics.herdSize * farmMetrics.demandPerCow) / totalArea : 0)) >= 0 ? '+' : ''}
+                                    {Math.round(growthRate - ((totalArea > 0 ? (farmMetrics.herdSize * farmMetrics.demandPerCow) / totalArea : 0)))} kg DM/ha/day
                                   </span>
                                 </div>
                               </div>
@@ -1325,35 +1325,15 @@ export default function PastureWalkPage() {
               </div>
 
               {(() => {
-                // Seasonal growth rate adjustments (NZ typical values)
-                const seasonalGrowthRates: Record<number, { name: string; rate: number; color: string }> = {
-                  0: { name: 'January', rate: 45, color: 'bg-yellow-500' },
-                  1: { name: 'February', rate: 35, color: 'bg-yellow-600' },
-                  2: { name: 'March', rate: 40, color: 'bg-orange-500' },
-                  3: { name: 'April', rate: 35, color: 'bg-orange-600' },
-                  4: { name: 'May', rate: 20, color: 'bg-blue-400' },
-                  5: { name: 'June', rate: 10, color: 'bg-blue-600' },
-                  6: { name: 'July', rate: 10, color: 'bg-blue-700' },
-                  7: { name: 'August', rate: 20, color: 'bg-green-400' },
-                  8: { name: 'September', rate: 45, color: 'bg-green-500' },
-                  9: { name: 'October', rate: 65, color: 'bg-green-600' },
-                  10: { name: 'November', rate: 60, color: 'bg-green-500' },
-                  11: { name: 'December', rate: 50, color: 'bg-yellow-400' },
-                };
-
-                const currentMonth = getMonth(new Date());
+                // The farm's measured growth (pasture walks), unless the farmer enters their own rate.
+                // There's no assumed monthly table: growth varies too much by district.
                 const measuredGrowth = farmCover?.summary.averageGrowthRate || 0;
-                const seasonalGrowth = seasonalGrowthRates[currentMonth].rate;
-                const effectiveGrowth = rotationCalc.customGrowthRate > 0 
-                  ? rotationCalc.customGrowthRate 
-                  : rotationCalc.seasonalAdjustment 
-                    ? seasonalGrowth 
-                    : measuredGrowth || seasonalGrowth;
+                const effectiveGrowth = rotationCalc.customGrowthRate > 0 ? rotationCalc.customGrowthRate : measuredGrowth;
 
-                const totalArea = farmCover?.paddocks.reduce((sum, p) => sum + (p.area || 0), 0) || farmMetrics.effectiveArea || 100;
-                const totalPaddocks = farmCover?.summary.totalPaddocks || pastures.length || 20;
+                const totalArea = farmCover?.paddocks.reduce((sum, p) => sum + (p.area || 0), 0) || farmMetrics.effectiveArea || 0;
+                const totalPaddocks = farmCover?.summary.totalPaddocks || pastures.length || 0;
                 const dailyDemand = farmMetrics.herdSize * farmMetrics.demandPerCow;
-                const demandPerHa = totalArea > 0 ? dailyDemand / totalArea : 30;
+                const demandPerHa = totalArea > 0 ? dailyDemand / totalArea : 0;
 
                 // Calculate rotation length: (Pre-grazing - Post-grazing) / Growth Rate
                 const coverToGrow = feedWedgeSettings.preGrazingTarget - feedWedgeSettings.postGrazingTarget;
@@ -1375,7 +1355,7 @@ export default function PastureWalkPage() {
                 let accumulatedArea = 0;
                 
                 for (const day of calendarDays) {
-                  if (day >= today) {
+                  if (day >= today && totalPaddocks > 0 && calculatedRotation > 0) {
                     accumulatedArea += areaPerDay;
                     const paddockNum = Math.floor(accumulatedArea / (totalArea / totalPaddocks)) + 1;
                     grazingSchedule[format(day, 'yyyy-MM-dd')] = {
@@ -1404,6 +1384,11 @@ export default function PastureWalkPage() {
 
                 return (
                   <>
+                    {effectiveGrowth === 0 && (
+                      <div className="p-3 rounded-lg border border-amber-300 bg-amber-50 text-sm text-amber-900">
+                        No growth rate yet. Record covers on two pasture walks to measure growth, or enter your own rate in Calculator Settings.
+                      </div>
+                    )}
                     {/* Rotation Summary Cards */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       <Card className="border-l-4 border-green-500">
@@ -1542,52 +1527,6 @@ export default function PastureWalkPage() {
                       </CardContent>
                     </Card>
 
-                    {/* Seasonal Growth Rates */}
-                    <Card>
-                      <CardHeader>
-                        <CardTitle>Seasonal Growth Adjustments</CardTitle>
-                        <CardDescription>Typical pasture growth rates by month (NZ conditions)</CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="grid grid-cols-6 md:grid-cols-12 gap-2">
-                          {Object.entries(seasonalGrowthRates).map(([month, data]) => {
-                            const isCurrentMonth = parseInt(month) === currentMonth;
-                            return (
-                              <div 
-                                key={month}
-                                className={`text-center p-2 rounded-lg ${isCurrentMonth ? 'ring-2 ring-blue-500' : ''}`}
-                              >
-                                <div 
-                                  className={`${data.color} text-white rounded p-2 mb-1`}
-                                  style={{ height: `${Math.max(20, data.rate)}px` }}
-                                >
-                                  <span className="text-xs font-bold">{data.rate}</span>
-                                </div>
-                                <p className="text-xs">{data.name.slice(0, 3)}</p>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <div className="mt-4 flex items-center justify-between text-sm">
-                          <div className="flex items-center gap-2">
-                            <span className="text-muted-foreground">Current month:</span>
-                            <Badge>{seasonalGrowthRates[currentMonth].name}</Badge>
-                            <span className="font-medium">{seasonalGrowthRates[currentMonth].rate} kg/ha/day</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-muted-foreground">Using:</span>
-                            <Badge variant={rotationCalc.seasonalAdjustment ? 'default' : 'secondary'}>
-                              {rotationCalc.customGrowthRate > 0 
-                                ? 'Custom' 
-                                : rotationCalc.seasonalAdjustment 
-                                  ? 'Seasonal' 
-                                  : 'Measured'}
-                            </Badge>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-
                     {/* Visual Calendar View */}
                     <Card>
                       <CardHeader>
@@ -1675,56 +1614,6 @@ export default function PastureWalkPage() {
                       </CardContent>
                     </Card>
 
-                    {/* Rotation Comparison */}
-                    <Card>
-                      <CardHeader>
-                        <CardTitle>Seasonal Rotation Comparison</CardTitle>
-                        <CardDescription>How rotation length changes through the year</CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Month</TableHead>
-                              <TableHead className="text-right">Growth Rate</TableHead>
-                              <TableHead className="text-right">Rotation Length</TableHead>
-                              <TableHead className="text-right">Area/Day</TableHead>
-                              <TableHead>Status</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {Object.entries(seasonalGrowthRates).map(([month, data]) => {
-                              const rotation = data.rate > 0 ? Math.round(coverToGrow / data.rate) : 999;
-                              const areaDay = totalArea / Math.max(rotation, 1);
-                              const isCurrentMonth = parseInt(month) === currentMonth;
-                              
-                              return (
-                                <TableRow key={month} className={isCurrentMonth ? 'bg-blue-50' : ''}>
-                                  <TableCell className="font-medium">
-                                    {data.name}
-                                    {isCurrentMonth && <Badge className="ml-2" variant="outline">Current</Badge>}
-                                  </TableCell>
-                                  <TableCell className="text-right">{data.rate} kg/ha/day</TableCell>
-                                  <TableCell className="text-right font-medium">{rotation} days</TableCell>
-                                  <TableCell className="text-right">{areaDay.toFixed(2)} ha</TableCell>
-                                  <TableCell>
-                                    {rotation <= 20 ? (
-                                      <Badge variant="destructive">Fast</Badge>
-                                    ) : rotation <= 30 ? (
-                                      <Badge className="bg-green-500">Optimal</Badge>
-                                    ) : rotation <= 45 ? (
-                                      <Badge variant="secondary">Slow</Badge>
-                                    ) : (
-                                      <Badge variant="outline">Very Slow</Badge>
-                                    )}
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
-                          </TableBody>
-                        </Table>
-                      </CardContent>
-                    </Card>
                   </>
                 );
               })()}
@@ -1820,7 +1709,7 @@ export default function PastureWalkPage() {
                   if (!paddock) return null;
                   
                   // Calculate grazing date based on position
-                  const totalArea = farmCover?.paddocks.reduce((sum, p) => sum + (p.area || 0), 0) || 100;
+                  const totalArea = farmCover?.paddocks.reduce((sum, p) => sum + (p.area || 0), 0) || farmMetrics.effectiveArea || 0;
                   const rotation = farmMetrics.targetRotation || 25;
                   const areaPerDay = totalArea / rotation;
                   let cumulativeArea = 0;
@@ -1828,7 +1717,7 @@ export default function PastureWalkPage() {
                     const prevPaddock = paddockData.find(p => p.id === grazingSequence[i]);
                     cumulativeArea += prevPaddock?.area || 0;
                   }
-                  const daysFromNow = Math.floor(cumulativeArea / areaPerDay);
+                  const daysFromNow = areaPerDay > 0 ? Math.floor(cumulativeArea / areaPerDay) : 0;
                   const grazingDate = addDays(new Date(), daysFromNow);
                   
                   // Check for conflicts
@@ -2191,7 +2080,7 @@ export default function PastureWalkPage() {
               {/* Alert Section */}
               {(farmMetrics?.herdSize * farmMetrics?.demandPerCow > 0) && (() => {
                 const totalArea = farmCover?.paddocks.reduce((sum, p) => sum + (p.area || 0), 0) || 0;
-                const effectiveArea = totalArea || farmMetrics.effectiveArea || 100;
+                const effectiveArea = totalArea || farmMetrics.effectiveArea || 0;
                 const afc = farmCover?.summary.weightedAverageCover || farmCover?.summary.averageCover || 0;
                 const growthRate = farmCover?.summary.averageGrowthRate || 0;
                 const dailyDemand = farmMetrics.herdSize * farmMetrics.demandPerCow;
@@ -2278,7 +2167,7 @@ export default function PastureWalkPage() {
                     <p className="text-2xl font-bold text-blue-600">
                       {(() => {
                         const totalArea = farmCover?.paddocks.reduce((sum, p) => sum + (p.area || 0), 0) || 0;
-                        const effectiveArea = totalArea || farmMetrics.effectiveArea || 100;
+                        const effectiveArea = totalArea || farmMetrics.effectiveArea || 0;
                         const afc = farmCover?.summary.weightedAverageCover || farmCover?.summary.averageCover || 0;
                         const growthRate = farmCover?.summary.averageGrowthRate || 0;
                         const dailyDemand = farmMetrics.herdSize * farmMetrics.demandPerCow;
@@ -2295,7 +2184,7 @@ export default function PastureWalkPage() {
                       <Badge variant={
                         (() => {
                           const totalArea = farmCover?.paddocks.reduce((sum, p) => sum + (p.area || 0), 0) || 0;
-                          const effectiveArea = totalArea || farmMetrics.effectiveArea || 100;
+                          const effectiveArea = totalArea || farmMetrics.effectiveArea || 0;
                           const afc = farmCover?.summary.weightedAverageCover || farmCover?.summary.averageCover || 0;
                           const growthRate = farmCover?.summary.averageGrowthRate || 0;
                           const dailyDemand = farmMetrics.herdSize * farmMetrics.demandPerCow;
@@ -2309,7 +2198,7 @@ export default function PastureWalkPage() {
                       }>
                         {(() => {
                           const totalArea = farmCover?.paddocks.reduce((sum, p) => sum + (p.area || 0), 0) || 0;
-                          const effectiveArea = totalArea || farmMetrics.effectiveArea || 100;
+                          const effectiveArea = totalArea || farmMetrics.effectiveArea || 0;
                           const afc = farmCover?.summary.weightedAverageCover || farmCover?.summary.averageCover || 0;
                           const growthRate = farmCover?.summary.averageGrowthRate || 0;
                           const dailyDemand = farmMetrics.herdSize * farmMetrics.demandPerCow;
@@ -2334,7 +2223,7 @@ export default function PastureWalkPage() {
                     <p className="text-2xl font-bold text-orange-600">
                       {(() => {
                         const totalArea = farmCover?.paddocks.reduce((sum, p) => sum + (p.area || 0), 0) || 0;
-                        const effectiveArea = totalArea || farmMetrics.effectiveArea || 100;
+                        const effectiveArea = totalArea || farmMetrics.effectiveArea || 0;
                         const afc = farmCover?.summary.weightedAverageCover || farmCover?.summary.averageCover || 0;
                         const growthRate = farmCover?.summary.averageGrowthRate || 0;
                         const dailyDemand = farmMetrics.herdSize * farmMetrics.demandPerCow;
@@ -2351,7 +2240,7 @@ export default function PastureWalkPage() {
                       <Badge variant={
                         (() => {
                           const totalArea = farmCover?.paddocks.reduce((sum, p) => sum + (p.area || 0), 0) || 0;
-                          const effectiveArea = totalArea || farmMetrics.effectiveArea || 100;
+                          const effectiveArea = totalArea || farmMetrics.effectiveArea || 0;
                           const afc = farmCover?.summary.weightedAverageCover || farmCover?.summary.averageCover || 0;
                           const growthRate = farmCover?.summary.averageGrowthRate || 0;
                           const dailyDemand = farmMetrics.herdSize * farmMetrics.demandPerCow;
@@ -2365,7 +2254,7 @@ export default function PastureWalkPage() {
                       }>
                         {(() => {
                           const totalArea = farmCover?.paddocks.reduce((sum, p) => sum + (p.area || 0), 0) || 0;
-                          const effectiveArea = totalArea || farmMetrics.effectiveArea || 100;
+                          const effectiveArea = totalArea || farmMetrics.effectiveArea || 0;
                           const afc = farmCover?.summary.weightedAverageCover || farmCover?.summary.averageCover || 0;
                           const growthRate = farmCover?.summary.averageGrowthRate || 0;
                           const dailyDemand = farmMetrics.herdSize * farmMetrics.demandPerCow;
@@ -2390,7 +2279,7 @@ export default function PastureWalkPage() {
                     <p className="text-2xl font-bold text-purple-600">
                       {(() => {
                         const totalArea = farmCover?.paddocks.reduce((sum, p) => sum + (p.area || 0), 0) || 0;
-                        const effectiveArea = totalArea || farmMetrics.effectiveArea || 100;
+                        const effectiveArea = totalArea || farmMetrics.effectiveArea || 0;
                         const afc = farmCover?.summary.weightedAverageCover || farmCover?.summary.averageCover || 0;
                         const growthRate = farmCover?.summary.averageGrowthRate || 0;
                         const dailyDemand = farmMetrics.herdSize * farmMetrics.demandPerCow;
@@ -2407,7 +2296,7 @@ export default function PastureWalkPage() {
                       <Badge variant={
                         (() => {
                           const totalArea = farmCover?.paddocks.reduce((sum, p) => sum + (p.area || 0), 0) || 0;
-                          const effectiveArea = totalArea || farmMetrics.effectiveArea || 100;
+                          const effectiveArea = totalArea || farmMetrics.effectiveArea || 0;
                           const afc = farmCover?.summary.weightedAverageCover || farmCover?.summary.averageCover || 0;
                           const growthRate = farmCover?.summary.averageGrowthRate || 0;
                           const dailyDemand = farmMetrics.herdSize * farmMetrics.demandPerCow;
@@ -2421,7 +2310,7 @@ export default function PastureWalkPage() {
                       }>
                         {(() => {
                           const totalArea = farmCover?.paddocks.reduce((sum, p) => sum + (p.area || 0), 0) || 0;
-                          const effectiveArea = totalArea || farmMetrics.effectiveArea || 100;
+                          const effectiveArea = totalArea || farmMetrics.effectiveArea || 0;
                           const afc = farmCover?.summary.weightedAverageCover || farmCover?.summary.averageCover || 0;
                           const growthRate = farmCover?.summary.averageGrowthRate || 0;
                           const dailyDemand = farmMetrics.herdSize * farmMetrics.demandPerCow;
@@ -2481,7 +2370,7 @@ export default function PastureWalkPage() {
                   <div className="space-y-4">
                     {(() => {
                       const totalArea = farmCover?.paddocks.reduce((sum, p) => sum + (p.area || 0), 0) || 0;
-                      const effectiveArea = totalArea || farmMetrics.effectiveArea || 100;
+                      const effectiveArea = totalArea || farmMetrics.effectiveArea || 0;
                       const afc = farmCover?.summary.weightedAverageCover || farmCover?.summary.averageCover || 0;
                       const growthRate = farmCover?.summary.averageGrowthRate || 0;
                       const dailyDemand = farmMetrics.herdSize * farmMetrics.demandPerCow;
@@ -2539,7 +2428,7 @@ export default function PastureWalkPage() {
                     <p className="text-2xl font-bold text-blue-600">
                       ${(() => {
                         const totalArea = farmCover?.paddocks.reduce((sum, p) => sum + (p.area || 0), 0) || 0;
-                        const effectiveArea = totalArea || farmMetrics.effectiveArea || 100;
+                        const effectiveArea = totalArea || farmMetrics.effectiveArea || 0;
                         const afc = farmCover?.summary.weightedAverageCover || farmCover?.summary.averageCover || 0;
                         const growthRate = farmCover?.summary.averageGrowthRate || 0;
                         const dailyDemand = farmMetrics.herdSize * farmMetrics.demandPerCow;
@@ -3543,14 +3432,7 @@ export default function PastureWalkPage() {
               </p>
               <div className="space-y-2">
                 <div 
-                  className={`p-3 border rounded-lg cursor-pointer ${rotationCalc.seasonalAdjustment && rotationCalc.customGrowthRate === 0 ? 'border-blue-500 bg-blue-50' : ''}`}
-                  onClick={() => setRotationCalc({ ...rotationCalc, seasonalAdjustment: true, customGrowthRate: 0 })}
-                >
-                  <p className="font-medium">Seasonal Average</p>
-                  <p className="text-xs text-muted-foreground">Use typical NZ growth rates for the current month</p>
-                </div>
-                <div 
-                  className={`p-3 border rounded-lg cursor-pointer ${!rotationCalc.seasonalAdjustment && rotationCalc.customGrowthRate === 0 ? 'border-blue-500 bg-blue-50' : ''}`}
+                  className={`p-3 border rounded-lg cursor-pointer ${rotationCalc.customGrowthRate === 0 ? 'border-blue-500 bg-blue-50' : ''}`}
                   onClick={() => setRotationCalc({ ...rotationCalc, seasonalAdjustment: false, customGrowthRate: 0 })}
                 >
                   <p className="font-medium">Measured Growth</p>
@@ -3561,7 +3443,7 @@ export default function PastureWalkPage() {
                   onClick={() => setRotationCalc({ ...rotationCalc, customGrowthRate: 40 })}
                 >
                   <p className="font-medium">Custom Value</p>
-                  <p className="text-xs text-muted-foreground">Enter your own growth rate estimate</p>
+                  <p className="text-xs text-muted-foreground">Enter your own growth rate, e.g. from your district's growth data</p>
                 </div>
               </div>
             </div>
@@ -3587,17 +3469,8 @@ export default function PastureWalkPage() {
             <div className="p-4 bg-muted rounded-lg">
               <p className="text-sm font-medium mb-2">Calculation Preview</p>
               {(() => {
-                const currentMonth = getMonth(new Date());
-                const seasonalRates: Record<number, number> = {
-                  0: 45, 1: 35, 2: 40, 3: 35, 4: 20, 5: 10,
-                  6: 10, 7: 20, 8: 45, 9: 65, 10: 60, 11: 50
-                };
                 const measuredGrowth = farmCover?.summary.averageGrowthRate || 0;
-                const effectiveGrowth = rotationCalc.customGrowthRate > 0 
-                  ? rotationCalc.customGrowthRate 
-                  : rotationCalc.seasonalAdjustment 
-                    ? seasonalRates[currentMonth] 
-                    : measuredGrowth || seasonalRates[currentMonth];
+                const effectiveGrowth = rotationCalc.customGrowthRate > 0 ? rotationCalc.customGrowthRate : measuredGrowth;
                 const coverToGrow = feedWedgeSettings.preGrazingTarget - feedWedgeSettings.postGrazingTarget;
                 const rotation = effectiveGrowth > 0 ? Math.round(coverToGrow / effectiveGrowth) : 0;
 
@@ -3608,7 +3481,7 @@ export default function PastureWalkPage() {
                     <span className="text-muted-foreground">Cover to regrow:</span>
                     <span className="font-medium">{coverToGrow} kg/ha</span>
                     <span className="text-muted-foreground">Calculated rotation:</span>
-                    <span className="font-bold text-green-600">{rotation} days</span>
+                    <span className="font-bold text-green-600">{rotation ? `${rotation} days` : 'needs a growth rate'}</span>
                   </div>
                 );
               })()}
@@ -3618,7 +3491,7 @@ export default function PastureWalkPage() {
             <Button variant="outline" onClick={() => {
               setRotationCalc({
                 customGrowthRate: 0,
-                seasonalAdjustment: true,
+                seasonalAdjustment: false,
               });
             }}>
               Reset to Defaults
