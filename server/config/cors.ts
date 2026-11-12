@@ -17,6 +17,12 @@ const getAllowedOrigins = (): string[] => {
   if (process.env.PRODUCTION_ORIGIN) {
     origins.push(process.env.PRODUCTION_ORIGIN);
   }
+
+  // The address Pulse is served from (also used for links in emails): the web pages call the
+  // API from it, so it must always be allowed
+  if (process.env.APP_URL) {
+    try { origins.push(new URL(process.env.APP_URL).origin); } catch { /* reported where APP_URL is used */ }
+  }
   
   // Remove duplicates and filter out empty strings
   return [...new Set(origins.filter(Boolean))];

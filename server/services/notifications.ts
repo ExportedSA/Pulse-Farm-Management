@@ -2,7 +2,8 @@ import { db } from "../db";
 import { users, staffProfiles } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import sgMail from "@sendgrid/mail";
-import { Twilio } from "twilio";
+// twilio is a CommonJS package: a named import works under tsx but not in the built server
+import twilio from "twilio";
 
 // Lazy initialization for SendGrid
 function getSendGridClient() {
@@ -32,7 +33,7 @@ function getTwilioClient() {
     return null;
   }
   
-  return new Twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
+  return twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
 }
 
 // Notification interface

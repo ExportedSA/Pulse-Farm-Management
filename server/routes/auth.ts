@@ -3,10 +3,14 @@ import { z } from 'zod';
 import { db } from '../db';
 import { users, farms, farmMembers } from '@shared/schema';
 import { eq } from 'drizzle-orm';
-import { hashPassword } from '../password';
-import { generateToken, generateRefreshToken, verifyToken, requireAuth, AUTH_COOKIE, authCookieOptions, type AuthenticatedRequest } from '../middleware/auth';
+import { hashPassword, verifyPassword } from '../password';
+import { generateToken, generateRefreshToken, verifyToken, requireAuth, optionalAuth, AUTH_COOKIE, authCookieOptions, type AuthenticatedRequest } from '../middleware/auth';
 import { sanitizeUser } from '../auth-utils';
 import { getUserFarm, getFarmRole } from '../domain/farms';
+import {
+  MIN_PASSWORD, InviteError, normaliseEmail, findUserByEmail, lookupInvite, acceptInvite,
+  requestPasswordReset, resetPassword,
+} from '../domain/accounts';
 
 const router = Router();
 
@@ -14,8 +18,9 @@ const router = Router();
 const registerSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
   email: z.string().email('Invalid email address'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
-  farmName: z.string().optional(),
+  password: z.string().min(MIN_PASSWORD, `Password must be at least ${MIN_PASSWORD} characters`),
+  farmName: z.string().trim().min(1).max(255).optional(),
+  acceptTerms: z.boolean().optional(), // the sign-up page's "I agree to the terms" box
 });
 
 const loginSchema = z.object({
@@ -31,11 +36,11 @@ const refreshTokenSchema = z.object({
 router.post('/register', async (req, res) => {
   try {
     const validatedData = registerSchema.parse(req.body);
-    const { name, email, password, farmName } = validatedData;
+    const { name, password, farmName, acceptTerms } = validatedData;
+    const email = normaliseEmail(validatedData.email);
 
-    // Check if user already exists
-    const existingUser = await db.select().from(users).where(eq(users.email, email)).limit(1);
-    if (existingUser.length > 0) {
+    // Check if user already exists (emails are matched ignoring case)
+    if (await findUserByEmail(email)) {
       return res.status(409).json({
         error: 'User already exists',
         message: 'An account with this email already exists'
@@ -64,6 +69,8 @@ router.post('/register', async (req, res) => {
           name: farmName,
           contactEmail: email,
           isActive: true,
+          // When the owner agreed to the (draft) terms on the sign-up page
+          settings: acceptTerms ? { signup: { termsAcceptedAt: new Date().toISOString() } } : undefined,
         }).returning();
         await tx.insert(farmMembers).values({ farmId: farm.id, userId: newUser.id, role: 'owner' });
       }
@@ -118,8 +125,8 @@ router.post('/login', async (req, res) => {
     const validatedData = loginSchema.parse(req.body);
     const { email, password } = validatedData;
 
-    // Find user
-    const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    // Find user (emails are matched ignoring case)
+    const user = await findUserByEmail(email);
     if (!user) {
       return res.status(401).json({
         error: 'Invalid credentials',
@@ -136,7 +143,6 @@ router.post('/login', async (req, res) => {
     }
 
     // Verify password
-    const { verifyPassword } = await import('../password');
     const isValidPassword = await verifyPassword(password, user.password);
     if (!isValidPassword) {
       return res.status(401).json({
@@ -283,6 +289,97 @@ router.get(['/me', '/user'], requireAuth, async (req: AuthenticatedRequest, res)
       error: 'Failed to get user info',
       message: 'An error occurred while fetching user information'
     });
+  }
+});
+
+// Sign a user in to one farm: the farm is part of the sign-in token
+function signInTo(res: any, user: typeof users.$inferSelect, farmId: string | undefined) {
+  const payload = { userId: user.id, name: user.name, email: user.email ?? undefined, role: user.role, farmId };
+  const accessToken = generateToken(payload);
+  res.cookie(AUTH_COOKIE, accessToken, authCookieOptions);
+  return { accessToken, refreshToken: generateRefreshToken(payload) };
+}
+
+function inviteFailure(res: any, error: unknown, what: string) {
+  if (error instanceof InviteError) return res.status(error.status).json({ error: error.message });
+  if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0]?.message ?? 'Validation failed', details: error.errors });
+  console.error(`${what} error:`, error);
+  res.status(500).json({ error: `${what} failed` });
+}
+
+const tokenParam = z.string().min(20).max(100);
+
+// GET /api/auth/invite/:token - What a join link is for (shown before joining)
+router.get('/invite/:token', optionalAuth as any, async (req, res) => {
+  const signedIn = (req as AuthenticatedRequest).user;
+  try {
+    const { invite, farmName, inviterName, account } = await lookupInvite(tokenParam.parse(req.params.token));
+    res.json({
+      farmName, inviterName, email: invite.email, role: invite.role, expiresAt: invite.expiresAt,
+      hasAccount: !!account,
+      signedInAsInvitee: !!account && signedIn?.userId === account.id,
+    });
+  } catch (error) {
+    inviteFailure(res, error, 'Invite lookup');
+  }
+});
+
+// POST /api/auth/invite/:token/accept - Join the farm. New to Pulse: name and a password make the
+// account. Already on Pulse: their password (or being signed in as them) proves it's them.
+router.post('/invite/:token/accept', optionalAuth as any, async (req, res) => {
+  const signedIn = (req as AuthenticatedRequest).user;
+  try {
+    const token = tokenParam.parse(req.params.token);
+    const { invite, account } = await lookupInvite(token);
+    let user = account;
+    if (user) {
+      if (!user.isActive) return res.status(403).json({ error: 'This account has been disabled' });
+      if (signedIn?.userId !== user.id) {
+        const { password } = z.object({ password: z.string().min(1, 'Enter your password') }).parse(req.body);
+        if (!(await verifyPassword(password, user.password))) return res.status(401).json({ error: 'Wrong password for this account' });
+      }
+    } else {
+      const { name, password } = z.object({
+        name: z.string().trim().min(2, 'Enter your name'),
+        password: z.string().min(MIN_PASSWORD, `Use at least ${MIN_PASSWORD} characters for your password`),
+      }).parse(req.body);
+      [user] = await db.insert(users).values({
+        name, email: invite.email, password: await hashPassword(password), role: invite.role, isActive: true,
+      }).returning();
+    }
+    await acceptInvite(token, user.id);
+    await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
+    const tokens = signInTo(res, user, invite.farmId);
+    res.json({ user: sanitizeUser(user), farmId: invite.farmId, ...tokens });
+  } catch (error) {
+    inviteFailure(res, error, 'Joining the farm');
+  }
+});
+
+// POST /api/auth/forgot-password - Email a reset link. Always the same answer, so it can't be
+// used to find out who has an account.
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = z.object({ email: z.string().email('Enter a valid email address') }).parse(req.body);
+    await requestPasswordReset(email);
+    res.json({ success: true });
+  } catch (error) {
+    inviteFailure(res, error, 'Password reset request');
+  }
+});
+
+// POST /api/auth/reset-password - Choose a new password with a reset link
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { token, password } = z.object({
+      token: tokenParam,
+      password: z.string().min(MIN_PASSWORD, `Use at least ${MIN_PASSWORD} characters`),
+    }).parse(req.body);
+    const ok = await resetPassword(token, await hashPassword(password));
+    if (!ok) return res.status(410).json({ error: 'This reset link has expired or was already used. Ask for a new one.' });
+    res.json({ success: true });
+  } catch (error) {
+    inviteFailure(res, error, 'Password reset');
   }
 });
 

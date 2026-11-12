@@ -173,56 +173,40 @@ class EmailService {
   /**
    * Send an email
    */
-  async sendEmail(options: EmailOptions): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  async sendEmail(options: EmailOptions): Promise<{ success: boolean; messageId?: string; error?: string; logged?: boolean }> {
     if (!this.isConfigured) {
-      console.log('[Email Service] Not configured - would send email:', {
+      // Live, an email that can't go is a failure the caller must show. In development the
+      // email is written to the server log instead (with its text, so links can be followed).
+      if (process.env.NODE_ENV === 'production') {
+        console.error('[Email Service] SENDGRID_API_KEY is not set; email not sent:', options.subject);
+        return { success: false, error: 'Email is not set up on this server' };
+      }
+      console.log('[Email Service] Not configured, so not sent. Would send:', {
         to: options.to,
         subject: options.subject,
         hasAttachments: !!options.attachments?.length,
       });
-      
-      // Return success for development/demo purposes
-      return {
-        success: true,
-        messageId: `demo-${Date.now()}`,
-      };
+      if (options.text) console.log(`[Email Service] Text:\n${options.text}`);
+      return { success: true, messageId: `logged-${Date.now()}`, logged: true };
     }
 
     try {
-      // In production, use SendGrid or AWS SES
-      // Example with SendGrid:
-      /*
-      const sgMail = require('@sendgrid/mail');
-      sgMail.setApiKey(this.apiKey);
-      
-      const msg = {
+      const { default: sgMail } = await import('@sendgrid/mail');
+      sgMail.setApiKey(this.apiKey!);
+      const [response] = await sgMail.send({
         to: options.to,
         from: this.fromEmail,
         subject: options.subject,
         html: options.html,
         text: options.text,
         attachments: options.attachments?.map(att => ({
-          content: typeof att.content === 'string' ? att.content : att.content.toString('base64'),
+          content: typeof att.content === 'string' ? Buffer.from(att.content).toString('base64') : att.content.toString('base64'),
           filename: att.filename,
           type: att.contentType,
           disposition: 'attachment',
         })),
-      };
-      
-      const response = await sgMail.send(msg);
-      return { success: true, messageId: response[0].headers['x-message-id'] };
-      */
-
-      // For now, log and return success
-      console.log('[Email Service] Sending email:', {
-        to: options.to,
-        subject: options.subject,
-      });
-
-      return {
-        success: true,
-        messageId: `msg-${Date.now()}`,
-      };
+      } as any);
+      return { success: true, messageId: String(response.headers['x-message-id'] ?? '') };
     } catch (error) {
       console.error('[Email Service] Error sending email:', error);
       return {

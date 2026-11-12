@@ -164,6 +164,7 @@ const menuItems = [
     icon: Rocket,
     subItems: [
       { title: "Onboarding", url: "/app/setup" },
+      { title: "Billing", url: "/app/billing" },
       { title: "Settings", url: "/app/settings" },
       { title: "Multi-Farm", url: "/app/multi-farm" },
     ],

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, Check, Plus, UserPlus, Users } from 'lucide-react';
+import { Building2, Check, Plus, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useFarm } from '@/lib/farm-context';
+import { InviteStaff } from '@/components/invite-staff';
 
 // The farms this person belongs to: switch between them, add a farm, and (for owners and
 // managers) see and add the people on each. Every farm's data is kept to that farm.
@@ -95,8 +96,6 @@ function FarmMembers({ farmId, isOwner }: { farmId: string; isOwner: boolean }) 
       return body.data;
     },
   });
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState('worker');
   const call = async (method: string, url: string, body?: unknown) => {
     const res = await fetch(url, { method, credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
     const out = await res.json().catch(() => ({}));
@@ -119,17 +118,7 @@ function FarmMembers({ farmId, isOwner }: { farmId: string; isOwner: boolean }) 
           </li>
         ))}
       </ul>
-      <form className="flex flex-wrap items-end gap-2" onSubmit={e => {
-        e.preventDefault();
-        if (!email.trim()) return;
-        call('POST', `/api/farms/${farmId}/members`, { email: email.trim(), role }).then(() => { toast.success('Added'); setEmail(''); }, err => toast.error(err.message));
-      }}>
-        <div className="space-y-1"><Label htmlFor={`m-email-${farmId}`}>Add someone who already has a Pulse sign-in</Label><Input id={`m-email-${farmId}`} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="their email" /></div>
-        <select className="h-9 rounded-md border bg-background px-2 text-sm" value={role} onChange={e => setRole(e.target.value)} aria-label="Role">
-          {['manager', 'worker', 'viewer', 'contractor', ...(isOwner ? ['owner'] : [])].map(r => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
-        </select>
-        <Button type="submit" variant="outline"><UserPlus className="h-4 w-4 mr-1" />Add</Button>
-      </form>
+      <InviteStaff farmId={farmId} isOwner={isOwner} />
     </div>
   );
 }

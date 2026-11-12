@@ -81,7 +81,16 @@ export function initSentry() {
 }
 
 // Helper to capture exceptions with additional context
-export function captureException(error: Error, context?: Record<string, any>) {
+// Passwords and link secrets in a request body must never reach logs or Sentry
+const SECRET_KEYS = /^(password|currentPassword|newPassword|token|refreshToken|accessToken)$/i;
+function withoutSecrets(value: any, depth = 0): any {
+  if (!value || typeof value !== 'object' || depth > 6) return value;
+  if (Array.isArray(value)) return value.map(v => withoutSecrets(v, depth + 1));
+  return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, SECRET_KEYS.test(k) ? '[hidden]' : withoutSecrets(v, depth + 1)]));
+}
+
+export function captureException(error: Error, rawContext?: Record<string, any>) {
+  const context = withoutSecrets(rawContext);
   try {
     // Use newer Sentry API - getClient is on the Sentry object directly
     if (Sentry.getClient && Sentry.getClient()) {

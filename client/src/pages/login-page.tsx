@@ -122,6 +122,11 @@ export default function LoginPage() {
             </form>
           </Form>
 
+          <div className="mt-4 flex justify-between text-sm">
+            <a className="underline text-slate-600" href="/forgot-password" data-testid="link-forgot-password">Forgot password?</a>
+            <a className="underline text-slate-600" href="/signup" data-testid="link-signup">New farm? Sign up</a>
+          </div>
+
           {import.meta.env.DEV && <div className="mt-6 pt-6 border-t border-gray-200">
             <p className="text-sm text-gray-500 text-center">
               Demo credentials for testing:

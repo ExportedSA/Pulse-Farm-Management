@@ -17,6 +17,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { z } from "zod";
 import { Checkbox } from "@/components/ui/checkbox";
+import { FarmDataExport } from "@/components/farm-data-export";
 
 const conditionFormSchema = insertConditionSchema.extend({
   name: z.string().min(1, "Name is required"),
@@ -327,6 +328,7 @@ export default function SettingsPage() {
 
         <TabsContent value="farm">
           <FarmProfile />
+          <FarmDataExport />
         </TabsContent>
       </Tabs>
 

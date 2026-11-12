@@ -100,15 +100,36 @@ import MobileScanner from "@/pages/mobile-scanner";
 // Phase overlay imports
 import HealthReports from "@/pages/Reports";
 import OnboardingWizard from "@/pages/OnboardingWizard";
+// Before signing in: sign up, join a farm by invite, password reset, and the legal pages
+import SignupPage from "@/pages/signup-page";
+import JoinPage from "@/pages/join-page";
+import ForgotPasswordPage from "@/pages/forgot-password-page";
+import ResetPasswordPage from "@/pages/reset-password-page";
+import { PrivacyPage, TermsPage } from "@/pages/legal-pages";
+import BillingPage from "@/pages/billing-page";
+import { BillingBanner } from "@/components/billing-banner";
+
+// Screens shown on their own, without the app's menu: before signing in, and the legal pages
+function isPublicPath(location: string) {
+  return location === "/login" || location.startsWith("/visitor-signin/") || location.startsWith("/app/mobile-scanner")
+    || ["/signup", "/forgot-password", "/privacy", "/terms"].includes(location)
+    || location.startsWith("/join/") || location.startsWith("/reset-password/");
+}
 
 function Router() {
   const [location] = useLocation();
-  const isPublicRoute = location === "/login" || location.startsWith("/visitor-signin/") || location.startsWith("/app/mobile-scanner");
+  const isPublicRoute = isPublicPath(location);
 
   if (isPublicRoute) {
     return (
       <Switch>
         <Route path="/login" component={LoginPage} />
+        <Route path="/signup" component={SignupPage} />
+        <Route path="/join/:token" component={JoinPage} />
+        <Route path="/forgot-password" component={ForgotPasswordPage} />
+        <Route path="/reset-password/:token" component={ResetPasswordPage} />
+        <Route path="/privacy" component={PrivacyPage} />
+        <Route path="/terms" component={TermsPage} />
         <Route path="/visitor-signin/:code" component={VisitorPortalPage} />
         <Route path="/app/mobile-scanner" component={MobileScanner} />
         <Route component={NotFound} />
@@ -202,6 +223,7 @@ function Router() {
         <Route path="/app/health/inventory" component={MedicinesInventory} />
         <Route path="/app/health/reports" component={HealthReports} />
         <Route path="/app/setup" component={OnboardingWizard} />
+        <Route path="/app/billing" component={BillingPage} />
         <Route component={NotFound} />
       </Switch>
       </ScreenErrorBoundary>
@@ -409,7 +431,7 @@ function AppHeader() {
 function AppShell() {
   const [location] = useLocation();
   const { isAuthenticated, isLoading } = useAuth();
-  const isPublicRoute = location === "/login";
+  const isPublicRoute = isPublicPath(location) && !location.startsWith("/app/mobile-scanner") && !location.startsWith("/visitor-signin/");
   const style = {
     "--sidebar-width": "20rem",
     "--sidebar-width-icon": "4rem",
@@ -440,6 +462,7 @@ function AppShell() {
           <AppSidebar />
           <div className="flex flex-col flex-1 overflow-hidden min-w-0">
             <AppHeader />
+            <BillingBanner />
             <main className="flex-1 overflow-auto">
               <Router />
             </main>

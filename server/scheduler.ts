@@ -1,6 +1,7 @@
 import { runComplianceChecks, getComplianceSummary } from './domain/complianceChecks';
 import logger from './config/logger';
 import { runJobReminders } from './domain/job-reminders';
+import { syncCowCounts } from './domain/billing';
 import { systemDb, withFarmDb } from './db';
 import { farms } from '@shared/schema';
 import { eq } from 'drizzle-orm';
@@ -187,6 +188,13 @@ export function initializeScheduler(): void {
   const remind = () => runJobReminders().catch(error => logger.error({ error }, 'Job reminders failed'));
   jobReminderStart = setTimeout(remind, 60 * 1000);
   jobReminderInterval = setInterval(remind, 15 * 60 * 1000);
+
+  // Billing: send each subscribed farm's cow count to Stripe daily (does nothing without Stripe)
+  const syncCows = () => syncCowCounts()
+    .then(r => r.changed && logger.info(r, 'Billing cow counts updated'))
+    .catch(error => logger.error({ error }, 'Billing cow count sync failed'));
+  setTimeout(syncCows, 5 * 60 * 1000);
+  setInterval(syncCows, ONE_DAY);
 
   logger.info('All scheduled jobs initialized');
 }

@@ -59,6 +59,8 @@ import pastureWalksRouter from "./routes/pasture-walks";
 import healthRouter from "./routes/health";
 import reportsRouter from "./routes/reports";
 import farmsRouter from "./routes/farms";
+import billingRouter from "./routes/billing";
+import { readOnlyWhenLapsed } from "./middleware/read-only";
 import recordsRouter from "./routes/records";
 import stockReconRouter from "./routes/stock-recon";
 import paddockMapRouter from "./routes/paddock-map";
@@ -92,7 +94,7 @@ import {
 
 // API paths open without signing in: signing in, health checks, and a visitor signing in at
 // the farm gate by QR code
-const PUBLIC_API = [/^\/auth(\/|$)/, /^\/health(\/db)?$/, /^\/visitor\/(qr|signin|signout)\//];
+const PUBLIC_API = [/^\/auth(\/|$)/, /^\/health(\/db)?$/, /^\/visitor\/(qr|signin|signout)\//, /^\/billing\/webhook$/];
 
 // The farm a request works in: the one in the user's token, while they're still an active
 // member of it. Checked at most once a minute per user and farm.
@@ -151,6 +153,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // the user's farm (row-level security), so no route can read or change another farm's rows
   app.use("/api", (req, res, next) => PUBLIC_API.some(p => p.test(req.path)) ? next() : requireAuth(req as any, res, next));
   app.use("/api", farmDbContext(memberFarm));
+  // A farm whose trial or subscription has ended is read-only (billing)
+  app.use("/api", readOnlyWhenLapsed);
 
   // ===== PHASE 4: ANIMAL GROUPS =====
   app.use("/api/groups", requireAuth, groupsRouter);
@@ -179,6 +183,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ===== FARMS & MEMBERSHIP =====
   app.use("/api/farms", requireAuth, farmsRouter);
+
+  // ===== BILLING (the Stripe webhook is open; Stripe signs it) =====
+  app.use("/api/billing", billingRouter);
 
   // ===== FARM RECORDS, TAGS, ATTACHMENTS & SEARCH =====
   app.use("/api/records", requireAuth, recordsRouter);

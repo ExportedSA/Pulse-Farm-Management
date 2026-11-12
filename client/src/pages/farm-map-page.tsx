@@ -195,6 +195,25 @@ export default function FarmMapPage() {
     else if (params.get("place") === "1") startDraw("hazard", "Marker", h.id);
   }, [state]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The setup wizard links here to start drawing (?draw=boundary or ?draw=paddock), with a way
+  // back to setup (&from=setup)
+  const drawLinked = useRef(false);
+  useEffect(() => {
+    if (!state || drawLinked.current) return;
+    drawLinked.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const draw = params.get("draw");
+    if (draw === "boundary") startDraw("feature", "Polygon", undefined, "boundary");
+    else if (draw === "paddock") startDraw("paddock", "Polygon");
+    if (params.get("from") === "setup") {
+      toast("Setting up your farm", {
+        description: draw === "paddock" ? "Draw each paddock, then go back to setup." : "Draw the boundary, then go back to setup.",
+        duration: Infinity,
+        action: { label: "Back to setup", onClick: () => window.location.assign("/app/setup") },
+      });
+    }
+  }, [state]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Frame the farm the first time the map loads
   const framed = useRef(false);
   useEffect(() => {
