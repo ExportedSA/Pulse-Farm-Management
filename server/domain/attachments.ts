@@ -1,7 +1,7 @@
 import { db } from '../db';
 import { attachments, farmRecords, jobs, tasks, animals, type Attachment, type TaggableType } from '@shared/schema';
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
-import { saveFileBuffer, deleteFile } from '../services/fileStorage';
+import { saveUpload, deleteFile } from '../services/fileStorage';
 import { ATTACHMENT_TYPES } from '../middleware/upload';
 
 // Things files can be attached to through the generic attachments API
@@ -41,13 +41,13 @@ export async function saveAttachments(
   const values = await Promise.all(files.map(async file => {
     const mimeType = file.mimetype.split(';')[0].trim().toLowerCase();
     const kind = ATTACHMENT_TYPES[mimeType] ?? 'document';
-    const { storageKey, publicUrl } = await saveFileBuffer(file.buffer, mimeType, file.originalname, `attachments/${farmId}`);
+    const { storageKey, url } = await saveUpload(farmId, 'attachments', { ...file, mimetype: mimeType });
     return {
       farmId,
       entityType,
       entityId,
       kind,
-      url: publicUrl,
+      url,
       storageKey,
       fileName: file.originalname,
       mimeType,

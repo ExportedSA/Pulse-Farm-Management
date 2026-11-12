@@ -15,26 +15,11 @@ import { chatWebSocket } from '../websocket';
 import { getUserId, getFarmId } from '../middleware/auth';
 import multer from 'multer';
 import path from 'path';
-import fs from 'fs';
+import { saveUpload } from '../services/fileStorage';
 
-// Configure multer for file uploads
-const uploadDir = path.join(process.cwd(), 'uploads', 'chat');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (_req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
+// Files are held in memory and saved by the storage module (local disk or the private bucket)
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
   fileFilter: (_req, file, cb) => {
     // Allow common file types
@@ -847,17 +832,14 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // Use the file storage service to save the file
-    const { saveFileBuffer } = await import('../services/fileStorage');
-    const { storageKey, publicUrl } = await saveFileBuffer(
-      req.file.buffer,
-      req.file.mimetype,
-      req.file.originalname,
-      'chat' // Store in chat subfolder
-    );
-    
+    const farmId = getFarmId(req);
+    if (!farmId) {
+      return res.status(403).json({ error: 'No farm selected' });
+    }
+    const { storageKey, url } = await saveUpload(farmId, 'chat', req.file);
+
     res.json({
-      url: publicUrl,
+      url,
       storageKey,
       filename: req.file.originalname,
       size: req.file.size,

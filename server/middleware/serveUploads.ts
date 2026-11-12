@@ -1,26 +1,18 @@
-import express from 'express';
-import path from 'path';
+import type { NextFunction, Request, Response } from 'express';
+import { normaliseKey, sendStoredFile } from '../services/fileStorage';
 
-// Create static middleware for serving uploads
-const serveUploads = express.static(path.join(process.cwd(), 'uploads'), {
-  // Set cache headers for better performance
-  maxAge: '1d',
-  etag: true,
-});
-
-// Middleware to check if we should serve local files
-export function uploadsMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
-  // Check if S3 is configured
-  if (process.env.S3_BUCKET_NAME) {
-    // S3 is configured, don't serve local files
-    return res.status(404).json({ 
-      error: 'Local file serving disabled when using S3',
-      message: 'Files are served from S3 when configured'
-    });
+/**
+ * Hands over an uploaded file: from local disk in development, or by redirecting to a short-lived signed
+ * link to the private bucket when S3 storage is set up. Mount after `uploadsGuard`, which checks the farm.
+ */
+export async function uploadsMiddleware(req: Request, res: Response, next: NextFunction) {
+  const key: string | null = res.locals.uploadKey ?? normaliseKey(req.path);
+  if (!key || (req.method !== 'GET' && req.method !== 'HEAD')) return res.status(404).end();
+  try {
+    await sendStoredFile(key, res, () => res.status(404).end());
+  } catch (err) {
+    next(err);
   }
-  
-  // S3 not configured, serve from local filesystem
-  serveUploads(req, res, next);
 }
 
 export default uploadsMiddleware;

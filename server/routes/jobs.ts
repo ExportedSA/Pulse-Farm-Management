@@ -9,6 +9,7 @@ import { db } from "../db";
 import { jobs, jobAssignments, users, pastures, farms, type Job } from "@shared/schema";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { uploadMultiplePhotos } from "../middleware/upload";
+import { saveUpload } from "../services/fileStorage";
 import { getFarmId, getUserId, requireFarm } from "../middleware/auth";
 import { getFarmRole, listFarmUserIds, type FarmRole } from "../domain/farms";
 import { createRecord } from "../domain/records";
@@ -95,10 +96,9 @@ const jobFieldsSchema = z.object({
 
 async function savePhotos(req: Request): Promise<string[]> {
   if (!req.files || !Array.isArray(req.files) || req.files.length === 0) return [];
-  const { saveFileBuffer } = await import("../services/fileStorage");
+  const farmId = getFarmId(req)!;
   return Promise.all(
-    req.files.map(async (file: Express.Multer.File) =>
-      (await saveFileBuffer(file.buffer, file.mimetype, file.originalname, "jobs")).publicUrl),
+    req.files.map(async (file: Express.Multer.File) => (await saveUpload(farmId, "jobs", file)).url),
   );
 }
 

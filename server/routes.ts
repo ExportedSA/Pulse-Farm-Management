@@ -142,8 +142,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ===== CORE HEALTH CHECKS (No auth middleware) =====
   app.use("/api", healthRouter);
 
-  // ===== STATIC FILE SERVING (Local only, disabled when S3 is configured) =====
-  // Signed-in members only: a farm's files are for that farm
+  // ===== UPLOADED FILES (local disk in development, private S3 bucket when S3_BUCKET_NAME is set) =====
+  // Signed-in members only: a farm's files are for that farm (see services/fileStorage.ts)
   app.use("/uploads", optionalAuth, farmDbContext(memberFarm), uploadsGuard, uploadsMiddleware);
 
   // Contractors reach only the jobs shared with them (checked before every other API route)
