@@ -45,6 +45,7 @@ import VisitorPortalPage from "@/pages/visitor-portal";
 import OperationsPage from "@/pages/operations-page";
 import VehicleRegistryPage from "@/pages/vehicle-registry-page";
 import StockReconciliationPage from "@/pages/stock-reconciliation-page";
+import StockSeasonReportPage from "@/pages/stock-season-report-page";
 import FinancialPage from "@/pages/financial-page";
 import MilkProductionPage from "@/pages/milk-production-page";
 import NZFAPCompliancePage from "@/pages/nzfap-compliance-page";
@@ -150,6 +151,7 @@ function Router() {
         <Route path="/app/batch-treatment" component={BatchTreatmentPage} />
         <Route path="/app/import" component={CSVImportPage} />
         <Route path="/app/stock-reconciliation" component={StockReconciliationPage} />
+        <Route path="/app/stock-reconciliation/seasons/:id/report" component={StockSeasonReportPage} />
         <Route path="/app/groups" component={GroupsManagement} />
         <Route path="/app/pastures" component={PasturesList} />
         <Route path="/app/pasture-rotation" component={PastureRotationPlanner} />

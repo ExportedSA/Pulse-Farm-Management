@@ -365,6 +365,10 @@ export const animals = pgTable('animals', {
     expectedCalfSireName?: string;
     expectedCalfSireBW?: number;
   }>(),
+  // How it came onto the farm: born, purchased or transferred_in (empty: already here when
+  // records started). startDate is the day it arrived. See shared/stock.ts.
+  arrival: varchar('arrival', { length: 20 }),
+  stockClass: varchar('stock_class', { length: 80 }), // set by hand, instead of from age and sex
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   version: integer('version').default(0).notNull(),
@@ -1516,6 +1520,11 @@ export const animalGroups = pgTable('animal_groups', {
   criteria: jsonb('criteria'), // For future dynamic groups: { breed: 'Holstein', status: 'active' }
   sortOrder: integer('sort_order').default(0).notNull(),
   metadata: jsonb('metadata'), // Extensibility: { tags: [], autoActions: {} }
+  // A mob: stock run together, checked against the stock tally for its class
+  isMob: boolean('is_mob').default(false).notNull(),
+  stockClass: varchar('stock_class', { length: 80 }),
+  headCount: integer('head_count'), // empty: count the animals in the group
+  currentPastureId: uuid('current_pasture_id').references(() => pastures.id),
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -2021,7 +2030,8 @@ export const stockTransactionTypeEnum = pgEnum('stock_transaction_type', [
   'transfer_in',
   'transfer_out',
   'birth',
-  'adjustment'
+  'adjustment',
+  'rations', // killed on farm for the farm's own use
 ]);
 
 export const stockTransactions = pgTable('stock_transactions', {
@@ -2034,6 +2044,9 @@ export const stockTransactions = pgTable('stock_transactions', {
   stockClass: varchar('stock_class', { length: 50 }),
   asdNumber: varchar('asd_number', { length: 50 }),
   otherPartyNait: varchar('other_party_nait', { length: 50 }),
+  // Made from an animal's record: its arrival or departure (see server/domain/stock.ts)
+  animalId: uuid('animal_id').references(() => animals.id),
+  source: varchar('source', { length: 20 }),
   deletedAt: timestamp('deleted_at'),
   type: stockTransactionTypeEnum('type').notNull(),
   date: date('date').notNull(),
@@ -2057,10 +2070,11 @@ export const stockTransactions = pgTable('stock_transactions', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
-// Stocktake: how many of a class were counted on farm on a date
+// A check on the tally: a stocktake of one class, or NAIT's count of animals at the farm's location
 export const stockCounts = pgTable('stock_counts', {
   id: uuid('id').primaryKey().defaultRandom(),
   farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
+  kind: varchar('kind', { length: 20 }).default('stocktake').notNull(), // stocktake | nait
   stockClass: varchar('stock_class', { length: 50 }).notNull(),
   count: integer('count').notNull(),
   countedAt: date('counted_at').notNull(),
@@ -2069,6 +2083,30 @@ export const stockCounts = pgTable('stock_counts', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 export type StockCount = typeof stockCounts.$inferSelect;
+
+// A stock season, running to the farm's balance date
+export const stockSeasons = pgTable('stock_seasons', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
+  startsOn: date('starts_on').notNull(),
+  endsOn: date('ends_on').notNull(),
+  closedAt: timestamp('closed_at'),
+  closedBy: uuid('closed_by').references(() => users.id),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+export type StockSeason = typeof stockSeasons.$inferSelect;
+
+// A season's opening head count per class, and its closing count once closed
+export const stockSeasonClasses = pgTable('stock_season_classes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
+  seasonId: uuid('season_id').references(() => stockSeasons.id, { onDelete: 'cascade' }).notNull(),
+  stockClass: varchar('stock_class', { length: 80 }).notNull(),
+  opening: integer('opening').notNull(),
+  closing: integer('closing'),
+});
 
 export const insertStockTransactionSchema = createInsertSchema(stockTransactions).omit({
   id: true,

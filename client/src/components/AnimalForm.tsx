@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { ARRIVALS, STOCK_CLASSES } from '@shared/stock';
 
 // Types
 interface Animal {
@@ -32,6 +33,9 @@ interface Animal {
   notes: string | null;
   damId: string | null;
   sireId: string | null;
+  arrival?: string | null;
+  startDate?: string | null;
+  stockClass?: string | null;
 }
 
 interface AnimalFormProps {
@@ -58,6 +62,9 @@ interface FormData {
   milkStatus: string;
   a2Status: string;
   notes: string;
+  arrival: string;
+  startDate: string;
+  stockClass: string;
 }
 
 const BREED_OPTIONS = [
@@ -126,6 +133,9 @@ export default function AnimalForm({ existingAnimal, onSuccess, onCancel }: Anim
     milkStatus: '',
     a2Status: '',
     notes: '',
+    arrival: '',
+    startDate: '',
+    stockClass: '',
   });
 
   // Initialize form with existing animal data
@@ -149,6 +159,9 @@ export default function AnimalForm({ existingAnimal, onSuccess, onCancel }: Anim
         milkStatus: existingAnimal.milkStatus || '',
         a2Status: existingAnimal.a2Status || '',
         notes: existingAnimal.notes || '',
+        arrival: existingAnimal.arrival || '',
+        startDate: existingAnimal.startDate || '',
+        stockClass: existingAnimal.stockClass || '',
       });
     }
   }, [existingAnimal]);
@@ -184,6 +197,10 @@ export default function AnimalForm({ existingAnimal, onSuccess, onCancel }: Anim
       if (formData.milkStatus) payload.milkStatus = formData.milkStatus;
       if (formData.a2Status) payload.a2Status = formData.a2Status;
       if (formData.notes) payload.notes = formData.notes;
+      // Stock reconciliation fields are sent even when cleared
+      payload.arrival = formData.arrival || null;
+      payload.startDate = formData.arrival === 'purchased' || formData.arrival === 'transferred_in' ? formData.startDate || null : null;
+      payload.stockClass = formData.stockClass || null;
 
       let result: Animal;
 
@@ -341,6 +358,41 @@ export default function AnimalForm({ existingAnimal, onSuccess, onCancel }: Anim
                 />
               </div>
             </div>
+          </div>
+
+          {/* Stock reconciliation */}
+          <div className="space-y-4">
+            <h3 className="font-medium text-gray-900">Stock reconciliation</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="arrival">How it came onto the farm</Label>
+                <select id="arrival" className="h-10 w-full rounded-md border bg-background px-2 text-sm"
+                  value={formData.arrival} onChange={(e) => handleChange('arrival', e.target.value)}>
+                  <option value="">Already here when records started</option>
+                  {(Object.keys(ARRIVALS) as (keyof typeof ARRIVALS)[]).map((a) => (
+                    <option key={a} value={a}>{ARRIVALS[a]}</option>
+                  ))}
+                </select>
+              </div>
+              {(formData.arrival === 'purchased' || formData.arrival === 'transferred_in') && (
+                <div className="space-y-2">
+                  <Label htmlFor="startDate">Date it arrived</Label>
+                  <Input id="startDate" type="date" value={formData.startDate}
+                    onChange={(e) => handleChange('startDate', e.target.value)} />
+                </div>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="stockClass">Stock class</Label>
+                <select id="stockClass" className="h-10 w-full rounded-md border bg-background px-2 text-sm"
+                  value={formData.stockClass} onChange={(e) => handleChange('stockClass', e.target.value)}>
+                  <option value="">From its age and sex</option>
+                  {STOCK_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            </div>
+            {formData.arrival === 'born' && !formData.dateOfBirth && (
+              <p className="text-xs text-amber-800">Add its date of birth so the birth is counted.</p>
+            )}
           </div>
 
           {/* Identification */}

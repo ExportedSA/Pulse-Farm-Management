@@ -22,7 +22,6 @@ import complianceRouter from "./routes/compliance";
 import jobsRouter from "./routes/jobs";
 import visitorRouter from "./visitor-routes";
 import vehicleRouter from "./vehicle-routes";
-import stockRouter from "./stock-routes";
 import mapRouter from "./map-routes";
 import rosterRouter from "./routes/roster";
 import animalsRouter from "./routes/animals";
@@ -51,7 +50,6 @@ import smartAlertsRouter from "./routes/smart-alerts";
 import photosRouter from "./routes/photos";
 import voiceNotesRouter from "./routes/voice-notes";
 import naitRouter from "./routes/nait";
-import stockTransactionsRouter from "./routes/stock-transactions";
 import bulkOperationsRouter from "./routes/bulk-operations";
 import animalTimelineRouter from "./routes/animal-timeline";
 import lineageRouter from "./routes/lineage";
@@ -224,8 +222,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ===== NAIT INTEGRATION =====
   app.use("/api/nait", requireAuth, naitRouter);
 
-  // ===== STOCK TRANSACTIONS =====
-  app.use("/api/stock", requireAuth, stockTransactionsRouter);
 
   // ===== BULK OPERATIONS =====
   app.use("/api/bulk", requireAuth, bulkOperationsRouter);
@@ -269,8 +265,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Vehicle Registry routes
   app.use("/api/vehicles", requireAuth, vehicleRouter);
   
-  // Stock Reconciliation routes
-  app.use("/api/stock", requireAuth, stockRouter);
   
   // Map & Task Pin routes
   app.use("/api/map", requireAuth, mapRouter);

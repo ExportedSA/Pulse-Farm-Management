@@ -30,6 +30,7 @@ import { db } from "../db";
 import { users } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import logger from "../config/logger";
+import { ARRIVALS, DEPARTURES, DEPARTURE_STATUS, type Departure } from "@shared/stock";
 
 const router = Router();
 
@@ -61,9 +62,20 @@ const createAnimalSchema = z.object({
   milkStatus: z.string().optional(),
   a2Status: z.string().optional(),
   notes: z.string().optional(),
+  // For stock reconciliation: how it came onto the farm, the day it arrived, and a class set by hand
+  arrival: z.enum(Object.keys(ARRIVALS) as [keyof typeof ARRIVALS]).nullish(),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format").nullish(),
+  stockClass: z.string().trim().max(80).nullish(),
 });
 
 const updateAnimalSchema = createAnimalSchema.partial();
+
+// How an animal left, and when
+const removeAnimalSchema = z.object({
+  fate: z.enum(Object.keys(DEPARTURES) as [Departure]).optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format").optional(),
+  reason: z.string().max(100).optional(),
+});
 
 // Health record validation schemas
 const createHealthRecordSchema = z.object({
@@ -315,12 +327,13 @@ router.delete("/:id", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "Animal not found" });
     }
 
-    // Get removal details from query params or body
-    const removalStatus = (req.query.status as 'sold' | 'deceased') || 'deceased';
-    const removalReason = req.body?.reason as string | undefined;
+    // How and when it left (older callers send ?status=sold|deceased)
+    const body = removeAnimalSchema.parse(req.body ?? {});
+    const fate: Departure = body.fate ?? (req.query.status === 'sold' ? 'Sold' : 'Died');
+    const removalStatus = DEPARTURE_STATUS[fate];
 
-    // Soft-delete: change status to sold/deceased
-    const animal = await removeAnimal(id, farmId, removalStatus, removalReason);
+    // Soft-delete: change status to sold/deceased, keeping the record
+    const animal = await removeAnimal(id, farmId, fate, body.date, body.reason);
     if (!animal) {
       return res.status(404).json({ error: "Animal not found" });
     }
@@ -339,6 +352,9 @@ router.delete("/:id", requireAuth, async (req, res) => {
     logger.info({ animalId: id, userId, farmId, status: removalStatus }, "Animal removed successfully");
     res.json({ message: "Animal removed successfully", animal });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors[0]?.message ?? "Invalid removal details", details: error.errors });
+    }
     logger.error({ error }, "Failed to remove animal");
     res.status(500).json({ error: "Failed to remove animal" });
   }

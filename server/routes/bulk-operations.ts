@@ -3,8 +3,19 @@ import { Router, type Request, type Response } from "express";
 import { storage } from "../storage";
 import { insertAnimalSchema } from "@shared/schema";
 import { z } from "zod";
+import { DEPARTURES, DEPARTURE_STATUS, type Departure } from "@shared/stock";
 
 const router = Router();
+
+const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format");
+const today = () => new Date().toISOString().split("T")[0];
+
+// What stock reconciliation needs when animals leave: how and when. Setting them active again clears it.
+function departure(status: "active" | "sold" | "deceased", fate?: Departure, date?: string) {
+  if (status === "active") return { status, dateRemoved: null, removalFate: null };
+  const how: Departure = fate && DEPARTURE_STATUS[fate] === status ? fate : status === "sold" ? "Sold" : "Died";
+  return { status, dateRemoved: date ?? today(), removalFate: how };
+}
 
 // POST /api/bulk/animals/status - Bulk update animal status
 router.post("/animals/status", async (req: Request, res: Response) => {
@@ -13,15 +24,17 @@ router.post("/animals/status", async (req: Request, res: Response) => {
       animalIds: z.array(z.string().uuid()),
       status: z.enum(["active", "sold", "deceased"]),
       reason: z.string().optional(),
+      fate: z.enum(Object.keys(DEPARTURES) as [Departure]).optional(),
+      date: isoDay.optional(),
     });
     
-    const { animalIds, status, reason } = schema.parse(req.body);
+    const { animalIds, status, fate, date } = schema.parse(req.body);
     
     const results: { success: string[]; failed: string[] } = { success: [], failed: [] };
     
     for (const animalId of animalIds) {
       try {
-        await storage.updateAnimal(animalId, { status });
+        await storage.updateAnimal(animalId, departure(status, fate, date));
         results.success.push(animalId);
       } catch (e) {
         results.failed.push(animalId);
@@ -157,9 +170,10 @@ router.post("/animals/delete", async (req: Request, res: Response) => {
     const schema = z.object({
       animalIds: z.array(z.string().uuid()),
       hardDelete: z.boolean().default(false), // If false, just set status to 'deceased'
+      date: isoDay.optional(),
     });
     
-    const { animalIds, hardDelete } = schema.parse(req.body);
+    const { animalIds, hardDelete, date } = schema.parse(req.body);
     
     const results: { success: string[]; failed: string[] } = { success: [], failed: [] };
     
@@ -169,7 +183,7 @@ router.post("/animals/delete", async (req: Request, res: Response) => {
           await storage.deleteAnimal(animalId);
         } else {
           // Soft delete - mark as deceased
-          await storage.updateAnimal(animalId, { status: "deceased" });
+          await storage.updateAnimal(animalId, departure("deceased", "Died", date));
         }
         results.success.push(animalId);
       } catch (e) {

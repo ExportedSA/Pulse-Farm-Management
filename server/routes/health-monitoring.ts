@@ -200,8 +200,10 @@ router.post("/mortality", async (req: Request, res: Response) => {
 
     const record = await storage.createMortalityRecord(validatedData);
 
-    // Update animal status to deceased
-    await storage.updateAnimal(validatedData.animalId, { status: 'deceased' });
+    // Update animal status to deceased, on the day it died (stock reconciliation counts it then)
+    await storage.updateAnimal(validatedData.animalId, {
+      status: 'deceased', dateRemoved: validatedData.deathDate, removalFate: 'Died',
+    });
 
     res.status(201).json(record);
   } catch (error) {

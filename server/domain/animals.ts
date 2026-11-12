@@ -1,6 +1,7 @@
 import { db } from '../db';
 import { animals, animalHealthRecords, users, type Animal } from '@shared/schema';
 import { eq, and, desc } from 'drizzle-orm';
+import { DEPARTURE_STATUS, type Departure } from '@shared/stock';
 
 // ===== CUSTOM ERROR CLASSES =====
 
@@ -81,6 +82,9 @@ export async function createAnimal(params: {
   milkStatus?: string;
   a2Status?: string;
   notes?: string;
+  arrival?: string | null;
+  startDate?: string | null;
+  stockClass?: string | null;
 }): Promise<Animal> {
   const [animal] = await db.insert(animals).values({
     ...params,
@@ -194,27 +198,30 @@ export async function updateAnimal(
 }
 
 /**
- * Soft-delete an animal by changing its status to 'deceased' or 'sold'.
- * This preserves the animal record for historical/compliance purposes.
- * 
+ * Record that an animal has left the farm, keeping its record for history and compliance.
+ * How it left (sold, died, killed for rations, transferred out) and when is what stock
+ * reconciliation counts.
+ *
  * @param id - The animal ID
  * @param farmId - The farm ID for access control
- * @param removalStatus - The status to set ('sold' or 'deceased')
+ * @param fate - How it left
+ * @param date - The day it left (yyyy-mm-dd); today if not given
  * @param removalReason - Optional reason for removal
  * @returns The updated animal record or null if not found
  */
 export async function removeAnimal(
   id: string,
   farmId: string,
-  removalStatus: 'sold' | 'deceased' = 'deceased',
+  fate: Departure = 'Died',
+  date?: string,
   removalReason?: string
 ): Promise<Animal | null> {
   const [animal] = await db
     .update(animals)
     .set({
-      status: removalStatus,
-      dateRemoved: new Date().toISOString().split('T')[0],
-      removalFate: removalStatus === 'sold' ? 'Sold' : 'Died',
+      status: DEPARTURE_STATUS[fate],
+      dateRemoved: date ?? new Date().toISOString().split('T')[0],
+      removalFate: fate,
       removalReason: removalReason || undefined,
       updatedAt: new Date(),
     })
