@@ -95,6 +95,12 @@ describe.skipIf(!live)('farm data isolation', () => {
     }
     await add('treatment', sql`INSERT INTO animal_treatments (farm_id, animal_id, staff_member_id, staff_member, date_time, condition, treatment_type) VALUES (${f}, ${bIds.animal}, ${user.b}, ${MARK}, '2026-01-01T00:00', ${MARK}, ${MARK}) RETURNING id`);
     await add('weight', sql`INSERT INTO weight_records (animal_id, weight, date, recorded_by, notes) VALUES (${bIds.animal}, 1, now(), ${user.b}, ${MARK}) RETURNING id`);
+    // A child row with no farm_id given: the farm guard fills it from the tag
+    await add('tag', sql`INSERT INTO tags (farm_id, name, slug) VALUES (${f}, ${MARK}, ${MARK.toLowerCase()}) RETURNING id`);
+    await systemDb.execute(sql`INSERT INTO taggings (tag_id, entity_type, entity_id) VALUES (${bIds.tag}, ${MARK}, ${bIds.animal})`);
+    // Farm B's own product, with an earlier version of it
+    await add('inputProduct', sql`INSERT INTO input_products (farm_id, kind, name, verification) VALUES (${f}, 'fertiliser', ${MARK}, 'farm_entered') RETURNING id`);
+    await systemDb.execute(sql`INSERT INTO product_versions (product_id, version, data) VALUES (${bIds.inputProduct}, 1, ${JSON.stringify({ name: MARK })}::jsonb)`);
   }, 120_000);
 
   afterAll(async () => {
@@ -189,5 +195,83 @@ describe.skipIf(!live)('farm data isolation', () => {
     }
     expect(links.length).toBeGreaterThan(100);
     expect(links.map((l: any) => `${l.child}.${l.col} -> ${l.parent}`).filter((l: string) => !checked.has(l))).toEqual([]);
+  });
+
+  it('every farm table has its own farm_id and row-level security', async () => {
+    // Read before a farm is chosen (signing in, picking a farm)
+    const shared = ['farms', 'farm_members'];
+    // A farm table: one with farm_id, or one linked to a farm table. Each must carry farm_id and
+    // the farm_isolation policy, so a query that forgets its farm filter can't reach other farms.
+    const tables = ((await systemDb.execute(sql`
+      WITH farm_tables AS (
+        SELECT c.oid FROM pg_class c
+        WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r'
+          AND (c.relname = 'farms' OR EXISTS (SELECT 1 FROM pg_attribute f WHERE f.attrelid = c.oid AND f.attname = 'farm_id' AND NOT f.attisdropped))
+          AND (c.relname = 'farms' OR c.relname <> ALL (${`{${shared.join(',')}}`}::text[]))
+      )
+      SELECT c.relname AS name,
+        EXISTS (SELECT 1 FROM pg_attribute f WHERE f.attrelid = c.oid AND f.attname = 'farm_id' AND NOT f.attisdropped) AS has_farm,
+        c.relrowsecurity AS rls,
+        EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid AND p.polname = 'farm_isolation') AS policy
+      FROM pg_class c
+      WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r'
+        AND c.relname <> ALL (${`{${shared.join(',')}}`}::text[])
+        AND (c.oid IN (SELECT oid FROM farm_tables)
+          OR EXISTS (SELECT 1 FROM pg_constraint k WHERE k.conrelid = c.oid AND k.contype = 'f' AND k.confrelid IN (SELECT oid FROM farm_tables)))`)) as any).rows;
+    expect(tables.length).toBeGreaterThan(100);
+    expect(tables.map((t: any) => t.name)).toContain('taggings');
+    const open = tables.filter((t: any) => !(t.has_farm && t.rls && t.policy))
+      .map((t: any) => `${t.name}:${t.has_farm ? '' : ' no farm_id'}${t.rls ? '' : ' no row-level security'}${t.policy ? '' : ' no farm_isolation policy'}`);
+    expect(open).toEqual([]);
+  });
+
+  it("a farm's connection can't see or link to another farm's child rows", async () => {
+    const { withFarmDb, db } = await import('../../server/db');
+    // The guard filled the child's farm from its parent
+    expect((await one(sql`SELECT farm_id FROM taggings WHERE tag_id = ${bIds.tag}`)).farm_id).toBe(farm.b);
+    const seen = await withFarmDb(farm.a, async () =>
+      ((await db.execute(sql`SELECT count(*)::int AS n FROM taggings WHERE tag_id = ${bIds.tag}`)) as any).rows[0].n);
+    expect(seen).toBe(0);
+    await expect(withFarmDb(farm.a, () =>
+      db.execute(sql`INSERT INTO taggings (tag_id, entity_type, entity_id) VALUES (${bIds.tag}, 'record', ${bIds.animal})`))).rejects.toThrow();
+    expect((await one(sql`SELECT count(*)::int AS n FROM taggings WHERE tag_id = ${bIds.tag}`)).n).toBe(1);
+  });
+
+  it("a farm's connection reads the shared product catalogue but only its own products", async () => {
+    const { withFarmDb, db } = await import('../../server/db');
+    const asFarm = async (farmId: string | null, q: any) => withFarmDb(farmId, async () => ((await db.execute(q)) as any).rows);
+    const builtIn = (await one(sql`SELECT id, name FROM input_products WHERE farm_id IS NULL LIMIT 1`));
+    expect(builtIn).toBeTruthy();
+    expect((await one(sql`SELECT farm_id FROM product_versions WHERE product_id = ${bIds.inputProduct}`)).farm_id).toBe(farm.b);
+
+    // Farm A: the shared catalogue, and nothing of farm B's
+    const [seen] = await asFarm(farm.a, sql`
+      SELECT (SELECT count(*) FROM input_products WHERE farm_id IS NULL)::int AS shared,
+             (SELECT count(*) FROM input_products WHERE id = ${bIds.inputProduct})::int AS theirs,
+             (SELECT count(*) FROM product_versions WHERE product_id = ${bIds.inputProduct})::int AS versions`);
+    expect(seen.shared).toBeGreaterThan(0);
+    expect(seen.theirs).toBe(0);
+    expect(seen.versions).toBe(0);
+    // Farm B sees its own
+    const [own] = await asFarm(farm.b, sql`SELECT count(*)::int AS n FROM input_products WHERE id = ${bIds.inputProduct}`);
+    expect(own.n).toBe(1);
+
+    // Farm A can't change farm B's product or the shared catalogue, or add to either
+    await asFarm(farm.a, sql`UPDATE input_products SET name = 'changed by A' WHERE id IN (${bIds.inputProduct}, ${builtIn.id})`);
+    await asFarm(farm.a, sql`DELETE FROM input_products WHERE id IN (${bIds.inputProduct}, ${builtIn.id})`);
+    await asFarm(farm.a, sql`DELETE FROM product_versions WHERE product_id = ${bIds.inputProduct}`);
+    await expect(asFarm(farm.a, sql`INSERT INTO input_products (farm_id, kind, name) VALUES (NULL, 'fertiliser', 'TEST shared by A')`)).rejects.toThrow();
+    await expect(asFarm(farm.a, sql`INSERT INTO input_products (farm_id, kind, name) VALUES (${farm.b}, 'fertiliser', 'TEST for B by A')`)).rejects.toThrow();
+    await expect(asFarm(farm.a, sql`INSERT INTO product_versions (product_id, version, data) VALUES (${bIds.inputProduct}, 2, '{}'::jsonb)`)).rejects.toThrow();
+    const after = await one(sql`
+      SELECT (SELECT name FROM input_products WHERE id = ${bIds.inputProduct}) AS theirs,
+             (SELECT name FROM input_products WHERE id = ${builtIn.id}) AS shared,
+             (SELECT count(*) FROM product_versions WHERE product_id = ${bIds.inputProduct})::int AS versions,
+             (SELECT count(*) FROM input_products WHERE name IN ('TEST shared by A', 'TEST for B by A'))::int AS added`);
+    expect(after).toEqual({ theirs: MARK, shared: builtIn.name, versions: 1, added: 0 });
+
+    // A product added without naming a farm is the request's farm's own
+    const [mine] = await asFarm(farm.a, sql`INSERT INTO input_products (kind, name) VALUES ('fertiliser', 'TEST product of A') RETURNING farm_id`);
+    expect(mine.farm_id).toBe(farm.a);
   });
 });

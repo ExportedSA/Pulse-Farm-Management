@@ -1417,6 +1417,8 @@ export type TaggableType = typeof TAGGABLE_TYPES[number];
 
 export const taggings = pgTable('taggings', {
   id: uuid('id').primaryKey().defaultRandom(),
+  // The tag's farm (the farm guard fills it in when it's left out)
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
   tagId: uuid('tag_id').references(() => tags.id, { onDelete: 'cascade' }).notNull(),
   entityType: varchar('entity_type', { length: 30 }).notNull(),
   entityId: uuid('entity_id').notNull(),
@@ -1451,7 +1453,7 @@ export type Attachment = typeof attachments.$inferSelect;
 // farm are the shared library; farms can add their own. Analysis is % by weight.
 export const inputProducts = pgTable('input_products', {
   id: uuid('id').primaryKey().defaultRandom(),
-  farmId: uuid('farm_id').references(() => farms.id),
+  farmId: uuid('farm_id').references(() => farms.id).default(currentFarm), // empty for the shared library
   kind: varchar('kind', { length: 20 }).notNull(), // fertiliser | effluent | chemical | feed
   name: varchar('name', { length: 120 }).notNull(),
   nPercent: numeric('n_percent', { precision: 6, scale: 3 }),
