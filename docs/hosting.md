@@ -37,14 +37,29 @@ browser ──https──> Railway service (npm start = node dist/index.js)
 | `JWT_SECRET`, `SESSION_SECRET` | new long random values, not the development ones |
 | `APP_URL` | the public address, e.g. `https://app.<domain>`. Used for links in emails and allowed by CORS. Required live |
 | `TRUST_PROXY` | `1` (Railway is a proxy; rate limits need the real client address) |
-| `SENDGRID_API_KEY`, `EMAIL_FROM` | email. `EMAIL_FROM` must be a sender verified in SendGrid |
+| `MAILTRAP_API_TOKEN`, `MAILTRAP_SANDBOX_ID`, `EMAIL_FROM` | email through Mailtrap (see Email below). `SENDGRID_API_KEY` still works instead |
 | `SENTRY_DSN` | error tracking (optional, recommended) |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | push notifications |
 | `S3_BUCKET_NAME`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (+ `S3_ENDPOINT` for R2) | file storage (see below) |
 | Stripe keys and price IDs | billing (see the billing section once built) |
 
-Without `SENDGRID_API_KEY`, a live server refuses to pretend an email went: invites are saved, and the screen
-says the email didn't go. In development, emails are written to the server log instead.
+## Email
+
+Invites, password resets, reports and notification emails all go through `server/services/email-service.ts`.
+It picks the provider on every send:
+
+| Set | What happens |
+|---|---|
+| `MAILTRAP_API_TOKEN` + `MAILTRAP_SANDBOX_ID` | **Building and testing.** Emails are caught in that Mailtrap sandbox and never reach a real inbox. Open the sandbox in Mailtrap to read them and follow the links. No domain needed. Free plan: 50 test emails a month |
+| `MAILTRAP_API_TOKEN` only | **Real sending** through Mailtrap. Needs a sending domain verified in Mailtrap (DNS records), and `EMAIL_FROM` on that domain. Free plan: 4,000 emails a month, 150 a day |
+| `SENDGRID_API_KEY` (no Mailtrap token) | Real sending through SendGrid. `EMAIL_FROM` must be a sender verified there |
+| none of these | Development: the email is written to the server log. Live: Pulse refuses to pretend an email went; invites are saved, and the screen says the email didn't go |
+
+Mailtrap is called over HTTPS, not SMTP, because Railway's Hobby plan blocks outgoing SMTP. `MAILTRAP_SANDBOX_ID`
+is the number in the sandbox's address in Mailtrap. `EMAIL_FROM_NAME` (default "Pulse") is the sender's display name.
+
+To go from testing to real sending: verify the domain in Mailtrap, set `EMAIL_FROM` to an address on it, and
+remove `MAILTRAP_SANDBOX_ID`. The token must be one that is allowed to send for that domain.
 
 ## Databases
 
@@ -119,7 +134,8 @@ from a foreign origin was refused. Four problems that would have stopped or harm
 1. Create the Railway project and service from the GitHub repo, in the region nearest Sydney.
 2. Set the environment above (new secrets, the production `DATABASE_URL`).
 3. Create the private bucket and a key limited to it (see File storage), and set the storage variables.
-4. SendGrid: verify the sending domain (SPF/DKIM), and set `EMAIL_FROM`.
+4. Email (Mailtrap): for real sending, verify the sending domain (SPF/DKIM), set `EMAIL_FROM` and remove
+   `MAILTRAP_SANDBOX_ID`. While it is set, emails are only caught in the sandbox.
 5. Point the domain at Railway and set `APP_URL` to match.
 6. Upgrade the Neon plan for a longer restore window.
 7. Deploy. Then check `/api/health/db`, sign-up, an invite email, a password reset and a file upload

@@ -6,10 +6,13 @@
  * - Alert notifications
  * - System notifications
  * 
- * In production, integrate with:
- * - SendGrid (recommended for transactional emails)
- * - AWS SES (cost-effective for high volume)
- * - Nodemailer with SMTP (self-hosted option)
+ * Sent through whichever provider is set up (checked on every send):
+ * - Mailtrap, when MAILTRAP_API_TOKEN is set. Uses its HTTPS API (Railway's Hobby plan blocks SMTP).
+ *   With MAILTRAP_SANDBOX_ID also set, emails are caught in that Mailtrap sandbox and never delivered,
+ *   which is what you want while building. Without it they are really sent (needs a verified domain).
+ * - SendGrid, when SENDGRID_API_KEY is set.
+ * - Neither: in development the email is written to the server log; live, it is reported as not sent.
+ * EMAIL_FROM is the sender address for both.
  */
 
 interface EmailOptions {
@@ -159,26 +162,34 @@ const EMAIL_TEMPLATES = {
   }),
 };
 
-class EmailService {
-  private apiKey: string | undefined;
-  private fromEmail: string;
-  private isConfigured: boolean;
+type EmailProvider = 'mailtrap' | 'sendgrid' | null;
+type SendResult = { success: boolean; messageId?: string; error?: string; logged?: boolean };
 
-  constructor() {
-    this.apiKey = process.env.SENDGRID_API_KEY || process.env.EMAIL_API_KEY;
-    this.fromEmail = process.env.EMAIL_FROM || 'noreply@pulsefarm.co.nz';
-    this.isConfigured = !!this.apiKey;
+const base64 = (content: Buffer | string) =>
+  (typeof content === 'string' ? Buffer.from(content) : content).toString('base64');
+
+class EmailService {
+  private get fromEmail(): string {
+    return process.env.EMAIL_FROM || 'noreply@pulsefarm.co.nz';
+  }
+
+  /** Which provider is set up right now (Mailtrap wins when both are) */
+  provider(): EmailProvider {
+    if (process.env.MAILTRAP_API_TOKEN) return 'mailtrap';
+    if (process.env.SENDGRID_API_KEY || process.env.EMAIL_API_KEY) return 'sendgrid';
+    return null;
   }
 
   /**
    * Send an email
    */
-  async sendEmail(options: EmailOptions): Promise<{ success: boolean; messageId?: string; error?: string; logged?: boolean }> {
-    if (!this.isConfigured) {
+  async sendEmail(options: EmailOptions): Promise<SendResult> {
+    const provider = this.provider();
+    if (!provider) {
       // Live, an email that can't go is a failure the caller must show. In development the
       // email is written to the server log instead (with its text, so links can be followed).
       if (process.env.NODE_ENV === 'production') {
-        console.error('[Email Service] SENDGRID_API_KEY is not set; email not sent:', options.subject);
+        console.error('[Email Service] No email provider is set up (MAILTRAP_API_TOKEN or SENDGRID_API_KEY); email not sent:', options.subject);
         return { success: false, error: 'Email is not set up on this server' };
       }
       console.log('[Email Service] Not configured, so not sent. Would send:', {
@@ -191,22 +202,7 @@ class EmailService {
     }
 
     try {
-      const { default: sgMail } = await import('@sendgrid/mail');
-      sgMail.setApiKey(this.apiKey!);
-      const [response] = await sgMail.send({
-        to: options.to,
-        from: this.fromEmail,
-        subject: options.subject,
-        html: options.html,
-        text: options.text,
-        attachments: options.attachments?.map(att => ({
-          content: typeof att.content === 'string' ? Buffer.from(att.content).toString('base64') : att.content.toString('base64'),
-          filename: att.filename,
-          type: att.contentType,
-          disposition: 'attachment',
-        })),
-      } as any);
-      return { success: true, messageId: String(response.headers['x-message-id'] ?? '') };
+      return provider === 'mailtrap' ? await this.sendWithMailtrap(options) : await this.sendWithSendGrid(options);
     } catch (error) {
       console.error('[Email Service] Error sending email:', error);
       return {
@@ -214,6 +210,67 @@ class EmailService {
         error: error instanceof Error ? error.message : 'Unknown error',
       };
     }
+  }
+
+  private async sendWithMailtrap(options: EmailOptions): Promise<SendResult> {
+    const sandboxId = (process.env.MAILTRAP_SANDBOX_ID || '').trim();
+    if (sandboxId && !/^\d+$/.test(sandboxId)) {
+      return { success: false, error: 'MAILTRAP_SANDBOX_ID must be the sandbox number' };
+    }
+    const url = sandboxId
+      ? `https://sandbox.api.mailtrap.io/api/send/${sandboxId}`
+      : 'https://send.api.mailtrap.io/api/send';
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.MAILTRAP_API_TOKEN}`,
+        'Content-Type': 'application/json',
+        // Mailtrap may block requests without an ordinary User-Agent
+        'User-Agent': 'Pulse-Farm-Management/1.0',
+      },
+      body: JSON.stringify({
+        from: { email: this.fromEmail, name: process.env.EMAIL_FROM_NAME || 'Pulse' },
+        to: (Array.isArray(options.to) ? options.to : [options.to]).map(email => ({ email })),
+        subject: options.subject,
+        ...(options.text ? { text: options.text } : {}),
+        ...(options.html ? { html: options.html } : {}),
+        ...(options.attachments?.length ? {
+          attachments: options.attachments.map(att => ({
+            content: base64(att.content),
+            filename: att.filename,
+            type: att.contentType,
+            disposition: 'attachment',
+          })),
+        } : {}),
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const body: any = await response.json().catch(() => ({}));
+    if (!response.ok || body.success === false) {
+      const reason = Array.isArray(body.errors) ? body.errors.join('; ') : body.errors || body.error || `HTTP ${response.status}`;
+      console.error(`[Email Service] Mailtrap refused the email (${response.status}): ${reason}`);
+      return { success: false, error: `Mailtrap: ${reason}` };
+    }
+    return { success: true, messageId: String(body.message_ids?.[0] ?? '') };
+  }
+
+  private async sendWithSendGrid(options: EmailOptions): Promise<SendResult> {
+    const { default: sgMail } = await import('@sendgrid/mail');
+    sgMail.setApiKey((process.env.SENDGRID_API_KEY || process.env.EMAIL_API_KEY)!);
+    const [response] = await sgMail.send({
+      to: options.to,
+      from: this.fromEmail,
+      subject: options.subject,
+      html: options.html,
+      text: options.text,
+      attachments: options.attachments?.map(att => ({
+        content: base64(att.content),
+        filename: att.filename,
+        type: att.contentType,
+        disposition: 'attachment',
+      })),
+    } as any);
+    return { success: true, messageId: String(response.headers['x-message-id'] ?? '') };
   }
 
   /**
@@ -281,7 +338,7 @@ class EmailService {
    * Check if email service is configured
    */
   isReady(): boolean {
-    return this.isConfigured;
+    return this.provider() !== null;
   }
 }
 
