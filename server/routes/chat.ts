@@ -7,32 +7,19 @@ import {
   chatMessages, 
   chatMessageReads, 
   chatMessagePins,
-  users 
+  users,
+  farmMembers
 } from '@shared/schema';
 import { eq, and, desc, like, or, sql, ne, isNull } from 'drizzle-orm';
 import { chatWebSocket } from '../websocket';
+import { getUserId, getFarmId } from '../middleware/auth';
 import multer from 'multer';
 import path from 'path';
-import fs from 'fs';
+import { saveUpload } from '../services/fileStorage';
 
-// Configure multer for file uploads
-const uploadDir = path.join(process.cwd(), 'uploads', 'chat');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (_req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
+// Files are held in memory and saved by the storage module (local disk or the private bucket)
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
   fileFilter: (_req, file, cb) => {
     // Allow common file types
@@ -88,7 +75,7 @@ function extractMentions(body: string): string[] {
 // GET /api/chat/channels - Get user's chat channels
 router.get('/channels', async (req, res) => {
   try {
-    const userId = 'demo-user'; // Simplified auth for now
+    const userId = getUserId(req)!; // requireAuth guarantees a user
     
     // Get channels where user is a member
     const userChannels = await db
@@ -150,45 +137,7 @@ router.get('/channels', async (req, res) => {
     res.json(validChannels);
   } catch (error) {
     console.error('Error fetching channels:', error);
-    // Return mock data for demo purposes when database is unavailable
-    const mockChannels = [
-      {
-        id: 'demo-channel-1',
-        type: 'group',
-        name: 'Farm Team',
-        description: 'General farm discussions',
-        avatarUrl: null,
-        isActive: true,
-        lastMessageAt: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        members: [
-          { userId: 'demo-user', name: 'You', avatar: undefined, role: 'admin' },
-          { userId: 'user-2', name: 'John Farmer', avatar: undefined, role: 'member' },
-          { userId: 'user-3', name: 'Sarah Manager', avatar: undefined, role: 'member' }
-        ],
-        isMuted: false,
-        pins: [],
-      },
-      {
-        id: 'demo-channel-2',
-        type: 'direct',
-        name: null,
-        description: null,
-        avatarUrl: null,
-        isActive: true,
-        lastMessageAt: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        members: [
-          { userId: 'demo-user', name: 'You', avatar: undefined, role: 'admin' },
-          { userId: 'user-4', name: 'Mike Worker', avatar: undefined, role: 'member' }
-        ],
-        isMuted: false,
-        pins: [],
-      }
-    ];
-    res.json(mockChannels);
+    res.status(500).json({ error: 'Failed to fetch channels' });
   }
 });
 
@@ -196,7 +145,7 @@ router.get('/channels', async (req, res) => {
 router.get('/channels/:id/messages', async (req, res) => {
   try {
     const channelId = req.params.id;
-    const userId = 'demo-user'; // Simplified auth
+    const userId = getUserId(req)!; // requireAuth guarantees a user
 
     // Verify user is a member of the channel
     const membership = await db
@@ -256,40 +205,7 @@ router.get('/channels/:id/messages', async (req, res) => {
     res.json(formattedMessages);
   } catch (error) {
     console.error('Error fetching messages:', error);
-    // Return mock messages for demo purposes
-    const mockMessages = [
-      {
-        id: 'msg-1',
-        userId: 'user-2',
-        userName: 'John Farmer',
-        userAvatar: 'john@farm.com',
-        body: 'Hey team, how are the animals doing today?',
-        createdAt: new Date(Date.now() - 3600000).toISOString(),
-        reads: [{ userId: 'demo-user', readAt: new Date(Date.now() - 3000000).toISOString() }],
-        pins: [],
-      },
-      {
-        id: 'msg-2',
-        userId: 'demo-user',
-        userName: 'You',
-        userAvatar: 'demo@farm.com',
-        body: 'All good! Just finished the morning feed.',
-        createdAt: new Date(Date.now() - 3000000).toISOString(),
-        reads: [],
-        pins: [],
-      },
-      {
-        id: 'msg-3',
-        userId: 'user-3',
-        userName: 'Sarah Manager',
-        userAvatar: 'sarah@farm.com',
-        body: 'Great! I\'ll check on the pasture rotation this afternoon.',
-        createdAt: new Date(Date.now() - 1800000).toISOString(),
-        reads: [],
-        pins: [],
-      }
-    ];
-    res.json(mockMessages);
+    res.status(500).json({ error: 'Failed to fetch messages' });
   }
 });
 
@@ -297,7 +213,7 @@ router.get('/channels/:id/messages', async (req, res) => {
 router.post('/messages', async (req, res) => {
   try {
     const { channelId, body, mentions } = sendMessageSchema.parse(req.body);
-    const userId = 'demo-user'; // Simplified auth
+    const userId = getUserId(req)!; // requireAuth guarantees a user
 
     // Verify user is a member of the channel
     const membershipResult = await db
@@ -417,7 +333,7 @@ router.post('/messages', async (req, res) => {
 router.post('/channels/:id/messages/:messageId/read', async (req, res) => {
   try {
     const { id: channelId, messageId } = req.params;
-    const userId = 'demo-user'; // Simplified auth
+    const userId = getUserId(req)!; // requireAuth guarantees a user
 
     // Verify user is a member of the channel
     const membership = await db
@@ -475,7 +391,7 @@ router.post('/channels/:id/messages/:messageId/read', async (req, res) => {
 router.post('/channels/:id/messages/:messageId/pin', async (req, res) => {
   try {
     const { id: channelId, messageId } = req.params;
-    const userId = 'demo-user'; // Simplified auth
+    const userId = getUserId(req)!; // requireAuth guarantees a user
 
     // Verify user is a member of the channel
     const membership = await db
@@ -531,7 +447,7 @@ router.post('/channels/:id/messages/:messageId/pin', async (req, res) => {
 router.post('/channels/:id/messages/:messageId/unpin', async (req, res) => {
   try {
     const { id: channelId, messageId } = req.params;
-    const userId = 'demo-user'; // Simplified auth
+    const userId = getUserId(req)!; // requireAuth guarantees a user
 
     // Verify user is a member of the channel
     const membership = await db
@@ -570,7 +486,7 @@ router.post('/channels/:id/messages/:messageId/unpin', async (req, res) => {
 router.post('/channels/:id/mute', async (req, res) => {
   try {
     const channelId = req.params.id;
-    const userId = 'demo-user'; // Simplified auth
+    const userId = getUserId(req)!; // requireAuth guarantees a user
 
     await db
       .update(chatChannelMembers)
@@ -593,7 +509,7 @@ router.post('/channels/:id/mute', async (req, res) => {
 router.post('/channels/:id/unmute', async (req, res) => {
   try {
     const channelId = req.params.id;
-    const userId = 'demo-user'; // Simplified auth
+    const userId = getUserId(req)!; // requireAuth guarantees a user
 
     await db
       .update(chatChannelMembers)
@@ -616,7 +532,7 @@ router.post('/channels/:id/unmute', async (req, res) => {
 router.post('/channels/create', async (req, res) => {
   try {
     const { name, type, description, userIds } = createChannelSchema.parse(req.body);
-    const creatorId = 'demo-user'; // Simplified auth
+    const creatorId = getUserId(req)!; // requireAuth guarantees a user
 
     // For direct messages, ensure exactly 2 users and no name
     if (type === 'direct') {
@@ -712,7 +628,7 @@ router.post('/channels/:id/add-user', async (req, res) => {
   try {
     const { userId } = addUserSchema.parse(req.body);
     const channelId = req.params.id;
-    const currentUserId = 'demo-user'; // Simplified auth
+    const currentUserId = getUserId(req)!; // requireAuth guarantees a user
 
     // Verify current user is a member of the channel
     const membership = await db
@@ -789,6 +705,8 @@ router.get('/users/search', async (req, res) => {
         role: users.role,
       })
       .from(users)
+      // People on this farm only
+      .innerJoin(farmMembers, and(eq(farmMembers.userId, users.id), eq(farmMembers.farmId, getFarmId(req)!), eq(farmMembers.isActive, true)))
       .where(
         and(
           eq(users.isActive, true),
@@ -806,19 +724,7 @@ router.get('/users/search', async (req, res) => {
       return res.status(400).json({ error: 'Invalid query parameter' });
     }
     console.error('Error searching users:', error);
-    // Return mock users for demo purposes when database is not available
-    const mockUsers = [
-      { id: 'user-1', name: 'John Smith', email: 'john@pulse.farm', role: 'manager' },
-      { id: 'user-2', name: 'Sarah Johnson', email: 'sarah@pulse.farm', role: 'staff' },
-      { id: 'user-3', name: 'Mike Wilson', email: 'mike@pulse.farm', role: 'staff' },
-      { id: 'user-4', name: 'Emily Brown', email: 'emily@pulse.farm', role: 'staff' },
-      { id: 'user-5', name: 'David Lee', email: 'david@pulse.farm', role: 'manager' },
-    ].filter(user => 
-      user.name.toLowerCase().includes(req.query?.query?.toString().toLowerCase() || '') ||
-      user.email.toLowerCase().includes(req.query?.query?.toString().toLowerCase() || '')
-    ).slice(0, 10);
-    
-    res.json(mockUsers);
+    res.status(500).json({ error: 'Failed to search users' });
   }
 });
 
@@ -827,7 +733,7 @@ router.put('/messages/:messageId', async (req, res) => {
   try {
     const { messageId } = req.params;
     const { body } = editMessageSchema.parse(req.body);
-    const userId = 'demo-user'; // Simplified auth
+    const userId = getUserId(req)!; // requireAuth guarantees a user
 
     // Get the message to verify ownership
     const messageResult = await db
@@ -882,7 +788,7 @@ router.put('/messages/:messageId', async (req, res) => {
 router.delete('/messages/:messageId', async (req, res) => {
   try {
     const { messageId } = req.params;
-    const userId = 'demo-user'; // Simplified auth
+    const userId = getUserId(req)!; // requireAuth guarantees a user
 
     // Get the message to verify ownership
     const messageResult = await db
@@ -926,17 +832,14 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // Use the file storage service to save the file
-    const { saveFileBuffer } = await import('../services/fileStorage');
-    const { storageKey, publicUrl } = await saveFileBuffer(
-      req.file.buffer,
-      req.file.mimetype,
-      req.file.originalname,
-      'chat' // Store in chat subfolder
-    );
-    
+    const farmId = getFarmId(req);
+    if (!farmId) {
+      return res.status(403).json({ error: 'No farm selected' });
+    }
+    const { storageKey, url } = await saveUpload(farmId, 'chat', req.file);
+
     res.json({
-      url: publicUrl,
+      url,
       storageKey,
       filename: req.file.originalname,
       size: req.file.size,
@@ -952,7 +855,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 router.get('/channels/:id/unread', async (req, res) => {
   try {
     const channelId = req.params.id;
-    const userId = 'demo-user'; // Simplified auth
+    const userId = getUserId(req)!; // requireAuth guarantees a user
 
     // Get the last read message timestamp for this user in this channel
     const lastReadResult = await db
@@ -991,15 +894,14 @@ router.get('/channels/:id/unread', async (req, res) => {
     res.json({ channelId, unreadCount });
   } catch (error) {
     console.error('Error getting unread count:', error);
-    // Return 0 for demo purposes
-    res.json({ channelId: req.params.id, unreadCount: 0 });
+    res.status(500).json({ error: 'Failed to get unread count' });
   }
 });
 
 // GET /api/chat/unread/all - Get unread counts for all channels
 router.get('/unread/all', async (req, res) => {
   try {
-    const userId = 'demo-user'; // Simplified auth
+    const userId = getUserId(req)!; // requireAuth guarantees a user
 
     // Get all channels the user is a member of
     const channelsResult = await db
@@ -1011,13 +913,19 @@ router.get('/unread/all', async (req, res) => {
       return res.json({ channels: {}, totalUnread: 0 });
     }
 
-    const unreadCounts: Record<string, number> = {};
-    let totalUnread = 0;
-
-    // For demo, return mock data
-    channelsResult.forEach(({ channelId }) => {
-      unreadCounts[channelId] = 0;
-    });
+    // Per channel: messages from others since this person last read anything there
+    const counts = await db.execute(sql`
+      SELECT m.channel_id AS "channelId", count(*)::int AS n
+      FROM chat_messages m
+      JOIN chat_channel_members cm ON cm.channel_id = m.channel_id AND cm.user_id = ${userId}
+      WHERE m.user_id <> ${userId}
+        AND m.created_at > COALESCE((
+          SELECT max(r.read_at) FROM chat_message_reads r JOIN chat_messages rm ON rm.id = r.message_id
+          WHERE r.user_id = ${userId} AND rm.channel_id = m.channel_id), 'epoch')
+      GROUP BY m.channel_id`);
+    const unreadCounts: Record<string, number> = Object.fromEntries(channelsResult.map(({ channelId }) => [channelId, 0]));
+    for (const row of ((counts as any).rows ?? counts) as { channelId: string; n: number }[]) unreadCounts[row.channelId] = row.n;
+    const totalUnread = Object.values(unreadCounts).reduce((n, c) => n + c, 0);
 
     res.json({ channels: unreadCounts, totalUnread });
   } catch (error) {

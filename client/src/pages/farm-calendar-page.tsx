@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useFarm } from '@/lib/farm-context';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -140,12 +141,23 @@ export default function FarmCalendarPage() {
   const [showBirthdays, setShowBirthdays] = useState(true);
   const [filterStaff, setFilterStaff] = useState<string>('all');
   
-  // Staff roster state
-  const [staff, setStaff] = useState<StaffMember[]>([
-    { id: '1', name: 'John Smith', email: 'john@farm.com', role: 'Manager', color: STAFF_COLORS[0], rosterPattern: '6-2', rosterStartDate: '2025-01-01' },
-    { id: '2', name: 'Sarah Johnson', email: 'sarah@farm.com', role: 'Farm Hand', color: STAFF_COLORS[1], rosterPattern: '6-2', rosterStartDate: '2025-01-03' },
-    { id: '3', name: 'Mike Wilson', email: 'mike@farm.com', role: 'Relief Milker', color: STAFF_COLORS[2], rosterPattern: '5-2', rosterStartDate: '2025-01-01' },
-  ]);
+  // The farm's people; their roster patterns are kept on this device, per farm
+  const { currentFarm } = useFarm();
+  const rosterKey = `pulse_calendar_rosters:${currentFarm?.id ?? 'none'}`;
+  const { data: people = [] } = useQuery<{ id: string; name: string; email: string | null; role?: string | null }[]>({ queryKey: ['/api/users'] });
+  const [staff, setStaff] = useState<StaffMember[]>([]);
+  useEffect(() => {
+    let saved: Record<string, { rosterPattern?: string; rosterStartDate?: string }> = {};
+    try { saved = JSON.parse(localStorage.getItem(rosterKey) ?? '{}'); } catch { /* nothing saved */ }
+    setStaff(people.map((p, i) => ({ id: p.id, name: p.name, email: p.email ?? '', role: p.role ?? '', color: STAFF_COLORS[i % STAFF_COLORS.length], ...saved[p.id] })));
+  }, [people, rosterKey]);
+  useEffect(() => {
+    // Not until the people have loaded, or saved rosters would be overwritten with nothing
+    if (staff.length === 0) return;
+    try {
+      localStorage.setItem(rosterKey, JSON.stringify(Object.fromEntries(staff.map(s => [s.id, { rosterPattern: s.rosterPattern, rosterStartDate: s.rosterStartDate }]))));
+    } catch { /* storage unavailable */ }
+  }, [staff, rosterKey]);
   
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
   
@@ -171,9 +183,9 @@ export default function FarmCalendarPage() {
 
   // Fetch animal treatments
   const { data: treatments = [] } = useQuery<any[]>({
-    queryKey: ['/api/animal-treatments'],
+    queryKey: ['/api/treatments'],
     queryFn: async () => {
-      const res = await fetch('/api/animal-treatments');
+      const res = await fetch('/api/treatments');
       if (!res.ok) return [];
       return res.json();
     },
@@ -189,16 +201,15 @@ export default function FarmCalendarPage() {
     },
   });
 
-  // Fetch farm events (custom events stored locally for now)
-  const [farmEvents, setFarmEvents] = useState<CalendarEvent[]>(() => {
-    const saved = localStorage.getItem('pulse_farm_events');
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  // Save farm events to localStorage
+  // Farm events added here are kept on this device, per farm
+  const eventsKey = `pulse_farm_events:${currentFarm?.id ?? 'none'}`;
+  const [farmEvents, setFarmEvents] = useState<CalendarEvent[]>([]);
   useEffect(() => {
-    localStorage.setItem('pulse_farm_events', JSON.stringify(farmEvents));
-  }, [farmEvents]);
+    try { setFarmEvents(JSON.parse(localStorage.getItem(eventsKey) ?? '[]')); } catch { setFarmEvents([]); }
+  }, [eventsKey]);
+  useEffect(() => {
+    try { localStorage.setItem(eventsKey, JSON.stringify(farmEvents)); } catch { /* storage unavailable */ }
+  }, [farmEvents]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Generate roster events for staff
   const generateRosterEvents = useMemo(() => {

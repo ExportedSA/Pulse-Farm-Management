@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { generatePasturePDF, exportToCSV } from "@/lib/report-utils";
 import { useAuth } from "@/lib/auth-context";
+import { PaddockOutlineDialog } from "@/components/PaddockOutlineDialog";
 import type { Pasture, PastureHealthRecord } from "@/../../shared/schema";
 import { insertPastureSchema } from "@/../../shared/schema";
 import type { z } from "zod";
@@ -34,6 +35,7 @@ export default function PasturesList() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [editingPasture, setEditingPasture] = useState<Pasture | null>(null);
+  const [mappingPasture, setMappingPasture] = useState<Pasture | null>(null);
   const [deletingPasture, setDeletingPasture] = useState<Pasture | null>(null);
 
   // Fetch pastures
@@ -247,6 +249,10 @@ export default function PasturesList() {
                       <span className="text-muted-foreground">Area:</span> {pasture.area} ha
                     </div>
                   )}
+                  <div className="flex items-center gap-1">
+                    <MapPin className="h-3.5 w-3.5 text-muted-foreground" strokeWidth={1.5} />
+                    {pasture.boundaries ? <span>Mapped</span> : <span className="text-muted-foreground">Not on the map yet</span>}
+                  </div>
                   <div>
                     <span className="text-muted-foreground">Stock:</span> {pasture.currentStock || 0} animals
                   </div>
@@ -299,6 +305,15 @@ export default function PasturesList() {
                   <Button
                     variant="outline"
                     size="sm"
+                    onClick={() => setMappingPasture(pasture)}
+                    data-testid={`button-map-pasture-${pasture.id}`}
+                  >
+                    <MapPin className="h-4 w-4 mr-1" strokeWidth={1.5} />
+                    {pasture.boundaries ? "Redraw" : "Draw on map"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
                     className="flex-1"
                     onClick={() => setEditingPasture(pasture)}
                     data-testid={`button-edit-pasture-${pasture.id}`}
@@ -320,6 +335,8 @@ export default function PasturesList() {
           ))}
         </div>
       )}
+
+      <PaddockOutlineDialog paddock={mappingPasture} onOpenChange={open => { if (!open) setMappingPasture(null); }} />
 
       {/* Create/Edit Dialog */}
       <PastureDialog

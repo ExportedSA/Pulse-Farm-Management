@@ -4,8 +4,11 @@ import { storage } from "../storage";
 import { insertVoiceNoteSchema } from "@shared/schema";
 import { z } from "zod";
 import { uploadSingleAudio } from "../middleware/upload";
+import { getFarmId, requireFarm } from "../middleware/auth";
+import { saveUpload, deleteFileByUrl } from "../services/fileStorage";
 
 const router = Router();
+router.use(requireFarm);
 
 // POST /api/voice-notes/upload - Upload audio file
 router.post("/upload", uploadSingleAudio, async (req: Request, res: Response) => {
@@ -14,17 +17,10 @@ router.post("/upload", uploadSingleAudio, async (req: Request, res: Response) =>
       return res.status(400).json({ error: "No audio file uploaded" });
     }
 
-    // Use the file storage service to save the file
-    const { saveFileBuffer } = await import('../services/fileStorage');
-    const { storageKey, publicUrl } = await saveFileBuffer(
-      req.file.buffer,
-      req.file.mimetype,
-      req.file.originalname,
-      'voice-notes' // Store in voice-notes subfolder
-    );
-    
+    const { storageKey, url } = await saveUpload(getFarmId(req)!, 'voice-notes', req.file);
+
     res.json({
-      url: publicUrl,
+      url,
       storageKey,
       filename: req.file.originalname,
       size: req.file.size,
@@ -128,15 +124,8 @@ router.delete("/:id", async (req: Request, res: Response) => {
     // Delete from database
     await storage.deleteVoiceNote(req.params.id);
 
-    // Try to delete the file
-    try {
-      const filePath = path.join(process.cwd(), existing.audioUrl);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-    } catch (fileError) {
-      console.warn("Could not delete audio file:", fileError);
-    }
+    // Remove the stored file (a missing file is not an error)
+    await deleteFileByUrl(existing.audioUrl);
 
     res.status(204).send();
   } catch (error) {

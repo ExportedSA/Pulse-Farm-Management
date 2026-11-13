@@ -1,7 +1,8 @@
-import { Home, Syringe, Pill, Users, Sprout, Heart, Settings, BarChart3, ChevronDown, MessageSquare, Shield, FileText, Briefcase, Wrench, Scale, ChevronRight, GitFork, Rocket, Stethoscope, Baby, ClipboardList, Clock, Calendar } from "lucide-react";
+import { Home, Syringe, Pill, Users, Sprout, Heart, Settings, BarChart3, ChevronDown, MessageSquare, Shield, FileText, Briefcase, Wrench, Scale, ChevronRight, GitFork, Rocket, Stethoscope, Baby, ClipboardList, Clock, Calendar, HardHat, Map as MapIcon } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useState, ComponentProps } from "react";
 import { useChatContext } from "@/contexts/ChatContext";
+import { useFarm } from "@/lib/farm-context";
 import { Badge } from "@/components/ui/badge";
 import {
   Sidebar,
@@ -31,7 +32,9 @@ import {
 const menuItems = [
   // Primary navigation - always visible
   { title: "Overview", url: "/app", icon: Home },
-  { title: "Dashboard", url: "/app/dashboard", icon: BarChart3 },
+  { title: "Farm map", url: "/app/farm-map", icon: MapIcon },
+  { title: "Records", url: "/app/records", icon: ClipboardList },
+  { title: "Compliance", url: "/app/compliance-overview", icon: Shield },
   
   // Animals - core functionality
   {
@@ -40,6 +43,8 @@ const menuItems = [
     subItems: [
       { title: "All Animals", url: "/app/animals" },
       { title: "Groups", url: "/app/groups" },
+      { title: "Weights", url: "/app/weight-growth" },
+      { title: "Stock Reconciliation", url: "/app/stock-reconciliation" },
       { title: "Import CSV", url: "/app/import" },
     ],
   },
@@ -50,11 +55,16 @@ const menuItems = [
     icon: Syringe,
     subItems: [
       { title: "Treatments", url: "/app/treatments/current" },
-      { title: "Treat Animal", url: "/app/health/treat" },
+      { title: "Batch Treatment", url: "/app/batch-treatment" },
       { title: "Vaccination", url: "/app/vaccination" },
-      { title: "Medicines", url: "/app/health/medicines" },
-      { title: "Inventory", url: "/app/health/inventory" },
+      { title: "Medicines & Stock", url: "/app/medicines" },
+      { title: "Health Monitoring", url: "/app/health-monitoring" },
+      { title: "Veterinary", url: "/app/veterinary" },
+      { title: "Lab Results", url: "/app/lab-results" },
+      { title: "Health Analytics", url: "/app/health-analytics" },
       { title: "Health Reports", url: "/app/health/reports" },
+      { title: "Withholding & Reminders", url: "/app/alerts" },
+      { title: "Field Mode", url: "/app/field-mode" },
     ],
   },
   
@@ -76,14 +86,9 @@ const menuItems = [
     subItems: [
       { title: "Dashboard", url: "/app/reproduction-management" },
       { title: "Events", url: "/app/reproduction" },
-      { title: "Run Sheet", url: "/app/repro/runsheet" },
-      { title: "Preg Testing", url: "/app/repro/preg" },
       { title: "Milk Production", url: "/app/milk-production" },
     ],
   },
-  
-  // Weights
-  { title: "Weights", url: "/app/weight-growth", icon: Scale },
   
   // Pastures - simplified
   {
@@ -99,14 +104,19 @@ const menuItems = [
   // Operations - consolidated
   {
     title: "Operations",
-    icon: Wrench,
+    icon: Briefcase,
     subItems: [
       { title: "Hub", url: "/app/operations" },
+      { title: "Tasks", url: "/app/tasks" },
       { title: "Jobs", url: "/app/jobs" },
+      { title: "Jobs Board", url: "/app/kanban" },
+      { title: "Recurring Tasks", url: "/app/recurring-tasks" },
       { title: "Roster", url: "/app/roster" },
       { title: "Timesheets", url: "/app/timesheets" },
       { title: "Calendar", url: "/app/calendar" },
       { title: "Staff", url: "/app/operations/staff" },
+      { title: "Contractors", url: "/app/operations/contractors" },
+      { title: "Weather", url: "/app/weather" },
     ],
   },
   
@@ -121,14 +131,14 @@ const menuItems = [
     ],
   },
   
-  // Compliance - consolidated
+  // Schemes and registers that sit beside the audit pack
   {
-    title: "Compliance",
-    icon: Shield,
+    title: "Safety & schemes",
+    icon: HardHat,
     subItems: [
+      { title: "Health & Safety", url: "/app/compliance" },
       { title: "NAIT", url: "/app/nait" },
       { title: "NZFAP", url: "/app/nzfap-compliance" },
-      { title: "Farm Compliance", url: "/app/farm-compliance" },
     ],
   },
   
@@ -137,8 +147,13 @@ const menuItems = [
     title: "Reports",
     icon: BarChart3,
     subItems: [
+      { title: "Dashboard", url: "/app/dashboard" },
       { title: "Analytics", url: "/app/analytics" },
       { title: "Herd Reports", url: "/app/herd-reports" },
+      { title: "Animal Report", url: "/app/reports/animals" },
+      { title: "Timesheet Report", url: "/app/reports/timesheets" },
+      { title: "Safety Report", url: "/app/reports/safety" },
+      { title: "Financial", url: "/app/financial" },
       { title: "Export", url: "/app/reports" },
     ],
   },
@@ -149,6 +164,7 @@ const menuItems = [
     icon: Rocket,
     subItems: [
       { title: "Onboarding", url: "/app/setup" },
+      { title: "Billing", url: "/app/billing" },
       { title: "Settings", url: "/app/settings" },
       { title: "Multi-Farm", url: "/app/multi-farm" },
     ],
@@ -156,10 +172,6 @@ const menuItems = [
   
   // Communication
   { title: "Chat", url: "/app/chat", icon: MessageSquare },
-  
-  // Safety & People
-  { title: "Safety", url: "/app/safety", icon: Shield },
-  { title: "People", url: "/app/people", icon: Users },
 ];
 
 export function AppSidebar({ ...props }: AppSidebarProps) {
@@ -167,6 +179,9 @@ export function AppSidebar({ ...props }: AppSidebarProps) {
   const [openMenus, setOpenMenus] = useState<string[]>([]);
   const { setOpen, setOpenMobile } = useSidebar();
   const { getTotalUnreadCount } = useChatContext();
+  // Contractors work only on the jobs shared with them, on the farm map
+  const { currentFarm } = useFarm();
+  const items = currentFarm?.role === "contractor" ? menuItems.filter(i => i.url === "/app/farm-map") : menuItems;
 
   const handleMenuClick = () => {
     setOpen(false);
@@ -205,7 +220,7 @@ export function AppSidebar({ ...props }: AppSidebarProps) {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {menuItems.map((item) => {
+              {items.map((item) => {
                 if (item.subItems) {
                   return (
                     <Collapsible

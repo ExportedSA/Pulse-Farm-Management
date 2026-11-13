@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1765783575844,
+      "tag": "0000_add_animal_models",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1765784183201,
+      "tag": "0001_extend_animal_model",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1765786877345,
+      "tag": "0002_add_jobs_tasks_models",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1765787051107,
+      "tag": "0003_add_roster_timesheet_models",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1765788074733,
+      "tag": "0004_opposite_mindworm",
+      "breakpoints": true
+    }
+  ]
+}

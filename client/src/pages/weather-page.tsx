@@ -146,7 +146,7 @@ export default function WeatherPage() {
             Refresh
           </Button>
           <a
-            href="https://www.yr.no/en/forecast/daily-table/2-6241327/New%20Zealand/Manawatu-Wanganui/Palmerston%20North%20City/Palmerston%20North"
+            href={agriWeather?.lat != null ? `https://www.yr.no/en/forecast/daily-table/${agriWeather.lat.toFixed(4)},${agriWeather.lon.toFixed(4)}` : "https://www.yr.no/en"}
             target="_blank"
             rel="noopener noreferrer"
           >

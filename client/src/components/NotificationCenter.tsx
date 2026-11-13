@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
+import { PhonePushToggle } from '@/components/PhonePushToggle';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Popover,
@@ -35,8 +36,6 @@ import {
   AlertTriangle,
   X,
   ExternalLink,
-  Volume2,
-  VolumeX,
 } from 'lucide-react';
 import { useLocation } from 'wouter';
 
@@ -216,24 +215,6 @@ export function NotificationCenter() {
       }
     },
   });
-
-  // Request push permission
-  const requestPushPermission = async () => {
-    if (!('Notification' in window)) {
-      toast.error('This browser does not support notifications');
-      return;
-    }
-
-    const permission = await Notification.requestPermission();
-    
-    if (permission === 'granted') {
-      toast.success('Push notifications enabled!');
-      updatePreferencesMutation.mutate({ pushEnabled: true });
-    } else if (permission === 'denied') {
-      toast.error('Notification permission denied');
-      updatePreferencesMutation.mutate({ pushEnabled: false });
-    }
-  };
 
   // Handle notification click
   const handleNotificationClick = (notification: Notification) => {
@@ -439,30 +420,7 @@ export function NotificationCenter() {
             <div className="space-y-4">
               <h4 className="font-medium text-sm">Push Notifications</h4>
               
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  {preferences?.pushEnabled ? (
-                    <Volume2 className="h-4 w-4 text-green-500" />
-                  ) : (
-                    <VolumeX className="h-4 w-4 text-gray-400" />
-                  )}
-                  <span className="text-sm">Browser Notifications</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {'Notification' in window && Notification.permission !== 'granted' ? (
-                    <Button size="sm" onClick={requestPushPermission}>
-                      Enable
-                    </Button>
-                  ) : (
-                    <Switch
-                      checked={preferences?.pushEnabled}
-                      onCheckedChange={(checked) => 
-                        updatePreferencesMutation.mutate({ pushEnabled: checked })
-                      }
-                    />
-                  )}
-                </div>
-              </div>
+              <PhonePushToggle />
 
               <Button
                 variant="outline"

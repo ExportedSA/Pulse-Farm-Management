@@ -9,7 +9,7 @@ import {
   insertTreatmentTemplateSchema, insertVoiceNoteSchema, insertPhotoAttachmentSchema,
   insertBatchTreatmentSchema, insertEidScanSessionSchema
 } from "@shared/schema";
-import { eq, desc, and, or, sql } from "drizzle-orm";
+import { eq, desc, and, or, sql, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 const router = Router();
@@ -242,7 +242,7 @@ router.post("/eid/bulk-lookup", async (req: Request, res: Response) => {
     const matchedAnimals = await db
       .select()
       .from(animals)
-      .where(sql`${animals.eid} IN (${sql.join(eids.map(e => sql`${e}`), sql`, `)})`);
+      .where(inArray(animals.eid, eids));
     
     const animalMap = new Map(matchedAnimals.map(a => [a.eid, a]));
     

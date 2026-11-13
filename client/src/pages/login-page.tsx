@@ -81,7 +81,7 @@ export default function LoginPage() {
                       <Input
                         {...field}
                         type="email"
-                        placeholder="admin@pulse.farm"
+                        placeholder="you@example.com"
                         autoComplete="email"
                         data-testid="input-login-email"
                       />
@@ -122,16 +122,21 @@ export default function LoginPage() {
             </form>
           </Form>
 
-          <div className="mt-6 pt-6 border-t border-gray-200">
+          <div className="mt-4 flex justify-between text-sm">
+            <a className="underline text-slate-600" href="/forgot-password" data-testid="link-forgot-password">Forgot password?</a>
+            <a className="underline text-slate-600" href="/signup" data-testid="link-signup">New farm? Sign up</a>
+          </div>
+
+          {import.meta.env.DEV && <div className="mt-6 pt-6 border-t border-gray-200">
             <p className="text-sm text-gray-500 text-center">
               Demo credentials for testing:
             </p>
             <div className="mt-3 text-xs text-gray-400 space-y-1">
-              <p className="text-center font-mono">admin@pulse.farm / admin123</p>
-              <p className="text-center font-mono">manager@pulse.farm / manager123</p>
-              <p className="text-center font-mono">staff@pulse.farm / staff123</p>
+              <p className="text-center font-mono">owner@demo.com / password123</p>
+              <p className="text-center font-mono">manager@demo.com / password123</p>
+              <p className="text-center font-mono">worker@demo.com / password123</p>
             </div>
-          </div>
+          </div>}
         </CardContent>
       </Card>
     </div>

@@ -1,6 +1,6 @@
 // Reference: blueprint:javascript_database
 import { db } from "./db";
-import { eq, and, desc, gte, lte, or, like, sql } from "drizzle-orm";
+import { eq, and, desc, gte, lte, or, like, sql, inArray } from "drizzle-orm";
 import { hashPassword } from "./password";
 import {
   users, products, productBatches, conditions, animals, pastures, animalTreatments,
@@ -526,7 +526,7 @@ export class DatabaseStorage implements IStorage {
     const uniqueAnimals = await db
       .select()
       .from(animals)
-      .where(sql`${animals.id} IN (${sql.join(animalIds.map(id => sql`${id}`), sql`, `)})`);
+      .where(inArray(animals.id, animalIds));
 
     return {
       batch,
@@ -623,7 +623,7 @@ export class DatabaseStorage implements IStorage {
       treatments = await db
         .select()
         .from(animalTreatments)
-        .where(sql`${animalTreatments.id} IN (${sql.join(treatmentIds.map(id => sql`${id}`), sql`, `)})`)
+        .where(inArray(animalTreatments.id, treatmentIds))
         .orderBy(desc(animalTreatments.dateTime));
     }
 
@@ -634,7 +634,7 @@ export class DatabaseStorage implements IStorage {
     const uniqueAnimals = await db
       .select()
       .from(animals)
-      .where(sql`${animals.id} IN (${sql.join(animalIds.map(id => sql`${id}`), sql`, `)})`);
+      .where(inArray(animals.id, animalIds));
 
     return {
       batch,

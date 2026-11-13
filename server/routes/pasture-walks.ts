@@ -7,7 +7,7 @@ import {
 import { 
   insertPastureWalkSessionSchema, insertPastureCoverMeasurementSchema
 } from "@shared/schema";
-import { eq, and, gte, lte, desc, sql, isNull } from "drizzle-orm";
+import { eq, and, gte, lte, desc, sql, isNull, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { format, differenceInDays, subDays, subMonths } from "date-fns";
 
@@ -135,7 +135,7 @@ router.post("/sessions/:id/complete", async (req: Request, res: Response) => {
     const pastureData = await db
       .select()
       .from(pastures)
-      .where(sql`${pastures.id} IN (${sql.join(pastureIds.map(id => sql`${id}`), sql`, `)})`);
+      .where(inArray(pastures.id, pastureIds));
     
     const pastureAreaMap = new Map(pastureData.map(p => [p.id, p.area || 0]));
     

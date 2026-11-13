@@ -28,7 +28,7 @@ export default function Dashboard() {
   });
 
   const { data: treatments = [], isLoading: isLoadingTreatments } = useQuery<AnimalTreatment[]>({
-    queryKey: ['/api/animal-treatments'],
+    queryKey: ['/api/treatments'],
   });
 
   const { data: pastures = [], isLoading: isLoadingPastures } = useQuery<Pasture[]>({
@@ -312,46 +312,48 @@ export default function Dashboard() {
     return "Good evening";
   };
 
-  // Mock weather data (in production, this would come from an API)
-  const weatherData = {
-    temp: 18,
-    condition: 'Partly Cloudy',
-    humidity: 65,
-    wind: 12,
-    sunrise: '6:42 AM',
-    sunset: '8:15 PM',
-    forecast: [
-      { day: 'Today', high: 22, low: 14, condition: 'sunny' },
-      { day: 'Wed', high: 20, low: 13, condition: 'cloudy' },
-      { day: 'Thu', high: 18, low: 11, condition: 'rain' },
-      { day: 'Fri', high: 21, low: 12, condition: 'sunny' },
-    ]
-  };
+  // Today's weather at the farm (Yr.no); none until the farm's paddocks are on the map
+  const { data: weather, error: weatherError } = useQuery<{ current: { temperature: number; humidity: number; windSpeed: number; condition: string } }>({
+    queryKey: ['/api/weather/agricultural/farm'],
+    queryFn: async () => {
+      const res = await fetch('/api/weather/agricultural/farm', { credentials: 'include' });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? 'Weather is unavailable');
+      return body;
+    },
+    retry: false,
+  });
 
-  // Sparkline data for metric cards
-  const herdSparkline = Array.from({ length: 7 }, (_, i) => ({ value: totalAnimals - (6 - i) * 3 + Math.floor(Math.random() * 5) }));
-  const treatmentSparkline = Array.from({ length: 7 }, (_, i) => ({ value: Math.max(0, treatments.length - (6 - i) * 2 + Math.floor(Math.random() * 3)) }));
+  // Herd size over the last 30 days (from when animals were added), and animals added
+  const herdSparkline = trendData.map(d => ({ value: d.animals }));
+  const addedThisMonth = animals.filter(a => new Date(a.createdAt) >= subDays(now, 30)).length;
+  // Treatments started on each of the last 7 days
+  const treatmentSparkline = Array.from({ length: 7 }, (_, i) => {
+    const day = subDays(startOfDay(now), 6 - i);
+    return { value: treatments.filter(t => t.createdAt && startOfDay(new Date(t.createdAt)).getTime() === day.getTime()).length };
+  });
 
-  // Mock pasture wedge data
-  const pastureWedgeData = [
-    { paddock: 'P1', cover: 3200, target: 2900 },
-    { paddock: 'P2', cover: 2800, target: 2900 },
-    { paddock: 'P3', cover: 2600, target: 2900 },
-    { paddock: 'P4', cover: 2400, target: 2900 },
-    { paddock: 'P5', cover: 2200, target: 2900 },
-    { paddock: 'P6', cover: 2000, target: 2900 },
-    { paddock: 'P7', cover: 1800, target: 2900 },
-    { paddock: 'P8', cover: 1600, target: 1500 },
-  ];
+  // Pasture covers as last recorded on each paddock (kg DM/ha)
+  const pastureWedgeData = pastures
+    .filter(p => p.grassCoverKg != null)
+    .map(p => ({ paddock: p.name, cover: Number(p.grassCoverKg) }))
+    .sort((a, b) => b.cover - a.cover);
+  const avgCover = pastureWedgeData.length ? Math.round(pastureWedgeData.reduce((n, p) => n + p.cover, 0) / pastureWedgeData.length) : null;
 
-  // Mock recent activity data
-  const recentActivityData = [
-    { id: 1, type: 'treatment', description: 'Recorded 12 liveweights', user: 'Sam', time: '04:45pm', date: 'Today' },
-    { id: 2, type: 'approved', description: 'Approved 96 remove animals', user: 'Sam', time: '04:45pm', date: 'Today' },
-    { id: 3, type: 'recorded', description: 'Recorded 144 liveweights', user: 'Sam', time: '04:30pm', date: 'Today' },
-    { id: 4, type: 'calving', description: 'Added 3 calving events', user: 'Admin', time: '02:15pm', date: 'Today' },
-    { id: 5, type: 'health', description: 'Updated health records', user: 'Rhys', time: '11:00am', date: 'Yesterday' },
-  ];
+  // The latest farm records
+  const { data: recentRecords = [] } = useQuery<{ id: string; title: string; occurredAt: string; recordedBy: { name: string } }[]>({
+    queryKey: ['/api/records', 'dashboard'],
+    queryFn: async () => {
+      const res = await fetch('/api/records?limit=5', { credentials: 'include' });
+      return res.ok ? res.json() : [];
+    },
+  });
+
+  // Deaths recorded this calendar year
+  const { data: mortality = [] } = useQuery<{ deathDate: string }[]>({ queryKey: ['/api/health/mortality'] });
+  const yearStart = new Date(now.getFullYear(), 0, 1);
+  const deathsThisYear = mortality.filter(m => new Date(m.deathDate) >= yearStart).length;
+  const deathRate = totalAnimals + deathsThisYear > 0 ? (deathsThisYear / (totalAnimals + deathsThisYear)) * 100 : null;
 
   // Render section content based on section ID
   const renderSection = (sectionId: string) => {
@@ -490,18 +492,19 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {recentActivityData.map((activity) => (
-                  <div key={activity.id} className="flex items-start gap-3 pb-3 border-b last:border-0 last:pb-0">
+                {recentRecords.length === 0 && <p className="text-sm text-muted-foreground">No records yet.</p>}
+                {recentRecords.map((record) => (
+                  <div key={record.id} className="flex items-start gap-3 pb-3 border-b last:border-0 last:pb-0">
                     <div className="w-2 h-2 rounded-full bg-primary mt-2 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium">{activity.user}</p>
-                      <p className="text-sm text-muted-foreground">{activity.description}</p>
+                      <p className="text-sm font-medium">{record.recordedBy?.name}</p>
+                      <p className="text-sm text-muted-foreground">{record.title}</p>
                     </div>
-                    <span className="text-xs text-muted-foreground whitespace-nowrap">{activity.time}</span>
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">{format(new Date(record.occurredAt), 'd MMM, h:mma')}</span>
                   </div>
                 ))}
               </div>
-              <Link href="/app/activity">
+              <Link href="/app/records">
                 <Button variant="ghost" size="sm" className="w-full mt-4">
                   View All Activity <ChevronRight className="h-4 w-4 ml-1" />
                 </Button>
@@ -520,24 +523,22 @@ export default function Dashboard() {
                   Pasture Wedge
                 </CardTitle>
                 <div className="text-right">
-                  <p className="text-sm font-medium">Avg Cover: 2,432 kg DM/ha</p>
-                  <p className="text-xs text-muted-foreground">Target: 2,900 kg DM/ha</p>
+                  <p className="text-sm font-medium">{avgCover != null ? `Avg cover: ${avgCover.toLocaleString()} kg DM/ha` : 'No covers recorded'}</p>
+                  <p className="text-xs text-muted-foreground">Last recorded on each paddock</p>
                 </div>
               </div>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={180}>
+              {pastureWedgeData.length === 0 ? <p className="text-sm text-muted-foreground py-6 text-center">Record covers on a pasture walk to see the wedge.</p> : (
+              <ResponsiveContainer width="100%" height={Math.max(120, pastureWedgeData.length * 22)}>
                 <BarChart data={pastureWedgeData} layout="vertical">
-                  <XAxis type="number" domain={[0, 3500]} tick={{ fontSize: 11 }} />
-                  <YAxis type="category" dataKey="paddock" tick={{ fontSize: 11 }} width={30} />
+                  <XAxis type="number" tick={{ fontSize: 11 }} />
+                  <YAxis type="category" dataKey="paddock" tick={{ fontSize: 11 }} width={90} />
                   <Tooltip />
-                  <Bar dataKey="cover" radius={[0, 4, 4, 0]}>
-                    {pastureWedgeData.map((entry, index) => (
-                      <Cell key={index} fill={entry.cover >= entry.target ? 'hsl(var(--primary))' : entry.cover >= entry.target * 0.8 ? '#f59e0b' : '#ef4444'} />
-                    ))}
-                  </Bar>
+                  <Bar dataKey="cover" radius={[0, 4, 4, 0]} fill="hsl(var(--primary))" />
                 </BarChart>
               </ResponsiveContainer>
+              )}
               <Link href="/app/pastures">
                 <Button variant="ghost" size="sm" className="w-full mt-2">
                   View Full Wedge <ChevronRight className="h-4 w-4 ml-1" />
@@ -577,7 +578,7 @@ export default function Dashboard() {
               <CardContent>
                 {isLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{avgBodyCondition}</div>}
                 <p className="text-xs text-muted-foreground">Scale: 1 (thin) - 5 (fat)</p>
-                <Progress value={typeof avgBodyCondition === 'number' ? (avgBodyCondition / 5) * 100 : 60} className="mt-2 h-2" />
+                <Progress value={avgBodyCondition === 'N/A' ? 0 : (Number(avgBodyCondition) / 5) * 100} className="mt-2 h-2" />
               </CardContent>
             </Card>
           </div>
@@ -683,30 +684,19 @@ export default function Dashboard() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <div className="grid grid-cols-2 gap-3 mb-4">
                 <div className="p-3 bg-destructive/10 rounded-lg text-center">
-                  <p className="text-xs text-destructive">Deaths (YTD)</p>
-                  <p className="text-2xl font-bold text-destructive">5</p>
-                  <p className="text-xs text-destructive/70">1.6% rate</p>
-                </div>
-                <div className="p-3 bg-orange-100 rounded-lg text-center">
-                  <p className="text-xs text-orange-700">Culled (YTD)</p>
-                  <p className="text-2xl font-bold text-orange-700">12</p>
-                  <p className="text-xs text-orange-600">3.8% rate</p>
+                  <p className="text-xs text-destructive">Deaths this year</p>
+                  <p className="text-2xl font-bold text-destructive">{deathsThisYear}</p>
+                  <p className="text-xs text-destructive/70">{deathRate != null ? `${deathRate.toFixed(1)}% of the herd` : '—'}</p>
                 </div>
                 <div className="p-3 bg-muted rounded-lg text-center">
-                  <p className="text-xs text-muted-foreground">Preventable</p>
-                  <p className="text-2xl font-bold">2</p>
-                  <p className="text-xs text-muted-foreground">40% of deaths</p>
-                </div>
-                <div className="p-3 bg-primary/10 rounded-lg text-center">
-                  <p className="text-xs text-primary">vs Last Year</p>
-                  <p className="text-2xl font-bold text-primary flex items-center justify-center gap-1">
-                    <TrendingDown className="h-4 w-4" />-15%
-                  </p>
+                  <p className="text-xs text-muted-foreground">Sold</p>
+                  <p className="text-2xl font-bold">{animals.filter(a => a.status === 'sold').length}</p>
+                  <p className="text-xs text-muted-foreground">animals marked sold</p>
                 </div>
               </div>
-              <Link href="/app/animal-performance">
+              <Link href="/app/health-monitoring">
                 <Button variant="ghost" size="sm" className="w-full">
                   View Full Dashboard <ChevronRight className="h-4 w-4 ml-1" />
                 </Button>
@@ -919,9 +909,11 @@ export default function Dashboard() {
                     <div className="p-3 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 shadow-lg shadow-emerald-500/25 group-hover:shadow-xl group-hover:shadow-emerald-500/30 transition-all duration-300">
                       <Users className="h-6 w-6 text-white" />
                     </div>
-                    <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold px-2 py-1">
-                      <ArrowUpRight className="h-3 w-3 mr-1" />+12
-                    </Badge>
+                    {addedThisMonth > 0 && (
+                      <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold px-2 py-1" title="Added in the last 30 days">
+                        <ArrowUpRight className="h-3 w-3 mr-1" />+{addedThisMonth}
+                      </Badge>
+                    )}
                   </div>
                   <div className="mt-4">
                     <p className="text-3xl font-bold text-gray-900">{isLoading ? <Skeleton className="h-9 w-20" /> : totalAnimals}</p>
@@ -951,9 +943,6 @@ export default function Dashboard() {
                     <div className="p-3 rounded-xl bg-gradient-to-br from-rose-500 to-pink-600 shadow-lg shadow-rose-500/25 group-hover:shadow-xl group-hover:shadow-rose-500/30 transition-all duration-300">
                       <Heart className="h-6 w-6 text-white" />
                     </div>
-                    <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200 font-semibold px-2 py-1">
-                      <Minus className="h-3 w-3 mr-1" />3 due
-                    </Badge>
                   </div>
                   <div className="mt-4">
                     <p className="text-3xl font-bold text-gray-900">{isLoading ? <Skeleton className="h-9 w-16" /> : activeTreatments}</p>
@@ -989,9 +978,8 @@ export default function Dashboard() {
                   </div>
                   <div className="mt-3">
                     <div className="flex items-center gap-2 text-xs text-gray-600 font-medium">
-                      <span>Avg: 2,432 kg/ha</span>
+                      <span>{avgCover != null ? `Avg cover: ${avgCover.toLocaleString()} kg DM/ha` : 'No covers recorded'}</span>
                     </div>
-                    <Progress value={78} className="h-2 mt-2 bg-emerald-100" />
                   </div>
                 </CardContent>
               </Card>
@@ -1009,20 +997,24 @@ export default function Dashboard() {
                     <div className="p-3 rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 shadow-lg shadow-sky-500/25 group-hover:shadow-xl group-hover:shadow-sky-500/30 transition-all duration-300">
                       <Sun className="h-6 w-6 text-white" />
                     </div>
-                    <span className="text-xs text-gray-600 font-medium bg-white/60 px-2 py-1 rounded-lg">{weatherData.condition}</span>
+                    {weather && <span className="text-xs text-gray-600 font-medium bg-white/60 px-2 py-1 rounded-lg">{weather.current.condition}</span>}
                   </div>
                   <div className="mt-4">
-                    <p className="text-3xl font-bold text-gray-900">{weatherData.temp}°C</p>
+                    <p className="text-3xl font-bold text-gray-900">{weather ? `${weather.current.temperature}°C` : '—'}</p>
                     <p className="text-sm text-gray-600 font-medium">Weather</p>
                   </div>
-                  <div className="flex items-center gap-4 mt-3 text-xs text-gray-600">
-                    <span className="flex items-center gap-1 font-medium">
-                      <Wind className="h-4 w-4 text-sky-500" /> {weatherData.wind} km/h
-                    </span>
-                    <span className="flex items-center gap-1 font-medium">
-                      <Droplets className="h-4 w-4 text-blue-500" /> {weatherData.humidity}%
-                    </span>
-                  </div>
+                  {weather ? (
+                    <div className="flex items-center gap-4 mt-3 text-xs text-gray-600">
+                      <span className="flex items-center gap-1 font-medium">
+                        <Wind className="h-4 w-4 text-sky-500" /> {weather.current.windSpeed} km/h
+                      </span>
+                      <span className="flex items-center gap-1 font-medium">
+                        <Droplets className="h-4 w-4 text-blue-500" /> {weather.current.humidity}%
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-xs text-gray-600">{weatherError ? (weatherError as Error).message : 'Loading…'}</p>
+                  )}
                 </CardContent>
               </Card>
             </motion.div>

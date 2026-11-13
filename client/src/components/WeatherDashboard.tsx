@@ -105,11 +105,11 @@ export function WeatherDashboard({
   const [selectedSuggestion, setSelectedSuggestion] = useState<RescheduleSuggestion | null>(null);
 
   // Fetch weather alerts
-  const { data: alertsData, isLoading: alertsLoading } = useQuery({
+  const { data: alertsData, isLoading: alertsLoading, error: alertsError } = useQuery({
     queryKey: ['weatherAlerts'],
     queryFn: async () => {
       const res = await fetch('/api/weather/task-alerts');
-      if (!res.ok) throw new Error('Failed to fetch weather alerts');
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || 'Weather is unavailable right now');
       return res.json();
     },
     refetchInterval: 30 * 60 * 1000, // Refresh every 30 minutes
@@ -231,8 +231,8 @@ export function WeatherDashboard({
               </div>
             </div>
           ) : (
-            <div className="text-center py-4 text-muted-foreground">
-              Loading weather data...
+            <div className="text-center py-4 text-muted-foreground" data-testid="text-weather-status">
+              {alertsError ? (alertsError as Error).message : 'Loading weather data...'}
             </div>
           )}
         </CardContent>
@@ -391,7 +391,7 @@ export function WeatherDashboard({
       )}
 
       {/* No Issues */}
-      {showAlerts && alerts.length === 0 && showReschedule && suggestions.length === 0 && (
+      {currentWeather && showAlerts && alerts.length === 0 && showReschedule && suggestions.length === 0 && (
         <Card>
           <CardContent className="py-6 text-center">
             <Sun className="h-12 w-12 mx-auto mb-2 text-yellow-500" />
@@ -506,11 +506,11 @@ export function WeatherWidget() {
 
 // Best days finder component
 export function BestDaysFinder({ taskType }: { taskType: string }) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['bestDays', taskType],
     queryFn: async () => {
       const res = await fetch(`/api/weather/best-days/${taskType}`);
-      if (!res.ok) throw new Error('Failed to fetch best days');
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || 'Weather is unavailable right now');
       return res.json();
     },
   });
@@ -518,6 +518,8 @@ export function BestDaysFinder({ taskType }: { taskType: string }) {
   if (isLoading) {
     return <div className="text-sm text-muted-foreground">Finding best days...</div>;
   }
+
+  if (error) return <div className="text-sm text-muted-foreground">{(error as Error).message}</div>;
 
   if (!data) return null;
 

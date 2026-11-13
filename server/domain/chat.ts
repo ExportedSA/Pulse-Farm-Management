@@ -1,7 +1,16 @@
 import { db } from '../db';
-import { chatChannels, chatChannelMembers, users, type ChatChannel } from '@shared/schema';
+import { chatChannels, chatChannelMembers, type ChatChannel } from '@shared/schema';
 import { eq, and } from 'drizzle-orm';
-import { nanoid } from 'nanoid';
+import { listFarmUserIds } from './farms';
+
+/**
+ * Automatically created channels need a creator; use the farm's (first) owner
+ */
+async function getFarmOwnerId(farmId: string): Promise<string> {
+  const [ownerId] = await listFarmUserIds(farmId, ['owner']);
+  if (!ownerId) throw new Error(`Farm ${farmId} has no active owner`);
+  return ownerId;
+}
 
 /**
  * Create or get a context channel for a job
@@ -9,7 +18,8 @@ import { nanoid } from 'nanoid';
 export async function getOrCreateJobChannel(
   jobId: string,
   channelName: string,
-  farmId: string
+  farmId: string,
+  createdById?: string
 ): Promise<ChatChannel> {
   // Check if channel already exists
   const [existingChannel] = await db
@@ -31,12 +41,11 @@ export async function getOrCreateJobChannel(
   const [newChannel] = await db
     .insert(chatChannels)
     .values({
-      id: nanoid(),
       name: channelName,
       type: 'context',
       contextType: 'job',
       contextId: jobId,
-      createdBy: 'system', // This should be replaced with actual user ID
+      createdBy: createdById ?? await getFarmOwnerId(farmId),
       isActive: true,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -55,7 +64,8 @@ export async function getOrCreateJobChannel(
 export async function getOrCreateAnimalChannel(
   animalId: string,
   channelName: string,
-  farmId: string
+  farmId: string,
+  createdById?: string
 ): Promise<ChatChannel> {
   // Check if channel already exists
   const [existingChannel] = await db
@@ -77,12 +87,11 @@ export async function getOrCreateAnimalChannel(
   const [newChannel] = await db
     .insert(chatChannels)
     .values({
-      id: nanoid(),
       name: channelName,
       type: 'context',
       contextType: 'animal',
       contextId: animalId,
-      createdBy: 'system', // This should be replaced with actual user ID
+      createdBy: createdById ?? await getFarmOwnerId(farmId),
       isActive: true,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -101,7 +110,8 @@ export async function getOrCreateAnimalChannel(
 export async function getOrCreateEquipmentChannel(
   equipmentId: string,
   channelName: string,
-  farmId: string
+  farmId: string,
+  createdById?: string
 ): Promise<ChatChannel> {
   // Check if channel already exists
   const [existingChannel] = await db
@@ -123,12 +133,11 @@ export async function getOrCreateEquipmentChannel(
   const [newChannel] = await db
     .insert(chatChannels)
     .values({
-      id: nanoid(),
       name: channelName,
       type: 'context',
       contextType: 'equipment',
       contextId: equipmentId,
-      createdBy: 'system', // This should be replaced with actual user ID
+      createdBy: createdById ?? await getFarmOwnerId(farmId),
       isActive: true,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -145,20 +154,14 @@ export async function getOrCreateEquipmentChannel(
  * Add all active farm staff to a channel
  */
 async function addFarmStaffToChannel(channelId: string, farmId: string): Promise<void> {
-  // Get all active users for the farm
-  // Note: This is a simplified approach. In a real implementation, you'd have a proper
-  // staff profiles table with farm associations
-  const farmUsers = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.farmId, farmId));
+  // Get all active members of the farm
+  const farmUsers = (await listFarmUserIds(farmId)).map(id => ({ id }));
 
   // Add each user to the channel
   for (const user of farmUsers) {
     await db
       .insert(chatChannelMembers)
       .values({
-        id: nanoid(),
         channelId,
         userId: user.id,
         role: 'member',

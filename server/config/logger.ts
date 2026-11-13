@@ -1,3 +1,4 @@
+import os from 'node:os';
 import pino from 'pino';
 import pinoPretty from 'pino-pretty';
 
@@ -12,7 +13,12 @@ const baseConfig: pino.LoggerOptions = {
   // Include process ID for debugging
   pid: process.pid,
   // Include hostname for multi-instance deployments
-  hostname: require('os').hostname(),
+  hostname: os.hostname(),
+  // Passwords and link secrets in logged request bodies are hidden
+  redact: {
+    paths: ['body.password', 'body.token', '*.body.password', '*.body.token', '*.*.body.password', '*.*.body.token'],
+    censor: '[hidden]',
+  },
 };
 
 // Create logger instance

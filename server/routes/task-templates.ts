@@ -632,8 +632,6 @@ const TASK_TEMPLATES = [
   },
 ];
 
-// Custom templates created by users (in-memory for demo)
-let customTemplates: any[] = [];
 
 // ============================================
 // ENDPOINTS
@@ -648,7 +646,7 @@ router.get('/categories', (req, res) => {
 router.get('/', (req, res) => {
   const { category, search, popular } = req.query;
   
-  let templates = [...TASK_TEMPLATES, ...customTemplates];
+  let templates = TASK_TEMPLATES;
   
   // Filter by category
   if (category && category !== 'all') {
@@ -694,7 +692,7 @@ router.get('/popular', (req, res) => {
 router.get('/:id', (req, res) => {
   const { id } = req.params;
   
-  const template = [...TASK_TEMPLATES, ...customTemplates].find(t => t.id === id);
+  const template = TASK_TEMPLATES.find(t => t.id === id);
   
   if (!template) {
     return res.status(404).json({ error: 'Template not found' });
@@ -706,140 +704,11 @@ router.get('/:id', (req, res) => {
   });
 });
 
-// Create custom template
-router.post('/', (req, res) => {
-  const templateData = req.body;
-  
-  const newTemplate = {
-    id: `custom-${Date.now()}`,
-    ...templateData,
-    isCustom: true,
-    createdAt: new Date().toISOString(),
-  };
-  
-  customTemplates.push(newTemplate);
-  
-  res.status(201).json({
-    ...newTemplate,
-    categoryInfo: TEMPLATE_CATEGORIES.find(c => c.id === newTemplate.category),
-  });
-});
-
-// Update custom template
-router.patch('/:id', (req, res) => {
-  const { id } = req.params;
-  const updates = req.body;
-  
-  // Can only update custom templates
-  const index = customTemplates.findIndex(t => t.id === id);
-  
-  if (index === -1) {
-    return res.status(404).json({ error: 'Custom template not found' });
-  }
-  
-  customTemplates[index] = {
-    ...customTemplates[index],
-    ...updates,
-    updatedAt: new Date().toISOString(),
-  };
-  
-  res.json(customTemplates[index]);
-});
-
-// Delete custom template
-router.delete('/:id', (req, res) => {
-  const { id } = req.params;
-  
-  const index = customTemplates.findIndex(t => t.id === id);
-  
-  if (index === -1) {
-    return res.status(404).json({ error: 'Custom template not found' });
-  }
-  
-  customTemplates.splice(index, 1);
-  res.json({ success: true });
-});
-
-// Create job from template
-router.post('/:id/create-job', (req, res) => {
-  const { id } = req.params;
-  const { date, time, assignedTo, location, notes } = req.body;
-  
-  const template = [...TASK_TEMPLATES, ...customTemplates].find(t => t.id === id);
-  
-  if (!template) {
-    return res.status(404).json({ error: 'Template not found' });
-  }
-  
-  // Create job from template
-  const job = {
-    id: `job-${Date.now()}`,
-    title: template.name,
-    description: template.description,
-    category: template.category,
-    priority: template.priority,
-    estimatedDuration: template.estimatedDuration,
-    scheduledDate: date || new Date().toISOString().split('T')[0],
-    scheduledTime: time || template.defaultTime,
-    assignedTo: assignedTo || [],
-    location: location || '',
-    notes: notes || '',
-    checklistItems: template.checklistItems?.map((item: any) => ({
-      ...item,
-      id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      completed: false,
-    })),
-    status: 'pending',
-    fromTemplate: id,
-    createdAt: new Date().toISOString(),
-  };
-  
-  res.status(201).json(job);
-});
-
-// Create recurring task from template
-router.post('/:id/create-recurring', (req, res) => {
-  const { id } = req.params;
-  const { recurrenceType, recurrenceInterval, recurrenceDays, startDate, assignedTo } = req.body;
-  
-  const template = [...TASK_TEMPLATES, ...customTemplates].find(t => t.id === id);
-  
-  if (!template) {
-    return res.status(404).json({ error: 'Template not found' });
-  }
-  
-  // Create recurring task from template
-  const recurringTask = {
-    id: `recurring-${Date.now()}`,
-    title: template.name,
-    description: template.description,
-    category: template.category,
-    priority: template.priority,
-    estimatedDuration: template.estimatedDuration,
-    recurrenceType: recurrenceType || template.suggestedRecurrence || 'daily',
-    recurrenceInterval: recurrenceInterval || 1,
-    recurrenceDays: recurrenceDays || [],
-    recurrenceTime: template.defaultTime,
-    startDate: startDate || new Date().toISOString().split('T')[0],
-    assignedTo: assignedTo || [],
-    checklistItems: template.checklistItems?.map((item: any) => ({
-      ...item,
-      id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-    })),
-    isActive: true,
-    fromTemplate: id,
-    createdAt: new Date().toISOString(),
-  };
-  
-  res.status(201).json(recurringTask);
-});
-
 // Get template statistics
 router.get('/stats/summary', (req, res) => {
   const stats = {
-    totalTemplates: TASK_TEMPLATES.length + customTemplates.length,
+    totalTemplates: TASK_TEMPLATES.length,
     systemTemplates: TASK_TEMPLATES.length,
-    customTemplates: customTemplates.length,
     categories: TEMPLATE_CATEGORIES.length,
     popularTemplates: TASK_TEMPLATES.filter(t => t.isPopular).length,
     byCategory: TEMPLATE_CATEGORIES.map(cat => ({

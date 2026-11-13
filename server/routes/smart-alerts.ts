@@ -3,7 +3,7 @@ import { Router, type Request, type Response } from "express";
 import { db } from "../db";
 import { 
   alerts, animals, animalTreatments, breedingRecords, vaccinationSchedules,
-  prescriptions, vetVisits, labResults, healthScores, weightRecords
+  prescriptions, vetVisits, labResults, healthScores, weightRecords, products
 } from "@shared/schema";
 import { eq, and, gte, lte, desc, sql, isNull, or } from "drizzle-orm";
 import { addDays, subDays, differenceInDays, differenceInMonths, format } from "date-fns";
@@ -223,13 +223,15 @@ async function generateTreatmentDueAlerts(): Promise<number> {
   const today = new Date();
   const tomorrow = addDays(today, 1);
 
-  // Find treatments that need follow-up (scheduled but not completed)
+  // Find treatments still waiting to be given (treatment status is only active/completed)
   const pendingTreatments = await db
     .select()
     .from(animalTreatments)
     .where(and(
-      eq(animalTreatments.status, 'scheduled'),
-      lte(animalTreatments.treatmentDate, format(tomorrow, 'yyyy-MM-dd'))
+      eq(animalTreatments.status, 'active'),
+      eq(animalTreatments.awaitingTreatment, true),
+      isNull(animalTreatments.deletedAt),
+      lte(animalTreatments.dateTime, format(tomorrow, 'yyyy-MM-dd'))
     ));
 
   for (const treatment of pendingTreatments) {
@@ -244,7 +246,7 @@ async function generateTreatmentDueAlerts(): Promise<number> {
       ));
 
     if (!existing) {
-      const isOverdue = treatment.treatmentDate < format(today, 'yyyy-MM-dd');
+      const isOverdue = treatment.dateTime < format(today, 'yyyy-MM-dd');
       
       await db.insert(alerts).values({
         type: isOverdue ? 'treatment_overdue' : 'treatment_due',
@@ -252,8 +254,8 @@ async function generateTreatmentDueAlerts(): Promise<number> {
         animalId: treatment.animalId,
         treatmentId: treatment.id,
         title: isOverdue ? 'Treatment Overdue' : 'Treatment Due',
-        message: `${treatment.treatmentType} treatment ${isOverdue ? 'was due' : 'is due'} on ${treatment.treatmentDate}`,
-        metadata: { treatmentType: treatment.treatmentType, dueDate: treatment.treatmentDate },
+        message: `${treatment.treatmentType} treatment ${isOverdue ? 'was due' : 'is due'} on ${treatment.dateTime.slice(0, 10)}`,
+        metadata: { treatmentType: treatment.treatmentType, dueDate: treatment.dateTime },
       });
       count++;
     }
@@ -267,20 +269,30 @@ async function generateWithdrawalAlerts(): Promise<number> {
   const today = new Date();
   const alertWindow = addDays(today, 2); // Alert 2 days before withdrawal ends
 
-  // Find treatments with active withholding periods
+  // Find treatments with active withholding periods. Milk days are recorded on the
+  // treatment; meat days come from the product that was used.
   const treatmentsWithWithholding = await db
-    .select()
+    .select({
+      id: animalTreatments.id,
+      animalId: animalTreatments.animalId,
+      treatmentType: animalTreatments.treatmentType,
+      dateTime: animalTreatments.dateTime,
+      milkWithholdingDays: animalTreatments.milkWithdrawalDays,
+      meatWithholdingDays: products.meatWithdrawalDays,
+    })
     .from(animalTreatments)
+    .leftJoin(products, eq(animalTreatments.productId, products.id))
     .where(and(
       or(
-        sql`${animalTreatments.meatWithholdingDays} > 0`,
-        sql`${animalTreatments.milkWithholdingDays} > 0`
+        sql`${animalTreatments.milkWithdrawalDays} > 0`,
+        sql`${products.meatWithdrawalDays} > 0`
       ),
-      eq(animalTreatments.status, 'completed')
+      eq(animalTreatments.status, 'completed'),
+      isNull(animalTreatments.deletedAt)
     ));
 
   for (const treatment of treatmentsWithWithholding) {
-    const treatmentDate = new Date(treatment.treatmentDate);
+    const treatmentDate = new Date(treatment.dateTime);
     
     // Check milk withholding
     if (treatment.milkWithholdingDays) {

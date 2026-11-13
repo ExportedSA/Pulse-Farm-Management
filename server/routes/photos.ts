@@ -4,8 +4,11 @@ import { storage } from "../storage";
 import { insertPhotoAttachmentSchema } from "@shared/schema";
 import { uploadSinglePhoto, uploadMultiplePhotos } from "../middleware/upload";
 import { z } from "zod";
+import { getFarmId, requireFarm } from "../middleware/auth";
+import { saveUpload, deleteFileByUrl } from "../services/fileStorage";
 
 const router = Router();
+router.use(requireFarm);
 
 // POST /api/photos/upload - Upload a single photo
 router.post("/upload", uploadSinglePhoto, async (req: Request, res: Response) => {
@@ -14,17 +17,10 @@ router.post("/upload", uploadSinglePhoto, async (req: Request, res: Response) =>
       return res.status(400).json({ error: "No file uploaded" });
     }
 
-    // Use the file storage service to save the file
-    const { saveFileBuffer } = await import('../services/fileStorage');
-    const { storageKey, publicUrl } = await saveFileBuffer(
-      req.file.buffer,
-      req.file.mimetype,
-      req.file.originalname,
-      'photos' // Store in photos subfolder
-    );
-    
+    const { storageKey, url } = await saveUpload(getFarmId(req)!, 'photos', req.file);
+
     res.json({
-      url: publicUrl,
+      url,
       storageKey,
       filename: req.file.originalname,
       size: req.file.size,
@@ -43,19 +39,12 @@ router.post("/upload-multiple", uploadMultiplePhotos, async (req: Request, res: 
       return res.status(400).json({ error: "No files uploaded" });
     }
 
-    // Use the file storage service to save the files
-    const { saveFileBuffer } = await import('./services/fileStorage');
-    
+    const farmId = getFarmId(req)!;
     const uploadPromises = req.files.map(async (file: Express.Multer.File) => {
-      const { storageKey, publicUrl } = await saveFileBuffer(
-        file.buffer,
-        file.mimetype,
-        file.originalname,
-        'photos' // Store in photos subfolder
-      );
-      
+      const { storageKey, url } = await saveUpload(farmId, 'photos', file);
+
       return {
-        url: publicUrl,
+        url,
         storageKey,
         filename: file.originalname,
         size: file.size,
@@ -125,15 +114,9 @@ router.delete("/attachments/:id", async (req: Request, res: Response) => {
     // Delete from database
     await storage.deletePhotoAttachment(id);
 
-    // Try to delete the file (don't fail if file doesn't exist)
-    try {
-      const filePath = path.join(process.cwd(), attachment.photoUrl);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-    } catch (fileError) {
-      console.warn("Could not delete photo file:", fileError);
-    }
+    // Remove the stored files (a missing file is not an error)
+    await deleteFileByUrl(attachment.photoUrl);
+    await deleteFileByUrl(attachment.thumbnailUrl);
 
     res.status(204).send();
   } catch (error) {

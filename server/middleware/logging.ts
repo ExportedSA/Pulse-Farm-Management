@@ -11,7 +11,8 @@ export const httpLogger = pinoHttp({
       method: req.method,
       url: req.url,
       userAgent: req.headers['user-agent'],
-      ip: req.ip || req.connection.remoteAddress,
+      // pino passes its pre-serialized request here, not the Express one
+      ip: req.remoteAddress,
     }),
     // Only include error details in response serialization
     res: (res) => ({
@@ -53,7 +54,7 @@ export function addRequestContext(req: Request, res: Response, next: NextFunctio
     method: req.method,
     url: req.url,
     userAgent: req.headers['user-agent'],
-    ip: req.ip || req.connection.remoteAddress,
+    ip: req.ip || req.socket?.remoteAddress,
   });
   
   // Log the start of the request

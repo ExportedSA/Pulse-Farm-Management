@@ -50,6 +50,12 @@ let instanceId: string;
 
 // Initialize Redis connections
 export function initRedis(): boolean {
+  // Redis is only needed for multi-instance pub/sub; skip it unless configured
+  if (!process.env.REDIS_URL && !process.env.REDIS_HOST) {
+    logger.info('Redis not configured (REDIS_URL/REDIS_HOST unset), running single-instance');
+    return false;
+  }
+
   try {
     const config = getRedisConfig();
     

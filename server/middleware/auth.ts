@@ -4,6 +4,7 @@ import type { Request, Response, NextFunction } from 'express';
 // JWT payload interface
 export interface JWTPayload {
   userId: string;
+  name?: string;
   email?: string;
   role?: string;
   farmId?: string;
@@ -13,7 +14,43 @@ export interface JWTPayload {
 
 // Extended Request interface to include user
 export interface AuthenticatedRequest extends Request {
-  user?: JWTPayload;
+  user?: RequestUser;
+}
+
+// Much of the route code reads `req.user.id`, so the user ID is exposed under both names
+export type RequestUser = JWTPayload & { id: string };
+
+function toRequestUser(payload: JWTPayload): RequestUser {
+  return { ...payload, id: payload.userId };
+}
+
+/**
+ * The signed-in user's ID (set by requireAuth/optionalAuth). The JWT payload calls it
+ * `userId`; reading `req.user.id` always gives undefined.
+ */
+export function getUserId(req: Request): string | undefined {
+  return (req as AuthenticatedRequest).user?.userId;
+}
+
+/**
+ * The farm the signed-in user is working in, from their token
+ */
+export function getFarmId(req: Request): string | undefined {
+  return (req as AuthenticatedRequest).user?.farmId;
+}
+
+/**
+ * Use after requireAuth on farm-scoped routes. Tokens issued before a user joined a farm
+ * have no farmId; signing in again picks the farm up.
+ */
+export function requireFarm(req: Request, res: Response, next: NextFunction) {
+  if (!getFarmId(req)) {
+    return res.status(403).json({
+      error: 'No farm selected',
+      message: 'Your account is not linked to a farm. Sign in again, or ask a farm owner to add you.',
+    });
+  }
+  next();
 }
 
 // JWT Secret from environment
@@ -59,16 +96,38 @@ export function verifyToken(token: string): JWTPayload {
   }
 }
 
-// Extract token from Authorization header
+// httpOnly cookie carrying the access token, so plain same-origin fetch() calls are authenticated
+export const AUTH_COOKIE = 'pulse_token';
+
+export const authCookieOptions = {
+  httpOnly: true,
+  sameSite: 'lax' as const,
+  secure: process.env.NODE_ENV === 'production',
+  maxAge: 24 * 60 * 60 * 1000, // matches JWT_EXPIRES_IN
+  path: '/',
+};
+
+// Extract token from Authorization header, falling back to the auth cookie
 function extractToken(req: Request): string | null {
   const authHeader = req.headers.authorization;
-  if (!authHeader) return null;
-  
+  if (!authHeader) return extractCookieToken(req);
+
   // Expect "Bearer <token>"
   const parts = authHeader.split(' ');
   if (parts.length !== 2 || parts[0] !== 'Bearer') return null;
-  
+
   return parts[1];
+}
+
+function extractCookieToken(req: Request): string | null {
+  const cookieHeader = req.headers.cookie;
+  if (!cookieHeader) return null;
+
+  for (const pair of cookieHeader.split(';')) {
+    const [name, ...rest] = pair.trim().split('=');
+    if (name === AUTH_COOKIE) return decodeURIComponent(rest.join('='));
+  }
+  return null;
 }
 
 // JWT authentication middleware
@@ -84,7 +143,7 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
     }
     
     const payload = verifyToken(token);
-    req.user = payload;
+    req.user = toRequestUser(payload);
     
     next();
   } catch (error) {
@@ -103,7 +162,7 @@ export function optionalAuth(req: AuthenticatedRequest, res: Response, next: Nex
     
     if (token) {
       const payload = verifyToken(token);
-      req.user = payload;
+      req.user = toRequestUser(payload);
     }
     
     next();

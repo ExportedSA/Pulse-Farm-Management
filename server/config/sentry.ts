@@ -81,15 +81,29 @@ export function initSentry() {
 }
 
 // Helper to capture exceptions with additional context
-export function captureException(error: Error, context?: Record<string, any>) {
-  if (Sentry.getCurrentHub().getClient()) {
-    Sentry.withScope((scope) => {
-      if (context) {
-        scope.setContext('custom', context);
-      }
-      scope.setTag('service', 'pulse-backend');
-      Sentry.captureException(error);
-    });
+// Passwords and link secrets in a request body must never reach logs or Sentry
+const SECRET_KEYS = /^(password|currentPassword|newPassword|token|refreshToken|accessToken)$/i;
+function withoutSecrets(value: any, depth = 0): any {
+  if (!value || typeof value !== 'object' || depth > 6) return value;
+  if (Array.isArray(value)) return value.map(v => withoutSecrets(v, depth + 1));
+  return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, SECRET_KEYS.test(k) ? '[hidden]' : withoutSecrets(v, depth + 1)]));
+}
+
+export function captureException(error: Error, rawContext?: Record<string, any>) {
+  const context = withoutSecrets(rawContext);
+  try {
+    // Use newer Sentry API - getClient is on the Sentry object directly
+    if (Sentry.getClient && Sentry.getClient()) {
+      Sentry.withScope((scope) => {
+        if (context) {
+          scope.setContext('custom', context);
+        }
+        scope.setTag('service', 'pulse-backend');
+        Sentry.captureException(error);
+      });
+    }
+  } catch (e) {
+    // Sentry not initialized, just log
   }
   
   // Always log to our logger as well
@@ -97,13 +111,17 @@ export function captureException(error: Error, context?: Record<string, any>) {
 }
 
 // Helper to capture messages
-export function captureMessage(message: string, level: Sentry.Severity = 'info') {
-  if (Sentry.getCurrentHub().getClient()) {
-    Sentry.captureMessage(message, level);
+export function captureMessage(message: string, level: 'info' | 'warning' | 'error' = 'info') {
+  try {
+    if (Sentry.getClient && Sentry.getClient()) {
+      Sentry.captureMessage(message, level);
+    }
+  } catch (e) {
+    // Sentry not initialized
   }
   
   // Always log to our logger as well
-  logger[level](message);
+  logger.info(message);
 }
 
 // Export Sentry for advanced usage

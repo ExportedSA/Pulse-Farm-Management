@@ -265,3 +265,36 @@ async function removePendingAction(id) {
   // This would remove the action from IndexedDB
   console.log('Removing pending action:', id);
 }
+
+// Phone notifications: show what the server pushed, even with Pulse closed
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (error) {
+    data = { title: 'Pulse', body: event.data ? event.data.text() : '' };
+  }
+  event.waitUntil(self.registration.showNotification(data.title || 'Pulse', {
+    body: data.body || '',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    tag: data.tag,
+    renotify: Boolean(data.tag),
+    requireInteraction: Boolean(data.urgent),
+    data: { link: data.link || '/app' },
+  }));
+});
+
+// Tapping the notification opens Pulse at the job (reusing an open Pulse window if there is one)
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const link = (event.notification.data && event.notification.data.link) || '/app';
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
+    for (const win of windows) {
+      if (new URL(win.url).origin === self.location.origin && 'focus' in win) {
+        return win.navigate(link).then((w) => (w || win).focus());
+      }
+    }
+    return self.clients.openWindow(link);
+  }));
+});

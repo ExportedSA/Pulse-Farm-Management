@@ -1,4 +1,5 @@
 import { storage } from './storage';
+import { inSeedFarm } from './seed-farm';
 import { InsertMilkRecord } from '@shared/schema';
 
 const milkRecords: InsertMilkRecord[] = [
@@ -117,7 +118,7 @@ async function seedMilkProduction() {
 
 // Run if called directly
 if (require.main === module) {
-  seedMilkProduction();
+  inSeedFarm(seedMilkProduction).then(() => process.exit(0), err => { console.error(err); process.exit(1); });
 }
 
 export { seedMilkProduction };

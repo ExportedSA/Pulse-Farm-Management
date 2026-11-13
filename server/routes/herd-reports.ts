@@ -785,13 +785,13 @@ router.get("/trends", async (req: Request, res: Response) => {
     // Get treatment trends
     const treatmentData = await db
       .select({
-        month: sql<string>`to_char(${animalTreatments.treatmentDate}::date, 'YYYY-MM')`,
+        month: sql<string>`to_char(${animalTreatments.dateTime}::date, 'YYYY-MM')`,
         count: sql<number>`count(*)::int`,
       })
       .from(animalTreatments)
-      .where(gte(animalTreatments.treatmentDate, format(subMonths(today, months), 'yyyy-MM-dd')))
-      .groupBy(sql`to_char(${animalTreatments.treatmentDate}::date, 'YYYY-MM')`)
-      .orderBy(sql`to_char(${animalTreatments.treatmentDate}::date, 'YYYY-MM')`);
+      .where(gte(animalTreatments.dateTime, format(subMonths(today, months), 'yyyy-MM-dd')))
+      .groupBy(sql`to_char(${animalTreatments.dateTime}::date, 'YYYY-MM')`)
+      .orderBy(sql`to_char(${animalTreatments.dateTime}::date, 'YYYY-MM')`);
 
     trends.treatments = treatmentData;
 

@@ -7,15 +7,18 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
-import { GlobalSearch } from "@/components/GlobalSearch";
+import GlobalSearch, { OPEN_SEARCH_EVENT } from "@/components/global/Search";
+import { RecordFab } from "@/components/records/RecordFab";
+import RecordsPage from "@/pages/records-page";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { PWAProvider, usePWA } from "@/lib/pwa-context";
 import { FarmProvider } from "@/lib/farm-context";
 import { RequireAuth } from "@/components/RequireAuth";
+import { ScreenErrorBoundary } from "@/components/ScreenErrorBoundary";
 import { ChatProvider } from "@/contexts/ChatContext";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 import { FarmSwitcher } from "@/components/FarmSwitcher";
-import { Home as HomeIcon, LogOut, Wifi, WifiOff, Bell, MapPin } from "lucide-react";
+import { Home as HomeIcon, LogOut, Wifi, WifiOff, Bell, MapPin, Search } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -23,12 +26,9 @@ import type { Alert } from "@shared/schema";
 import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import Dashboard from "@/pages/dashboard";
-import LandingDashboard from "@/pages/landing-dashboard";
 import DashboardOverview from "@/components/dashboard/DashboardOverview";
 import ChatPage from "@/pages/chat-page";
 import CompliancePage from "@/pages/compliance-page";
-import FarmCompliancePage from "@/pages/farm-compliance-page";
-import NaitRecordsPage from "@/pages/nait-records";
 import Home from "@/pages/home";
 import AnimalsList from "@/pages/animals-list";
 import GroupsManagement from "@/pages/groups-management";
@@ -45,7 +45,7 @@ import VisitorPortalPage from "@/pages/visitor-portal";
 import OperationsPage from "@/pages/operations-page";
 import VehicleRegistryPage from "@/pages/vehicle-registry-page";
 import StockReconciliationPage from "@/pages/stock-reconciliation-page";
-import MapTasksPage from "@/pages/map-tasks-page";
+import StockSeasonReportPage from "@/pages/stock-season-report-page";
 import FinancialPage from "@/pages/financial-page";
 import MilkProductionPage from "@/pages/milk-production-page";
 import NZFAPCompliancePage from "@/pages/nzfap-compliance-page";
@@ -54,16 +54,11 @@ import JobsPage from "@/pages/jobs-page";
 import StaffManagementPage from "@/pages/staff-management-page";
 import ContractorManagementPage from "@/pages/contractor-management-page";
 import RecurringTasksPage from "@/pages/recurring-tasks-page";
-import TaskTemplatesPage from "@/pages/task-templates-page";
-import TaskCalendarPage from "@/pages/task-calendar-page";
 import FarmCalendarPage from "@/pages/farm-calendar-page";
 import WeatherPage from "@/pages/weather-page";
 import { NotificationCenter } from "@/components/NotificationCenter";
 import TimesheetsPage from "@/pages/timesheets-page";
 import KanbanPage from "@/pages/kanban-page";
-import EquipmentPage from "@/pages/equipment-page";
-import TaskDependenciesPage from "@/pages/task-dependencies-page";
-import ComplianceTagsPage from "@/pages/compliance-tags-page";
 import VaccinationDashboard from "@/pages/vaccination-dashboard";
 import HealthMonitoringDashboard from "@/pages/health-monitoring-dashboard";
 import ReproductionDashboardNew from "@/pages/reproduction-dashboard";
@@ -71,58 +66,70 @@ import VeterinaryDashboard from "@/pages/veterinary-dashboard";
 import HealthAnalyticsDashboard from "@/pages/health-analytics-dashboard";
 import FieldModeDashboard from "@/pages/field-mode-dashboard";
 import AlertsNotificationsDashboard from "@/pages/alerts-notifications-dashboard";
-import WeightTrackingDashboard from "@/pages/weight-tracking-dashboard";
 import BatchTreatmentPage from "@/pages/batch-treatment-page";
 import LabResultsImportPage from "@/pages/lab-results-import";
-import BenchmarkingPage from "@/pages/benchmarking-page";
-import HealthPredictionsPage from "@/pages/health-predictions-page";
 import NaitCompliancePage from "@/pages/nait-compliance-page";
 import WeightGrowthTrackingPage from "@/pages/weight-growth-tracking";
 import SmartGroupsPage from "@/pages/smart-groups-page";
 import BulkOperationsPage from "@/pages/bulk-operations-page";
 import AnimalTimelinePage from "@/pages/animal-timeline-page";
 import AnimalLineagePage from "@/pages/animal-lineage-page";
+import AnimalHealthPage from "@/pages/AnimalHealthPage";
+import AnimalDetailPage from "@/pages/AnimalDetailPage";
+import TaskListPage from "@/pages/TaskListPage";
+import EquipmentListPage from "@/pages/EquipmentListPage";
+import EquipmentDetailPage from "@/pages/EquipmentDetailPage";
+import EquipmentMaintenancePage from "@/pages/EquipmentMaintenancePage";
+import EquipmentServiceHistoryPage from "@/pages/EquipmentServiceHistoryPage";
+import CompliancePackPage from "@/pages/compliance-pack-page";
+import FarmMapPage from "@/pages/farm-map-page";
+import FarmReportsPage from "@/pages/farm-reports-page";
+import JobPrintPage from "@/pages/job-print-page";
+import HazardMapPrintPage from "@/pages/hazard-map-print-page";
+import TimesheetReportPage from "@/pages/TimesheetReportPage";
+import SafetyReportPage from "@/pages/SafetyReportPage";
+import AnimalReportPage from "@/pages/AnimalReportPage";
 import HerdReportsPage from "@/pages/herd-reports-page";
 import PastureWalkPage from "@/pages/pasture-walk-page";
 import RosterSchedulingPage from "@/pages/roster-scheduling-page";
-import HealthSafetyPage from "@/pages/health-safety-page";
-import SafetyPage from "@/pages/safety-page";
-import PeoplePage from "@/pages/people-page";
-import AssetRegistryPage from "@/pages/asset-registry-page";
-import FarmFinancePage from "@/pages/farm-finance-page";
 import QRCodeManagementPage from "@/pages/qr-code-management-page";
-import FinancialAnalyticsPage from "@/pages/financial-analytics-page";
-import PerformanceBenchmarkingPage from "@/pages/performance-benchmarking-page";
-import AnimalPerformancePage from "@/pages/animal-performance-page";
-import FreshwaterFarmPlanPage from "@/pages/freshwater-farm-plan-page";
-import EnvironmentalCompliancePage from "@/pages/environmental-compliance-page";
 import ReportsExportPage from "@/pages/reports-export-page";
-import WeatherIntegrationPage from "@/pages/weather-integration-page";
-import MilkAnalyticsPage from "@/pages/milk-analytics-page";
-import GISMappingPage from "@/pages/gis-mapping-page";
-import GeneticMeritPage from "@/pages/genetic-merit-page";
-import FeedPlanningPage from "@/pages/feed-planning-page";
-import IoTDashboardPage from "@/pages/iot-dashboard-page";
 import MultiFarmPage from "@/pages/multi-farm-page";
 import CSVImportPage from "@/pages/csv-import-page";
 import MobileScanner from "@/pages/mobile-scanner";
 // Phase overlay imports
-import RunSheet from "@/pages/RunSheet";
-import PregQuick from "@/pages/PregQuick";
-import Treat from "@/pages/Treat";
-import Medicines from "@/pages/Medicines";
-import Inventory from "@/pages/Inventory";
 import HealthReports from "@/pages/Reports";
 import OnboardingWizard from "@/pages/OnboardingWizard";
+// Before signing in: sign up, join a farm by invite, password reset, and the legal pages
+import SignupPage from "@/pages/signup-page";
+import JoinPage from "@/pages/join-page";
+import ForgotPasswordPage from "@/pages/forgot-password-page";
+import ResetPasswordPage from "@/pages/reset-password-page";
+import { PrivacyPage, TermsPage } from "@/pages/legal-pages";
+import BillingPage from "@/pages/billing-page";
+import { BillingBanner } from "@/components/billing-banner";
+
+// Screens shown on their own, without the app's menu: before signing in, and the legal pages
+function isPublicPath(location: string) {
+  return location === "/login" || location.startsWith("/visitor-signin/") || location.startsWith("/app/mobile-scanner")
+    || ["/signup", "/forgot-password", "/privacy", "/terms"].includes(location)
+    || location.startsWith("/join/") || location.startsWith("/reset-password/");
+}
 
 function Router() {
   const [location] = useLocation();
-  const isPublicRoute = location === "/login" || location.startsWith("/visitor-signin/") || location.startsWith("/app/mobile-scanner");
+  const isPublicRoute = isPublicPath(location);
 
   if (isPublicRoute) {
     return (
       <Switch>
         <Route path="/login" component={LoginPage} />
+        <Route path="/signup" component={SignupPage} />
+        <Route path="/join/:token" component={JoinPage} />
+        <Route path="/forgot-password" component={ForgotPasswordPage} />
+        <Route path="/reset-password/:token" component={ResetPasswordPage} />
+        <Route path="/privacy" component={PrivacyPage} />
+        <Route path="/terms" component={TermsPage} />
         <Route path="/visitor-signin/:code" component={VisitorPortalPage} />
         <Route path="/app/mobile-scanner" component={MobileScanner} />
         <Route component={NotFound} />
@@ -132,6 +139,7 @@ function Router() {
 
   return (
     <RequireAuth>
+      <ScreenErrorBoundary key={location}>
       <Switch>
         <Route path="/" component={DashboardOverview} />
         <Route path="/app" component={DashboardOverview} />
@@ -139,14 +147,13 @@ function Router() {
         <Route path="/app/dashboard" component={Dashboard} />
         <Route path="/app/chat" component={ChatPage} />
         <Route path="/app/jobs" component={JobsPage} />
+        <Route path="/app/recurring-tasks" component={RecurringTasksPage} />
         <Route path="/app/roster" component={RosterSchedulingPage} />
         <Route path="/app/timesheets" component={TimesheetsPage} />
-        <Route path="/app/equipment" component={EquipmentPage} />
+        <Route path="/app/calendar" component={FarmCalendarPage} />
         <Route path="/app/compliance" component={CompliancePage} />
         <Route path="/app/animals" component={AnimalsList} />
         <Route path="/app/kanban" component={KanbanPage} />
-        <Route path="/app/dependencies" component={TaskDependenciesPage} />
-        <Route path="/app/compliance-tags" component={ComplianceTagsPage} />
         <Route path="/app/operations" component={OperationsPage} />
         <Route path="/app/operations/vehicles" component={VehicleRegistryPage} />
         <Route path="/app/operations/vehicles/inspections" component={VehicleRegistryPage} />
@@ -155,28 +162,17 @@ function Router() {
         <Route path="/app/operations/staff" component={StaffManagementPage} />
         <Route path="/app/operations/contractors" component={ContractorManagementPage} />
         <Route path="/app/operations/roster" component={RosterSchedulingPage} />
-        <Route path="/app/health-safety" component={HealthSafetyPage} />
-        <Route path="/app/safety" component={SafetyPage} />
-        <Route path="/app/people" component={PeoplePage} />
-        <Route path="/app/asset-registry" component={AssetRegistryPage} />
-        <Route path="/app/farm-finance" component={FarmFinancePage} />
-        <Route path="/app/financial-analytics" component={FinancialAnalyticsPage} />
-        <Route path="/app/performance-benchmarking" component={PerformanceBenchmarkingPage} />
-        <Route path="/app/animal-performance" component={AnimalPerformancePage} />
-        <Route path="/app/freshwater-farm-plan" component={FreshwaterFarmPlanPage} />
-        <Route path="/app/environmental-compliance" component={EnvironmentalCompliancePage} />
+        <Route path="/app/safety" component={CompliancePage} />
+        <Route path="/app/people" component={StaffManagementPage} />
         <Route path="/app/reports" component={ReportsExportPage} />
-        <Route path="/app/weather" component={WeatherIntegrationPage} />
-        <Route path="/app/milk-analytics" component={MilkAnalyticsPage} />
-        <Route path="/app/compliance" component={CompliancePage} />
-        <Route path="/app/farm-compliance" component={FarmCompliancePage} />
-        <Route path="/app/nait" component={NaitRecordsPage} />
+        <Route path="/app/weather" component={WeatherPage} />
+        <Route path="/app/farm-compliance" component={CompliancePackPage} />
+        <Route path="/app/nait" component={NaitCompliancePage} />
         <Route path="/app/treatments/:section?" component={Home} />
         <Route path="/app/batch-treatment" component={BatchTreatmentPage} />
-        <Route path="/app/animals" component={AnimalsList} />
         <Route path="/app/import" component={CSVImportPage} />
         <Route path="/app/stock-reconciliation" component={StockReconciliationPage} />
-        <Route path="/app/map-tasks" component={MapTasksPage} />
+        <Route path="/app/stock-reconciliation/seasons/:id/report" component={StockSeasonReportPage} />
         <Route path="/app/groups" component={GroupsManagement} />
         <Route path="/app/pastures" component={PasturesList} />
         <Route path="/app/pasture-rotation" component={PastureRotationPlanner} />
@@ -189,17 +185,30 @@ function Router() {
         <Route path="/app/veterinary" component={VeterinaryDashboard} />
         <Route path="/app/lab-results" component={LabResultsImportPage} />
         <Route path="/app/health-analytics" component={HealthAnalyticsDashboard} />
-        <Route path="/app/benchmarking" component={BenchmarkingPage} />
-        <Route path="/app/health-predictions" component={HealthPredictionsPage} />
         <Route path="/app/field-mode" component={FieldModeDashboard} />
         <Route path="/app/smart-alerts" component={AlertsNotificationsDashboard} />
-        <Route path="/app/weight-tracking" component={WeightTrackingDashboard} />
         <Route path="/app/weight-growth" component={WeightGrowthTrackingPage} />
         <Route path="/app/smart-groups" component={SmartGroupsPage} />
         <Route path="/app/bulk-operations" component={BulkOperationsPage} />
         <Route path="/app/animals/:animalId/timeline" component={AnimalTimelinePage} />
         <Route path="/app/animals/:animalId/lineage" component={AnimalLineagePage} />
+        <Route path="/app/animals/:animalId/health" component={AnimalHealthPage} />
+        <Route path="/app/animals/:id" component={AnimalDetailPage} />
         <Route path="/app/herd-reports" component={HerdReportsPage} />
+        <Route path="/app/tasks" component={TaskListPage} />
+        <Route path="/app/records" component={RecordsPage} />
+        <Route path="/app/farm-map" component={FarmMapPage} />
+        <Route path="/app/farm-map/reports" component={FarmReportsPage} />
+        <Route path="/app/farm-map/jobs/:id/print" component={JobPrintPage} />
+        <Route path="/app/farm-map/hazards/print" component={HazardMapPrintPage} />
+        <Route path="/app/equipment" component={EquipmentListPage} />
+        <Route path="/app/equipment/maintenance" component={EquipmentMaintenancePage} />
+        <Route path="/app/equipment/history" component={EquipmentServiceHistoryPage} />
+        <Route path="/app/equipment/:id" component={EquipmentDetailPage} />
+        <Route path="/app/compliance-overview" component={CompliancePackPage} />
+        <Route path="/app/reports/timesheets" component={TimesheetReportPage} />
+        <Route path="/app/reports/safety" component={SafetyReportPage} />
+        <Route path="/app/reports/animals" component={AnimalReportPage} />
         <Route path="/app/analytics" component={AnalyticsDashboard} />
         <Route path="/app/financial" component={FinancialPage} />
         <Route path="/app/milk-production" component={MilkProductionPage} />
@@ -208,21 +217,16 @@ function Router() {
         <Route path="/app/shed" component={ShedPage} />
         <Route path="/app/settings" component={SettingsPage} />
         <Route path="/app/alerts" component={AlertsPage} />
-        <Route path="/app/gis-mapping" component={GISMappingPage} />
-        <Route path="/app/genetic-merit" component={GeneticMeritPage} />
-        <Route path="/app/feed-planning" component={FeedPlanningPage} />
-        <Route path="/app/iot" component={IoTDashboardPage} />
         <Route path="/app/multi-farm" component={MultiFarmPage} />
         {/* Phase overlay routes */}
-        <Route path="/app/repro/runsheet" component={RunSheet} />
-        <Route path="/app/repro/preg" component={PregQuick} />
-        <Route path="/app/health/treat" component={Treat} />
-        <Route path="/app/health/medicines" component={Medicines} />
-        <Route path="/app/health/inventory" component={Inventory} />
+        <Route path="/app/health/medicines" component={MedicinesInventory} />
+        <Route path="/app/health/inventory" component={MedicinesInventory} />
         <Route path="/app/health/reports" component={HealthReports} />
         <Route path="/app/setup" component={OnboardingWizard} />
+        <Route path="/app/billing" component={BillingPage} />
         <Route component={NotFound} />
       </Switch>
+      </ScreenErrorBoundary>
     </RequireAuth>
   );
 }
@@ -321,7 +325,7 @@ function AlertsNotification() {
         {activeAlerts.length > 0 && (
           <div className="p-3 border-t">
             <Button asChild variant="ghost" size="sm" className="w-full" data-testid="button-view-all-alerts">
-              <Link href="/app/alerts">View All Alerts</Link>
+              <Link href="/app/smart-alerts">View All Alerts</Link>
             </Button>
           </div>
         )}
@@ -361,6 +365,16 @@ function AppHeader() {
         <FarmSwitcher />
       </div>
       <div className="flex items-center gap-3">
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Search the farm"
+          title="Search (Ctrl K)"
+          onClick={() => window.dispatchEvent(new Event(OPEN_SEARCH_EVENT))}
+          data-testid="button-search"
+        >
+          <Search className="h-5 w-5" strokeWidth={1.5} />
+        </Button>
         <NotificationCenter />
         <AlertsNotification />
         <div className="flex items-center gap-1.5">
@@ -417,7 +431,7 @@ function AppHeader() {
 function AppShell() {
   const [location] = useLocation();
   const { isAuthenticated, isLoading } = useAuth();
-  const isPublicRoute = location === "/login";
+  const isPublicRoute = isPublicPath(location) && !location.startsWith("/app/mobile-scanner") && !location.startsWith("/visitor-signin/");
   const style = {
     "--sidebar-width": "20rem",
     "--sidebar-width-icon": "4rem",
@@ -448,6 +462,7 @@ function AppShell() {
           <AppSidebar />
           <div className="flex flex-col flex-1 overflow-hidden min-w-0">
             <AppHeader />
+            <BillingBanner />
             <main className="flex-1 overflow-auto">
               <Router />
             </main>
@@ -455,8 +470,10 @@ function AppShell() {
         </div>
       </SidebarProvider>
       <GlobalSearch />
+      <RecordFab />
       <KeyboardShortcuts />
-      <Toaster position="bottom-right" />
+      {/* Sit above the floating Record button */}
+      <Toaster position="bottom-right" offset={96} />
     </>
   );
 }

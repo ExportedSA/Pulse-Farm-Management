@@ -23,6 +23,8 @@ import type { z } from "zod";
 import { AnimalFiltersComponent, type AnimalFilters } from "@/components/AnimalFilters";
 import { prepareAnimalsForExport, exportAnimalsToCSV, downloadCSV, generateFilename } from "@/lib/csv-export";
 import AnimalDetailDialog from "@/components/AnimalDetailDialog";
+import { Label } from "@/components/ui/label";
+import { ARRIVALS, DEPARTURES, STOCK_CLASSES, type Departure } from "@shared/stock";
 
 type AnimalGroup = {
   id: string;
@@ -179,19 +181,22 @@ export default function AnimalsList() {
     },
   });
 
-  // Delete animal mutation
+  // Remove an animal from the herd: how and when it left (kept for the record and the stock
+  // tally), or delete it outright if it was entered by mistake
   const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await apiRequest(`/api/animals/${id}`, 'DELETE');
+    mutationFn: async ({ id, fate, date }: { id: string; fate: Departure | 'mistake'; date: string }) => {
+      if (fate === 'mistake') await apiRequest(`/api/animals/${id}/permanent`, 'DELETE');
+      else await apiRequest(`/api/animals/${id}`, 'DELETE', { fate, date });
     },
-    onSuccess: () => {
+    onSuccess: (_data, { fate }) => {
       queryClient.invalidateQueries({ queryKey: ['/api/animals'], exact: false });
       queryClient.invalidateQueries({ queryKey: ['/api/animals/search'], exact: false });
-      toast.success('Animal deleted successfully');
+      queryClient.invalidateQueries({ queryKey: ['/api/stock-recon'], exact: false });
+      toast.success(fate === 'mistake' ? 'Animal deleted' : 'Animal removed from the herd');
       setDeletingAnimal(null);
     },
     onError: (error: Error) => {
-      toast.error(`Failed to delete animal: ${error.message}`);
+      toast.error(`Failed to remove animal: ${error.message}`);
     },
   });
 
@@ -594,31 +599,69 @@ export default function AnimalsList() {
         pasture={pastures.find(p => p.id === viewingAnimal?.currentPastureId)}
       />
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={!!deletingAnimal} onOpenChange={() => setDeletingAnimal(null)}>
-        <DialogContent data-testid="dialog-delete-animal">
-          <DialogHeader>
-            <DialogTitle>Delete Animal</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete this animal? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeletingAnimal(null)} data-testid="button-cancel-delete">
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => deletingAnimal && deleteMutation.mutate(deletingAnimal.id)}
-              disabled={deleteMutation.isPending}
-              data-testid="button-confirm-delete"
-            >
-              {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Remove from herd */}
+      <RemoveAnimalDialog
+        animal={deletingAnimal}
+        onClose={() => setDeletingAnimal(null)}
+        onRemove={(fate, date) => deletingAnimal && deleteMutation.mutate({ id: deletingAnimal.id, fate, date })}
+        isPending={deleteMutation.isPending}
+      />
     </div>
+  );
+}
+
+const todayIso = () => new Date().toLocaleDateString('en-CA');
+const selectClass = "h-9 w-full rounded-md border bg-background px-2 text-sm";
+
+function RemoveAnimalDialog({ animal, onClose, onRemove, isPending }: {
+  animal: Animal | null;
+  onClose: () => void;
+  onRemove: (fate: Departure | 'mistake', date: string) => void;
+  isPending: boolean;
+}) {
+  const [fate, setFate] = useState<Departure | 'mistake'>('Sold');
+  const [date, setDate] = useState(todayIso);
+  useEffect(() => {
+    if (animal) { setFate('Sold'); setDate(todayIso()); }
+  }, [animal]);
+  const label = animal ? (animal.visualId || animal.cowId || animal.name || 'this animal') : '';
+  return (
+    <Dialog open={!!animal} onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent data-testid="dialog-delete-animal">
+        <DialogHeader>
+          <DialogTitle>Remove {label} from the herd</DialogTitle>
+          <DialogDescription>
+            Its record is kept, and stock reconciliation counts it as leaving on this day.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <Label htmlFor="remove-fate">How it left</Label>
+            <select id="remove-fate" className={selectClass} value={fate} onChange={e => setFate(e.target.value as Departure | 'mistake')}>
+              {(Object.keys(DEPARTURES) as Departure[]).map(f => <option key={f} value={f}>{f}</option>)}
+              <option value="mistake">Entered by mistake: delete it (owners only)</option>
+            </select>
+          </div>
+          {fate !== 'mistake' && (
+            <div className="space-y-1">
+              <Label htmlFor="remove-date">Date it left</Label>
+              <Input id="remove-date" type="date" max={todayIso()} value={date} onChange={e => setDate(e.target.value)} />
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} data-testid="button-cancel-delete">Cancel</Button>
+          <Button
+            variant="destructive"
+            onClick={() => onRemove(fate, date)}
+            disabled={isPending || (fate !== 'mistake' && !date)}
+            data-testid="button-confirm-delete"
+          >
+            {isPending ? 'Saving…' : fate === 'mistake' ? 'Delete' : 'Remove from herd'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -892,6 +935,61 @@ function AnimalDialog({
               </div>
             </div>
 
+            {/* What stock reconciliation needs: how it arrived and its class */}
+            <div className="border rounded-lg p-4 space-y-4">
+              <h3 className="text-sm font-medium">Stock reconciliation</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="arrival"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>How it came onto the farm</FormLabel>
+                      <select className={selectClass} value={field.value || ''} data-testid="select-arrival"
+                        onChange={e => field.onChange(e.target.value || null)}>
+                        <option value="">Already here when records started</option>
+                        {(Object.keys(ARRIVALS) as (keyof typeof ARRIVALS)[]).map(a => <option key={a} value={a}>{ARRIVALS[a]}</option>)}
+                      </select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                {(form.watch('arrival') === 'purchased' || form.watch('arrival') === 'transferred_in') && (
+                  <FormField
+                    control={form.control}
+                    name="startDate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Date it arrived</FormLabel>
+                        <FormControl>
+                          <Input type="date" value={field.value || ''} onChange={e => field.onChange(e.target.value || null)} data-testid="input-arrival-date" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+                <FormField
+                  control={form.control}
+                  name="stockClass"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Stock class</FormLabel>
+                      <select className={selectClass} value={field.value || ''} data-testid="select-stock-class"
+                        onChange={e => field.onChange(e.target.value || null)}>
+                        <option value="">From its age and sex</option>
+                        {STOCK_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              {form.watch('arrival') === 'born' && !form.watch('dateOfBirth') && (
+                <p className="text-xs text-amber-800">Add its date of birth so the birth is counted.</p>
+              )}
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormField
                 control={form.control}
@@ -944,6 +1042,38 @@ function AnimalDialog({
                 )}
               />
             </div>
+
+            {form.watch('status') !== 'active' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="removalFate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>How it left</FormLabel>
+                      <select className={selectClass} value={field.value || ''} onChange={e => field.onChange(e.target.value || null)}>
+                        <option value="">Not recorded</option>
+                        {(Object.keys(DEPARTURES) as Departure[]).map(f => <option key={f} value={f}>{f}</option>)}
+                      </select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="dateRemoved"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Date it left</FormLabel>
+                      <FormControl>
+                        <Input type="date" value={field.value || ''} onChange={e => field.onChange(e.target.value || null)} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            )}
 
             <FormField
               control={form.control}

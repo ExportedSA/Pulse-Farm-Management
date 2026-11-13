@@ -8,8 +8,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { 
   BarChart3, TrendingUp, TrendingDown, DollarSign, Activity, 
-  AlertTriangle, CheckCircle, Pill, Heart, Thermometer, Users,
-  Calendar, Target, ArrowUp, ArrowDown, Minus
+  AlertTriangle, Pill, Heart, Thermometer, Users,
+  Calendar, ArrowUp, ArrowDown, Minus
 } from "lucide-react";
 
 type HealthSummary = {
@@ -59,19 +59,6 @@ type SeasonalTrends = {
   seasonalDistribution: { season: string; count: number }[];
   yearOverYearChange: string | null;
   peakSeason: string;
-};
-
-type Benchmarks = {
-  farmMetrics: {
-    treatmentsPerAnimal: number;
-    mortalityRate: number;
-    lamenessPrevalence: number;
-    mastitisIncidence: number;
-  };
-  industryBenchmarks: Record<string, { industry: number; label: string }>;
-  comparison: Record<string, { value: number; benchmark: number; status: string }>;
-  totalAnimals: number;
-  periodDays: number;
 };
 
 export default function HealthAnalyticsDashboard() {
@@ -127,21 +114,6 @@ export default function HealthAnalyticsDashboard() {
     },
   });
 
-  // Fetch benchmarks
-  const { data: benchmarks, isLoading: loadingBenchmarks } = useQuery<Benchmarks>({
-    queryKey: ["/api/analytics/health/benchmarks"],
-    queryFn: async () => {
-      const res = await fetch("/api/analytics/health/benchmarks?days=365");
-      if (!res.ok) throw new Error("Failed to fetch benchmarks");
-      return res.json();
-    },
-  });
-
-  const getStatusIcon = (status: string) => {
-    if (status === 'good') return <CheckCircle className="h-4 w-4 text-green-500" />;
-    return <AlertTriangle className="h-4 w-4 text-orange-500" />;
-  };
-
   const getChangeIcon = (change: string | null) => {
     if (!change) return <Minus className="h-4 w-4 text-gray-400" />;
     const val = parseFloat(change);
@@ -160,7 +132,7 @@ export default function HealthAnalyticsDashboard() {
             Health Analytics & Reporting
           </h1>
           <p className="text-muted-foreground mt-1">
-            Comprehensive health insights, cost analysis, and industry benchmarking
+            Treatment costs, conditions, antibiotic use and trends for this farm
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -259,7 +231,7 @@ export default function HealthAnalyticsDashboard() {
 
       {/* Main Tabs */}
       <Tabs defaultValue="costs" className="space-y-4">
-        <TabsList className="grid grid-cols-5 w-full max-w-2xl">
+        <TabsList className="grid grid-cols-4 w-full max-w-xl">
           <TabsTrigger value="costs">
             <DollarSign className="h-4 w-4 mr-1" />
             Costs
@@ -275,10 +247,6 @@ export default function HealthAnalyticsDashboard() {
           <TabsTrigger value="trends">
             <TrendingUp className="h-4 w-4 mr-1" />
             Trends
-          </TabsTrigger>
-          <TabsTrigger value="benchmarks">
-            <Target className="h-4 w-4 mr-1" />
-            Benchmarks
           </TabsTrigger>
         </TabsList>
 
@@ -619,117 +587,6 @@ export default function HealthAnalyticsDashboard() {
           </div>
         </TabsContent>
 
-        {/* Benchmarks Tab */}
-        <TabsContent value="benchmarks" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Industry Benchmarking</CardTitle>
-              <CardDescription>Compare your farm metrics against industry standards</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loadingBenchmarks ? (
-                <Skeleton className="h-64 w-full" />
-              ) : !benchmarks?.comparison ? (
-                <p className="text-muted-foreground text-center py-8">No benchmark data available</p>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {Object.entries(benchmarks.comparison).map(([key, data]) => {
-                    const benchmark = benchmarks.industryBenchmarks[key];
-                    const percentage = (data.value / data.benchmark) * 100;
-                    return (
-                      <div key={key} className="p-4 border rounded-lg">
-                        <div className="flex justify-between items-start mb-3">
-                          <div>
-                            <div className="font-medium">{benchmark?.label || key}</div>
-                            <div className="text-xs text-muted-foreground">
-                              Industry benchmark: {data.benchmark}
-                            </div>
-                          </div>
-                          {getStatusIcon(data.status)}
-                        </div>
-                        <div className="flex items-end gap-4">
-                          <div>
-                            <div className="text-3xl font-bold">
-                              {typeof data.value === 'number' ? data.value.toFixed(2) : data.value}
-                            </div>
-                            <div className="text-xs text-muted-foreground">Your farm</div>
-                          </div>
-                          <div className="flex-1">
-                            <Progress 
-                              value={Math.min(percentage, 100)} 
-                              className={`h-3 ${data.status === 'good' ? '[&>div]:bg-green-500' : '[&>div]:bg-orange-500'}`}
-                            />
-                            <div className="text-xs text-right text-muted-foreground mt-1">
-                              {percentage.toFixed(0)}% of benchmark
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card className="bg-green-50 border-green-200">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-green-800">
-                  <CheckCircle className="h-5 w-5" />
-                  Areas of Strength
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {loadingBenchmarks ? (
-                  <Skeleton className="h-16 w-full" />
-                ) : (
-                  <ul className="space-y-2 text-sm text-green-800">
-                    {benchmarks?.comparison && Object.entries(benchmarks.comparison)
-                      .filter(([_, data]) => data.status === 'good')
-                      .map(([key]) => (
-                        <li key={key} className="flex items-center gap-2">
-                          <CheckCircle className="h-4 w-4" />
-                          {benchmarks.industryBenchmarks[key]?.label || key}
-                        </li>
-                      ))}
-                    {(!benchmarks?.comparison || Object.entries(benchmarks.comparison).filter(([_, d]) => d.status === 'good').length === 0) && (
-                      <li className="text-muted-foreground">Collect more data to identify strengths</li>
-                    )}
-                  </ul>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="bg-orange-50 border-orange-200">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-orange-800">
-                  <AlertTriangle className="h-5 w-5" />
-                  Areas for Improvement
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {loadingBenchmarks ? (
-                  <Skeleton className="h-16 w-full" />
-                ) : (
-                  <ul className="space-y-2 text-sm text-orange-800">
-                    {benchmarks?.comparison && Object.entries(benchmarks.comparison)
-                      .filter(([_, data]) => data.status === 'attention')
-                      .map(([key]) => (
-                        <li key={key} className="flex items-center gap-2">
-                          <AlertTriangle className="h-4 w-4" />
-                          {benchmarks.industryBenchmarks[key]?.label || key}
-                        </li>
-                      ))}
-                    {(!benchmarks?.comparison || Object.entries(benchmarks.comparison).filter(([_, d]) => d.status === 'attention').length === 0) && (
-                      <li className="text-muted-foreground">All metrics within acceptable range</li>
-                    )}
-                  </ul>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
       </Tabs>
     </div>
   );

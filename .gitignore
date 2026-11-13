@@ -44,6 +44,8 @@ attached_assets
 # Logs & databases
 *.log
 *.sql
+!scripts/migrations/*.sql
+!scripts/baseline.sql
 *.db
 
 # Temp directories
@@ -51,3 +53,6 @@ tmp
 temp
 integration_temp
 testing
+
+# Farm backups (scripts/farm-backup.ts)
+backups/

@@ -28,7 +28,9 @@ router.get('/pins', async (req, res) => {
 });
 
 // Get task pin by ID
-router.get('/pins/:id', async (req, res) => {
+router.get('/pins/:id', async (req, res, next) => {
+  // Not an id: leave it to the named routes declared further down (e.g. /pins/nearby)
+  if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return next();
   try {
     const { id } = req.params;
     const pin = await storage.getTaskPinById(id);

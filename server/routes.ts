@@ -1,11 +1,13 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { pool } from "./db";
+import { pool, farmDbContext } from "./db";
 import passport from "passport";
 import { sanitizeUser, sanitizeUsers } from "./auth-utils";
-import { requireAuth, optionalAuth } from "./middleware/auth";
+import { requireAuth, optionalAuth, getFarmId, getUserId } from "./middleware/auth";
+import { getFarmRole } from "./domain/farms";
 import { uploadsMiddleware } from "./middleware/serveUploads";
+import { contractorGuard, uploadsGuard } from "./middleware/farmAccess";
 import { httpLogger, addRequestContext, logError } from "./middleware/logging";
 import logger from "./config/logger";
 import { initSentry, captureException } from "./config/sentry";
@@ -20,7 +22,6 @@ import complianceRouter from "./routes/compliance";
 import jobsRouter from "./routes/jobs";
 import visitorRouter from "./visitor-routes";
 import vehicleRouter from "./vehicle-routes";
-import stockRouter from "./stock-routes";
 import mapRouter from "./map-routes";
 import rosterRouter from "./routes/roster";
 import animalsRouter from "./routes/animals";
@@ -29,7 +30,6 @@ import summaryRouter from "./routes/summary";
 import budgetingRouter from "./budgeting-routes";
 import nzfapRouter from "./nzfap-routes";
 import weatherRouter from "./weather-routes";
-import gallagherRouter from "./gallagher-routes";
 import staffRouter from "./routes/staff";
 import contractorsRouter from "./routes/contractors";
 import recurringTasksRouter from "./routes/recurring-tasks";
@@ -37,9 +37,9 @@ import taskTemplatesRouter from "./routes/task-templates";
 import notificationsRouter from "./routes/notifications";
 import timeTrackingRouter from "./routes/time-tracking";
 import equipmentRouter from "./routes/equipment";
-import taskDependenciesRouter from "./routes/task-dependencies";
-import complianceTagsRouter from "./routes/compliance-tags";
 import weightRouter from "./routes/weight";
+import tasksRouter from "./routes/tasks";
+import timesheetsRouter from "./routes/timesheets";
 import vaccinationRouter from "./routes/vaccination";
 import healthMonitoringRouter from "./routes/health-monitoring";
 import reproductionRouter from "./routes/reproduction";
@@ -50,28 +50,28 @@ import smartAlertsRouter from "./routes/smart-alerts";
 import photosRouter from "./routes/photos";
 import voiceNotesRouter from "./routes/voice-notes";
 import naitRouter from "./routes/nait";
-import stockTransactionsRouter from "./routes/stock-transactions";
 import bulkOperationsRouter from "./routes/bulk-operations";
 import animalTimelineRouter from "./routes/animal-timeline";
 import lineageRouter from "./routes/lineage";
 import herdReportsRouter from "./routes/herd-reports";
 import pastureWalksRouter from "./routes/pasture-walks";
-import rosterRouter from "./routes/roster";
-import healthSafetyRouter from "./routes/health-safety";
-import financialAnalyticsRouter from "./routes/financial-analytics";
-import benchmarkingRouter from "./routes/benchmarking";
+// import rosterRouter from "./routes/roster"; // Duplicate - already imported on line 25
 import healthRouter from "./routes/health";
 import reportsRouter from "./routes/reports";
-import externalApisRouter from "./routes/external-apis";
-import iotRouter from "./routes/iot";
-import multiFarmRouter from "./routes/multi-farm";
+import farmsRouter from "./routes/farms";
+import billingRouter from "./routes/billing";
+import { readOnlyWhenLapsed } from "./middleware/read-only";
+import recordsRouter from "./routes/records";
+import stockReconRouter from "./routes/stock-recon";
+import paddockMapRouter from "./routes/paddock-map";
+import healthReportsRouter from "./routes/health-reports";
+import farmMapRouter from "./routes/farm-map";
+import { catalogueRouter, applicationsRouter, docketsRouter, restrictionsRouter, activityReportsRouter } from "./routes/applications";
+import { tagsRouter, attachmentsRouter, searchRouter } from "./routes/farm-data";
 import animalTagsRouter from "./routes/animal-tags";
 // Phase overlay routes
-import medCoreRouter from "./routes/med.core";
-import medWithholdRouter from "./routes/med.withhold";
-import medWithholdIdsRouter from "./routes/med.withhold.ids";
-import reproExtrasRouter from "./routes/repro.extras";
-import reproPlanRouter from "./routes/repro.plan";
+import milkRouter from "./milk-routes";
+import financialRouter from "./financial-routes";
 import syncCoreRouter from "./routes/sync.core";
 import naitCoreRouter from "./routes/nait.core";
 import { z } from "zod";
@@ -92,6 +92,26 @@ import {
   insertAlertSchema,
 } from "@shared/schema";
 
+// API paths open without signing in: signing in, health checks, and a visitor signing in at
+// the farm gate by QR code
+const PUBLIC_API = [/^\/auth(\/|$)/, /^\/health(\/db)?$/, /^\/visitor\/(qr|signin|signout)\//, /^\/billing\/webhook$/];
+
+// The farm a request works in: the one in the user's token, while they're still an active
+// member of it. Checked at most once a minute per user and farm.
+const membership = new Map<string, { ok: boolean; at: number }>();
+async function memberFarm(req: Request): Promise<string | null> {
+  const farmId = getFarmId(req);
+  const userId = getUserId(req);
+  if (!farmId || !userId) return null;
+  const key = `${userId}:${farmId}`;
+  const cached = membership.get(key);
+  if (cached && Date.now() - cached.at < 60_000) return cached.ok ? farmId : null;
+  const { rowCount } = await pool.query(
+    "SELECT 1 FROM farm_members WHERE farm_id = $1 AND user_id = $2 AND is_active", [farmId, userId]);
+  membership.set(key, { ok: !!rowCount, at: Date.now() });
+  return rowCount ? farmId : null;
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize Sentry for error tracking
   initSentry();
@@ -107,7 +127,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(corsConfig);
   
   // Rate limiting
-  app.use(apiLimiter);
+  app.use("/api", apiLimiter);
   
   // Add request logging middleware
   app.use(httpLogger);
@@ -122,8 +142,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ===== CORE HEALTH CHECKS (No auth middleware) =====
   app.use("/api", healthRouter);
 
-  // ===== STATIC FILE SERVING (Local only, disabled when S3 is configured) =====
-  app.use("/uploads", uploadsMiddleware);
+  // ===== UPLOADED FILES (local disk in development, private S3 bucket when S3_BUCKET_NAME is set) =====
+  // Signed-in members only: a farm's files are for that farm (see services/fileStorage.ts)
+  app.use("/uploads", optionalAuth, farmDbContext(memberFarm), uploadsGuard, uploadsMiddleware);
+
+  // Contractors reach only the jobs shared with them (checked before every other API route)
+  app.use("/api", optionalAuth, contractorGuard);
+
+  // Everything else under /api needs a signed-in user, and runs on a connection limited to
+  // the user's farm (row-level security), so no route can read or change another farm's rows
+  app.use("/api", (req, res, next) => PUBLIC_API.some(p => p.test(req.path)) ? next() : requireAuth(req as any, res, next));
+  app.use("/api", farmDbContext(memberFarm));
+  // A farm whose trial or subscription has ended is read-only (billing)
+  app.use("/api", readOnlyWhenLapsed);
 
   // ===== PHASE 4: ANIMAL GROUPS =====
   app.use("/api/groups", requireAuth, groupsRouter);
@@ -146,35 +177,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ===== HEALTH ANALYTICS =====
   app.use("/api/analytics/health", requireAuth, healthAnalyticsRouter);
 
-  // ===== FINANCIAL ANALYTICS =====
-  app.use(requireAuth, financialAnalyticsRouter);
-
-  // ===== BENCHMARKING =====
-  app.use(requireAuth, benchmarkingRouter);
-
   // ===== REPORTS & PDF GENERATION =====
-  app.use(requireAuth, reportsRouter);
+  app.use("/api/reports", requireAuth);
+  app.use(reportsRouter);
 
-  // ===== EXTERNAL API INTEGRATIONS (NAIT, Weather, LIC, Fonterra) =====
-  app.use(externalApisRouter);
+  // ===== FARMS & MEMBERSHIP =====
+  app.use("/api/farms", requireAuth, farmsRouter);
 
-  // ===== IOT INTEGRATIONS =====
-  app.use(iotRouter);
+  // ===== BILLING (the Stripe webhook is open; Stripe signs it) =====
+  app.use("/api/billing", billingRouter);
 
-  // ===== MULTI-FARM MANAGEMENT =====
-  app.use(multiFarmRouter);
+  // ===== FARM RECORDS, TAGS, ATTACHMENTS & SEARCH =====
+  app.use("/api/records", requireAuth, recordsRouter);
+  app.use("/api/stock-recon", requireAuth, stockReconRouter);
+  app.use("/api/paddock-map", requireAuth, paddockMapRouter);
+  app.use("/api/health-reports", requireAuth, healthReportsRouter);
+  app.use("/api/farm-map", requireAuth, farmMapRouter);
+  app.use("/api/catalogue", requireAuth, catalogueRouter);
+  app.use("/api/applications", requireAuth, applicationsRouter);
+  app.use("/api/dockets", requireAuth, docketsRouter);
+  app.use("/api/restrictions", requireAuth, restrictionsRouter);
+  app.use("/api/activity-reports", requireAuth, activityReportsRouter);
+  app.use("/api/tags", requireAuth, tagsRouter);
+  app.use("/api/attachments", requireAuth, attachmentsRouter);
+  app.use("/api/search", requireAuth, searchRouter);
 
   // ===== ANIMAL TAG MANAGEMENT =====
-  app.use(requireAuth, animalTagsRouter);
+  app.use(/^\/api\/animals\/(tags\/bulk|[^/]+\/tags|[^/]+\/tag-history)/, requireAuth);
+  app.use(animalTagsRouter);
 
-  // ===== PHASE OVERLAY: MEDICINE & WITHHOLD =====
-  app.use("/api/med", requireAuth, medCoreRouter);
-  app.use("/api/med/withhold", requireAuth, medWithholdRouter);
-  app.use("/api/med/withhold-ids", requireAuth, medWithholdIdsRouter);
 
-  // ===== PHASE OVERLAY: REPRODUCTION EXTRAS =====
-  app.use("/api/repro", requireAuth, reproExtrasRouter);
-  app.use("/api/repro/plan", requireAuth, reproPlanRouter);
 
   // ===== PHASE OVERLAY: OFFLINE SYNC =====
   app.use("/api/sync", requireAuth, syncCoreRouter);
@@ -197,8 +229,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ===== NAIT INTEGRATION =====
   app.use("/api/nait", requireAuth, naitRouter);
 
-  // ===== STOCK TRANSACTIONS =====
-  app.use("/api/stock", requireAuth, stockTransactionsRouter);
 
   // ===== BULK OPERATIONS =====
   app.use("/api/bulk", requireAuth, bulkOperationsRouter);
@@ -231,6 +261,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ===== JOBS =====
   app.use("/api/jobs", requireAuth, jobsRouter);
 
+  // ===== TASKS & TIMESHEETS =====
+  app.use("/api/tasks", requireAuth, tasksRouter);
+  app.use("/api/timesheets", requireAuth, timesheetsRouter);
+
   // ===== VISITOR MANAGEMENT (PHASE 1) =====
   // Public visitor routes (no authentication required)
   app.use("/api/visitor", visitorRouter);
@@ -238,8 +272,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Vehicle Registry routes
   app.use("/api/vehicles", requireAuth, vehicleRouter);
   
-  // Stock Reconciliation routes
-  app.use("/api/stock", requireAuth, stockRouter);
   
   // Map & Task Pin routes
   app.use("/api/map", requireAuth, mapRouter);
@@ -259,16 +291,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Weather Integration routes
   app.use("/api/weather", requireAuth, weatherRouter);
   
-  // Gallagher Weigh Scale Integration routes
-  app.use("/api/gallagher", requireAuth, gallagherRouter);
-  
   // Staff & Contractor Management routes
   app.use("/api/staff", requireAuth, staffRouter);
   app.use("/api/contractors", requireAuth, contractorsRouter);
   app.use("/api/roster", requireAuth, rosterRouter);
   
   // Health & Safety routes
-  app.use("/api/health-safety", requireAuth, healthSafetyRouter);
   
   // Recurring Tasks routes
   app.use("/api/recurring-tasks", requireAuth, recurringTasksRouter);
@@ -320,20 +348,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Equipment routes
   app.use("/api/equipment", requireAuth, equipmentRouter);
   
-  // Task Dependencies routes
-  app.use("/api/task-dependencies", requireAuth, taskDependenciesRouter);
-  
-  // Compliance Tags routes
-  app.use("/api/compliance-tags", requireAuth, complianceTagsRouter);
-  
   // Admin visitor routes (authentication required)
   app.use("/api/visitor/admin", requireAuth, visitorRouter);
 
   // ===== USERS (Protected) =====
   
-  app.get("/api/users", requireAuth, async (req, res) => {
+  // People are listed and managed per farm: a farm sees and changes only its own members
+  const farmMemberIds = async (farmId: string) =>
+    new Set((await pool.query("SELECT user_id FROM farm_members WHERE farm_id = $1 AND is_active", [farmId])).rows.map((r: any) => r.user_id as string));
+  const canManagePeople = async (req: Request) => {
+    const role = await getFarmRole(getUserId(req)!, getFarmId(req)!);
+    return role === "owner" || role === "manager";
+  };
+
+  app.get("/api/users", async (req, res) => {
     try {
-      const users = await storage.getUsers();
+      const farmId = getFarmId(req);
+      if (!farmId) return res.json([]);
+      const members = await farmMemberIds(farmId);
+      const users = (await storage.getUsers()).filter(u => members.has(u.id));
       res.json(sanitizeUsers(users));
     } catch (error) {
       console.error("Failed to fetch users:", error);
@@ -341,8 +374,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/users/:id", requireAuth, async (req, res) => {
+  app.get("/api/users/:id", async (req, res) => {
     try {
+      const farmId = getFarmId(req);
+      if (!farmId || !(await farmMemberIds(farmId)).has(req.params.id)) {
+        return res.status(404).json({ error: "User not found" });
+      }
       const user = await storage.getUser(req.params.id);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
@@ -354,12 +391,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/users", requireAuth, async (req, res) => {
+  // A new person is created as a member of the current farm
+  app.post("/api/users", async (req, res) => {
     try {
+      const farmId = getFarmId(req);
+      if (!farmId || !(await canManagePeople(req))) {
+        return res.status(403).json({ error: "Only the farm's owner or a manager can add people" });
+      }
       const data = insertUserSchema.parse(req.body);
       const user = await storage.createUser(data);
+      const role = ["manager", "worker", "viewer", "contractor"].includes((data as any).role) ? (data as any).role : "worker";
+      await pool.query("INSERT INTO farm_members (farm_id, user_id, role) VALUES ($1, $2, $3)", [farmId, user.id, role]);
       storage.createActivityLog({
-        userId: (req.user as any)?.id ?? null,
+        userId: getUserId(req) ?? null,
         userName: (req.user as any)?.name || (req.user as any)?.email || "System",
         action: "create",
         resourceType: "user",
@@ -382,13 +426,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.put("/api/users/:id", async (req, res) => {
     try {
+      const farmId = getFarmId(req);
+      const self = req.params.id === getUserId(req);
+      if (!farmId || !(await farmMemberIds(farmId)).has(req.params.id)) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      if (!self && !(await canManagePeople(req))) {
+        return res.status(403).json({ error: "Only the farm's owner or a manager can change other people" });
+      }
       const data = insertUserSchema.partial().parse(req.body);
       const user = await storage.updateUser(req.params.id, data);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
       storage.createActivityLog({
-        userId: (req.user as any)?.id ?? null,
+        userId: getUserId(req) ?? null,
         userName: (req.user as any)?.name || (req.user as any)?.email || "System",
         action: "update",
         resourceType: "user",
@@ -409,20 +461,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Removing someone takes them off this farm; their account and any other farms stay
   app.delete("/api/users/:id", async (req, res) => {
     try {
-      const existing = await storage.getUser(req.params.id);
-      if (!existing) {
+      const farmId = getFarmId(req);
+      if (!farmId || !(await farmMemberIds(farmId)).has(req.params.id)) {
         return res.status(404).json({ error: "User not found" });
       }
-      await storage.deleteUser(req.params.id);
+      if (!(await canManagePeople(req))) {
+        return res.status(403).json({ error: "Only the farm's owner or a manager can remove people" });
+      }
+      if (req.params.id === getUserId(req)) {
+        return res.status(400).json({ error: "You can't remove yourself from the farm" });
+      }
+      const existing = await storage.getUser(req.params.id);
+      await pool.query("UPDATE farm_members SET is_active = false WHERE farm_id = $1 AND user_id = $2", [farmId, req.params.id]);
       storage.createActivityLog({
-        userId: (req.user as any)?.id ?? null,
+        userId: getUserId(req) ?? null,
         userName: (req.user as any)?.name || (req.user as any)?.email || "System",
         action: "delete",
         resourceType: "user",
-        resourceId: existing.id,
-        details: { name: existing.name, email: existing.email, role: (existing as any).role },
+        resourceId: req.params.id,
+        details: { name: existing?.name, email: existing?.email, removedFromFarm: farmId },
         ipAddress: req.ip,
         userAgent: req.get("user-agent") || null,
       }).catch((err: any) => {
@@ -882,9 +942,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ===== PASTURES =====
 
-  app.get("/api/pastures", async (req, res) => {
+  app.get("/api/pastures", requireAuth, async (req, res) => {
     try {
-      const pastures = await storage.getPastures();
+      // Only the signed-in farm's paddocks
+      const farmId = getFarmId(req);
+      const pastures = (await storage.getPastures()).filter(p => p.farmId === farmId);
       res.json(pastures);
     } catch (error) {
       console.error("Failed to fetch pastures:", error);
@@ -892,13 +954,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/pastures/search", async (req, res) => {
+  // Paddocks belong to a farm: everyone on it can look and add health readings;
+  // owners and managers add, change and remove paddocks
+  async function farmPasture(req: any, id: string) {
+    if (!z.string().uuid().safeParse(id).success) return undefined;
+    const pasture = await storage.getPasture(id);
+    return pasture && pasture.farmId === getFarmId(req) && !pasture.deletedAt ? pasture : undefined;
+  }
+  async function canManagePastures(req: any): Promise<boolean> {
+    const role = await getFarmRole(getUserId(req)!, getFarmId(req)!);
+    return role === "owner" || role === "manager";
+  }
+  const pastureFields = (body: unknown) => {
+    const { farmId: _farmId, id: _id, deletedAt: _deleted, ...rest } = (body ?? {}) as Record<string, unknown>;
+    return rest;
+  };
+
+  app.get("/api/pastures/search", requireAuth, async (req, res) => {
     try {
       const query = req.query.q as string;
       if (!query) {
         return res.status(400).json({ error: "Search query required" });
       }
-      const pastures = await storage.searchPastures(query);
+      const farmId = getFarmId(req);
+      const pastures = (await storage.searchPastures(query)).filter(p => p.farmId === farmId);
       res.json(pastures);
     } catch (error) {
       console.error("Failed to search pastures:", error);
@@ -906,9 +985,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/pastures/:id", async (req, res) => {
+  app.get("/api/pastures/:id", requireAuth, async (req, res) => {
     try {
-      const pasture = await storage.getPasture(req.params.id);
+      const pasture = await farmPasture(req, req.params.id);
       if (!pasture) {
         return res.status(404).json({ error: "Pasture not found" });
       }
@@ -919,9 +998,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/pastures", async (req, res) => {
+  app.post("/api/pastures", requireAuth, async (req, res) => {
     try {
-      const data = insertPastureSchema.parse(req.body);
+      if (!getFarmId(req)) return res.status(400).json({ error: "Choose a farm first" });
+      if (!(await canManagePastures(req))) {
+        return res.status(403).json({ error: "Only owners and managers can add paddocks" });
+      }
+      // Always on the signed-in farm, whatever the request says
+      const data = insertPastureSchema.parse({ ...pastureFields(req.body), farmId: getFarmId(req) });
       const pasture = await storage.createPasture(data);
       res.status(201).json(pasture);
     } catch (error: any) {
@@ -933,15 +1017,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/pastures/:id", async (req, res) => {
-    if (!req.isAuthenticated()) {
-      return res.status(401).json({ error: "Authentication required" });
-    }
-    
+  app.put("/api/pastures/:id", requireAuth, async (req, res) => {
     try {
-      const data = insertPastureSchema.partial().parse(req.body);
-      const userId = (req.user as any).id; // Extract user ID for auto-snapshot
-      const pasture = await storage.updatePasture(req.params.id, data, userId);
+      const existing = await farmPasture(req, req.params.id);
+      if (!existing) {
+        return res.status(404).json({ error: "Pasture not found" });
+      }
+      if (!(await canManagePastures(req))) {
+        return res.status(403).json({ error: "Only owners and managers can change paddocks" });
+      }
+      const data = insertPastureSchema.partial().parse(pastureFields(req.body));
+      const pasture = await storage.updatePasture(existing.id, data, getUserId(req)); // user for the auto health snapshot
       if (!pasture) {
         return res.status(404).json({ error: "Pasture not found" });
       }
@@ -955,13 +1041,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/pastures/:id", async (req, res) => {
+  app.delete("/api/pastures/:id", requireAuth, async (req, res) => {
     try {
-      const existing = await storage.getPasture(req.params.id);
+      const existing = await farmPasture(req, req.params.id);
       if (!existing) {
         return res.status(404).json({ error: "Pasture not found" });
       }
-      await storage.deletePasture(req.params.id);
+      if (!(await canManagePastures(req))) {
+        return res.status(403).json({ error: "Only owners and managers can remove paddocks" });
+      }
+      await storage.deletePasture(existing.id);
       res.status(204).send();
     } catch (error) {
       console.error("Failed to delete pasture:", error);
@@ -971,9 +1060,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ===== PASTURE HEALTH RECORDS (Phase 5.3) =====
 
-  app.get("/api/pastures/:id/health-records", async (req, res) => {
+  app.get("/api/pastures/:id/health-records", requireAuth, async (req, res) => {
     try {
-      const records = await storage.getPastureHealthRecords(req.params.id);
+      const pasture = await farmPasture(req, req.params.id);
+      if (!pasture) {
+        return res.status(404).json({ error: "Pasture not found" });
+      }
+      const records = await storage.getPastureHealthRecords(pasture.id);
       res.json(records);
     } catch (error) {
       console.error("Failed to fetch pasture health records:", error);
@@ -981,11 +1074,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/pastures/:id/health-records", async (req, res) => {
+  app.post("/api/pastures/:id/health-records", requireAuth, async (req, res) => {
     try {
+      const pasture = await farmPasture(req, req.params.id);
+      if (!pasture) {
+        return res.status(404).json({ error: "Pasture not found" });
+      }
+      const role = await getFarmRole(getUserId(req)!, getFarmId(req)!);
+      if (!role || role === "viewer") {
+        return res.status(403).json({ error: "Viewers can't add health readings" });
+      }
       const data = insertPastureHealthRecordSchema.parse({
         ...req.body,
-        pastureId: req.params.id,
+        pastureId: pasture.id,
+        recordedBy: getUserId(req),
       });
       const record = await storage.createPastureHealthRecord(data);
       res.status(201).json(record);
@@ -1110,8 +1212,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ===== USER PREFERENCES (Phase 6A) =====
 
+  // Each person reads and saves only their own preferences
   app.get("/api/user-preferences/:userId", async (req, res) => {
     try {
+      if (req.params.userId !== getUserId(req)) return res.status(404).json({ error: "Preferences not found" });
       const preferences = await storage.getUserPreferences(req.params.userId);
       if (!preferences) {
         return res.status(404).json({ error: "Preferences not found" });
@@ -1125,7 +1229,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/user-preferences", async (req, res) => {
     try {
-      const preferences = await storage.upsertUserPreferences(req.body);
+      const preferences = await storage.upsertUserPreferences({ ...req.body, userId: getUserId(req)! });
       res.json(preferences);
     } catch (error: any) {
       console.error("Failed to save user preferences:", error);
@@ -1530,6 +1634,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Any other /api address doesn't exist (rather than falling through to the web app)
+  app.use("/api", (_req, res) => res.status(404).json({ error: "Not found" }));
+
   // ===== GLOBAL ERROR HANDLING =====
   
   // Log errors using our logging middleware
@@ -1560,9 +1667,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       userId: (req as any).user?.id,
     });
     
+    // The database refused a row from, or a link to, another farm (row-level security / farm guard)
+    const code = (err as any)?.code;
+    if (code === 'P0403' || code === '42501') {
+      return res.status(403).json({ error: 'That belongs to another farm' });
+    }
+
     // Don't expose error details in production
     const isDevelopment = process.env.NODE_ENV !== 'production';
-    
+
     res.status(500).json({
       error: isDevelopment ? err.message : 'Internal Server Error',
       ...(isDevelopment && { stack: err.stack }),

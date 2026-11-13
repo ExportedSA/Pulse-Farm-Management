@@ -107,7 +107,8 @@ export default function StaffManagementPage() {
 
   // Fetch timesheets
   const { data: timesheets = [] } = useQuery({
-    queryKey: ['timesheets'],
+    // Not ['timesheets']: the Timesheets page caches a different shape under that key
+    queryKey: ['/api/staff/timesheets/all'],
     queryFn: () => pulseGet<Timesheet[]>('/staff/timesheets/all'),
   });
 

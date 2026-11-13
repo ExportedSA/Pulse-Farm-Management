@@ -93,15 +93,10 @@ const CATEGORY_COLORS: Record<string, string> = {
   general: 'bg-gray-500',
 };
 
-const USERS = [
-  { id: 'user-1', name: 'John Smith' },
-  { id: 'user-2', name: 'Sarah Johnson' },
-  { id: 'user-3', name: 'Mike Wilson' },
-  { id: 'user-4', name: 'Emily Brown' },
-];
-
 export default function KanbanPage() {
   const queryClient = useQueryClient();
+  // The farm's people, to assign and filter by
+  const { data: USERS = [] } = useQuery<{ id: string; name: string }[]>({ queryKey: ['/api/users'] });
   const [draggedTask, setDraggedTask] = useState<KanbanTask | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');

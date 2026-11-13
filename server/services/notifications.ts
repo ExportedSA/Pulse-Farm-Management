@@ -1,24 +1,9 @@
 import { db } from "../db";
-import { users } from "@shared/schema";
+import { users, staffProfiles } from "@shared/schema";
 import { eq } from "drizzle-orm";
-import sgMail from "@sendgrid/mail";
-import { Twilio } from "twilio";
-
-// Lazy initialization for SendGrid
-function getSendGridClient() {
-  if (!process.env.SENDGRID_API_KEY) {
-    return null;
-  }
-  
-  // Validate API key format
-  if (!process.env.SENDGRID_API_KEY.startsWith('SG.')) {
-    console.warn('[EMAIL] Invalid SendGrid API key format - should start with "SG."');
-    return null;
-  }
-  
-  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-  return sgMail;
-}
+import { emailService } from "./email-service";
+// twilio is a CommonJS package: a named import works under tsx but not in the built server
+import twilio from "twilio";
 
 // Lazy initialization for Twilio
 function getTwilioClient() {
@@ -32,7 +17,7 @@ function getTwilioClient() {
     return null;
   }
   
-  return new Twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
+  return twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
 }
 
 // Notification interface
@@ -53,20 +38,16 @@ export async function sendEmailNotification(
   priority?: 'low' | 'normal' | 'high' | 'urgent'
 ): Promise<boolean> {
   try {
-    // Get SendGrid client with lazy initialization
-    const sgClient = getSendGridClient();
-    if (!sgClient) {
+    // Sent by the shared email service (Mailtrap or SendGrid, whichever is set up)
+    if (!emailService.isReady()) {
       console.log(`[EMAIL] Would send email to ${userEmail}:`);
       console.log(`  Subject: ${subject}`);
       console.log(`  Message: ${message}`);
       return true; // Simulate success in development
     }
 
-    const fromEmail = process.env.SENDGRID_FROM_EMAIL || 'noreply@pulsefarm.app';
-    
-    const msg = {
+    const result = await emailService.sendEmail({
       to: userEmail,
-      from: fromEmail,
       subject: subject,
       text: message,
       html: `
@@ -81,9 +62,11 @@ export async function sendEmailNotification(
           </p>
         </div>
       `,
-    };
-
-    await sgClient.send(msg);
+    });
+    if (!result.success) {
+      console.error("[EMAIL] Failed to send email:", result.error);
+      return false;
+    }
     console.log(`[EMAIL] Sent to ${userEmail}: ${subject}`);
     return true;
   } catch (error) {
@@ -144,11 +127,12 @@ async function getUserContactInfo(userId: string): Promise<{
       return {};
     }
 
-    // Note: Phone number would need to be added to the users table
-    // For now, we'll use a mock phone number for demonstration
+    // Texts go to the phone on the person's staff profile; no number, no text
+    const [profile] = await db.select({ phone: staffProfiles.phone }).from(staffProfiles)
+      .where(eq(staffProfiles.userId, userId)).limit(1);
     return {
       email: user.email || undefined,
-      phone: user.email ? `+6421${Math.floor(Math.random() * 10000000)}` : undefined,
+      phone: profile?.phone || undefined,
       name: user.name || undefined,
     };
   } catch (error) {
@@ -227,7 +211,7 @@ export async function deliverNotification(
   const smsBody = `[Pulse] ${notificationData.title}: ${notificationData.message.substring(0, 100)}${notificationData.message.length > 100 ? '...' : ''}`;
 
   // Send email if enabled and email is available
-  if (preferences?.emailEnabled !== false && userInfo.email && process.env.SENDGRID_API_KEY) {
+  if (preferences?.emailEnabled !== false && userInfo.email && emailService.isReady()) {
     results.email = await sendEmailNotification(userInfo.email, subject, emailBody, notificationData.priority);
   }
 

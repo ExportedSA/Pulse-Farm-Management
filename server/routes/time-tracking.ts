@@ -1,622 +1,378 @@
+/**
+ * Time tracking API for the Timesheets page (mounted at /api/time-tracking behind requireAuth).
+ * A thin adapter over the timesheets table and domain/timesheets: one row per shift,
+ * with the shift's individual breaks and logged tasks kept on the row.
+ */
 import { Router } from 'express';
+import { z } from 'zod';
+import { addDays, differenceInMinutes, format, startOfWeek } from 'date-fns';
+import { db } from '../db';
+import { timesheets, staffProfiles, users, type Timesheet } from '@shared/schema';
+import { and, desc, eq, gte, inArray, lte } from 'drizzle-orm';
+import { getFarmId, getUserId, requireFarm } from '../middleware/auth';
+import {
+  clockIn,
+  clockOut,
+  getActiveShift,
+  getOrCreateStaffProfileForUser,
+  logTimeEntry,
+  ActiveShiftError,
+  ValidationError,
+} from '../domain/timesheets';
+import { listFarmUserIds } from '../domain/farms';
 
 const router = Router();
+router.use(requireFarm);
 
-// Types
-interface TimeEntry {
-  id: string;
-  userId: string;
-  userName: string;
-  type: 'clock_in' | 'clock_out' | 'break_start' | 'break_end' | 'task_start' | 'task_end';
-  timestamp: string;
-  taskId?: string;
-  taskTitle?: string;
-  location?: string;
-  notes?: string;
+type Break = Timesheet['breaks'][number];
+type TaskLog = Timesheet['taskLog'][number];
+
+// Shift times are stored as local "HH:MM" next to the shift's date
+const toDateTime = (date: string, time: string) => `${date}T${time}:00`;
+const today = () => format(new Date(), 'yyyy-MM-dd');
+
+function completedBreakMinutes(breaks: Break[]): number {
+  return breaks.reduce((sum, b) => sum + (b.duration ?? 0), 0);
 }
 
-interface TimesheetEntry {
-  id: string;
-  date: string;
-  userId: string;
-  userName: string;
-  clockIn: string;
-  clockOut?: string;
-  breaks: { start: string; end?: string; duration?: number }[];
-  tasks: {
-    taskId: string;
-    taskTitle: string;
-    startTime: string;
-    endTime?: string;
-    duration?: number;
-    category?: string;
-  }[];
-  totalHours: number;
-  breakHours: number;
-  netHours: number;
-  status: 'active' | 'completed' | 'pending_approval' | 'approved';
-  approvedBy?: string;
-  approvedAt?: string;
-}
-
-// In-memory storage (would be database in production)
-let timeEntries: TimeEntry[] = [];
-let timesheets: TimesheetEntry[] = [];
-let entryIdCounter = 1;
-let timesheetIdCounter = 1;
-
-// Mock users
-const USERS = [
-  { id: 'demo-user', name: 'You' },
-  { id: 'user-1', name: 'John Smith' },
-  { id: 'user-2', name: 'Sarah Johnson' },
-  { id: 'user-3', name: 'Mike Wilson' },
-  { id: 'user-4', name: 'Emily Brown' },
-];
-
-// Generate demo data
-function generateDemoData() {
-  const today = new Date();
-  const yesterday = new Date(today.getTime() - 86400000);
-  const twoDaysAgo = new Date(today.getTime() - 2 * 86400000);
-  
-  // Today's active timesheet for demo user
-  timesheets.push({
-    id: `ts-${timesheetIdCounter++}`,
-    date: today.toISOString().split('T')[0],
-    userId: 'demo-user',
-    userName: 'You',
-    clockIn: new Date(today.setHours(6, 0, 0, 0)).toISOString(),
-    breaks: [
-      { start: new Date(today.setHours(10, 0, 0, 0)).toISOString(), end: new Date(today.setHours(10, 15, 0, 0)).toISOString(), duration: 15 },
-    ],
-    tasks: [
-      { taskId: '1', taskTitle: 'Morning Feed - Paddock A', startTime: new Date(today.setHours(6, 15, 0, 0)).toISOString(), endTime: new Date(today.setHours(7, 30, 0, 0)).toISOString(), duration: 75, category: 'feeding' },
-      { taskId: '2', taskTitle: 'Fence Inspection', startTime: new Date(today.setHours(8, 0, 0, 0)).toISOString(), endTime: new Date(today.setHours(9, 45, 0, 0)).toISOString(), duration: 105, category: 'maintenance' },
-    ],
-    totalHours: (new Date().getTime() - new Date(today.setHours(6, 0, 0, 0)).getTime()) / 3600000,
-    breakHours: 0.25,
-    netHours: 0,
-    status: 'active',
-  });
-  
-  // Yesterday's completed timesheet
-  timesheets.push({
-    id: `ts-${timesheetIdCounter++}`,
-    date: yesterday.toISOString().split('T')[0],
-    userId: 'demo-user',
-    userName: 'You',
-    clockIn: new Date(yesterday.setHours(5, 30, 0, 0)).toISOString(),
-    clockOut: new Date(yesterday.setHours(16, 0, 0, 0)).toISOString(),
-    breaks: [
-      { start: new Date(yesterday.setHours(10, 0, 0, 0)).toISOString(), end: new Date(yesterday.setHours(10, 15, 0, 0)).toISOString(), duration: 15 },
-      { start: new Date(yesterday.setHours(12, 30, 0, 0)).toISOString(), end: new Date(yesterday.setHours(13, 0, 0, 0)).toISOString(), duration: 30 },
-    ],
-    tasks: [
-      { taskId: '3', taskTitle: 'Morning Milking', startTime: new Date(yesterday.setHours(5, 30, 0, 0)).toISOString(), endTime: new Date(yesterday.setHours(8, 0, 0, 0)).toISOString(), duration: 150, category: 'milking' },
-      { taskId: '4', taskTitle: 'Calf Feeding', startTime: new Date(yesterday.setHours(8, 30, 0, 0)).toISOString(), endTime: new Date(yesterday.setHours(9, 30, 0, 0)).toISOString(), duration: 60, category: 'feeding' },
-      { taskId: '5', taskTitle: 'Afternoon Milking', startTime: new Date(yesterday.setHours(14, 0, 0, 0)).toISOString(), endTime: new Date(yesterday.setHours(16, 0, 0, 0)).toISOString(), duration: 120, category: 'milking' },
-    ],
-    totalHours: 10.5,
-    breakHours: 0.75,
-    netHours: 9.75,
-    status: 'approved',
-    approvedBy: 'user-1',
-    approvedAt: yesterday.toISOString(),
-  });
-  
-  // Other staff timesheets
-  USERS.slice(1).forEach((user, index) => {
-    timesheets.push({
-      id: `ts-${timesheetIdCounter++}`,
-      date: today.toISOString().split('T')[0],
-      userId: user.id,
-      userName: user.name,
-      clockIn: new Date(today.setHours(5 + index, 0, 0, 0)).toISOString(),
-      clockOut: index > 1 ? new Date(today.setHours(14 + index, 0, 0, 0)).toISOString() : undefined,
-      breaks: [],
-      tasks: [
-        { taskId: `task-${user.id}`, taskTitle: `${user.name}'s Task`, startTime: new Date(today.setHours(6 + index, 0, 0, 0)).toISOString(), duration: 120, category: 'general' },
-      ],
-      totalHours: index > 1 ? 8 + index : (new Date().getHours() - 5 - index),
-      breakHours: 0,
-      netHours: index > 1 ? 8 + index : (new Date().getHours() - 5 - index),
-      status: index > 1 ? 'completed' : 'active',
-    });
+function closeOpenBreak(breaks: Break[], at: Date): Break[] {
+  return breaks.map(b => b.end ? b : {
+    ...b,
+    end: at.toISOString(),
+    duration: Math.max(0, differenceInMinutes(at, new Date(b.start))),
   });
 }
 
-generateDemoData();
-
-// Helper functions
-function getUserName(userId: string): string {
-  return USERS.find(u => u.id === userId)?.name || userId;
+function toStatus(row: Timesheet): 'active' | 'completed' | 'pending_approval' | 'approved' {
+  if (!row.endTime) return 'active';
+  if (row.status === 'pending') return 'pending_approval';
+  if (row.status === 'approved') return 'approved';
+  return 'completed';
 }
 
-function formatDuration(minutes: number): string {
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+/**
+ * Shape a shift row the way the Timesheets page expects it
+ */
+function toEntry(row: Timesheet, userId: string, userName: string) {
+  const breakHours = completedBreakMinutes(row.breaks) / 60;
+  let netHours: number;
+  if (row.endTime) {
+    netHours = Number(row.totalHours ?? 0);
+  } else {
+    const worked = differenceInMinutes(new Date(), new Date(toDateTime(row.date, row.startTime)));
+    netHours = Math.max(0, worked / 60 - breakHours);
+  }
+  return {
+    id: row.id,
+    date: row.date,
+    userId,
+    userName,
+    clockIn: toDateTime(row.date, row.startTime),
+    clockOut: row.endTime ? toDateTime(row.date, row.endTime) : undefined,
+    breaks: row.breaks,
+    tasks: row.taskLog.map((t, i) => ({ taskId: `${row.id}-${i}`, ...t })),
+    totalHours: Math.round((netHours + breakHours) * 100) / 100,
+    breakHours: Math.round(breakHours * 100) / 100,
+    netHours: Math.round(netHours * 100) / 100,
+    status: toStatus(row),
+    approvedBy: row.approvedBy ?? undefined,
+    approvedAt: row.approvedAt?.toISOString(),
+  };
 }
 
-function calculateNetHours(timesheet: TimesheetEntry): number {
-  if (!timesheet.clockOut) return 0;
-  const totalMs = new Date(timesheet.clockOut).getTime() - new Date(timesheet.clockIn).getTime();
-  const totalHours = totalMs / 3600000;
-  return Math.round((totalHours - timesheet.breakHours) * 100) / 100;
+async function currentUser(req: Parameters<typeof getUserId>[0]) {
+  const userId = getUserId(req)!;
+  const [user] = await db.select({ name: users.name }).from(users).where(eq(users.id, userId));
+  return {
+    userId,
+    userName: user?.name ?? 'Unknown',
+    farmId: getFarmId(req)!,
+    staffProfileId: await getOrCreateStaffProfileForUser(userId),
+  };
 }
 
-// ============================================
-// CLOCK IN/OUT ENDPOINTS
-// ============================================
+function handleError(res: any, error: unknown, message: string) {
+  if (error instanceof z.ZodError) {
+    return res.status(400).json({ error: 'Validation failed', details: error.errors });
+  }
+  if (error instanceof ActiveShiftError || error instanceof ValidationError) {
+    return res.status(400).json({ error: error.message });
+  }
+  console.error(`${message}:`, error);
+  res.status(500).json({ error: message });
+}
 
-// Get current clock status
-router.get('/status', (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
-  const today = new Date().toISOString().split('T')[0];
-  
-  const todayTimesheet = timesheets.find(ts => ts.userId === userId && ts.date === today);
-  
-  if (!todayTimesheet) {
-    return res.json({
-      clockedIn: false,
-      onBreak: false,
+// GET /api/time-tracking/status - The signed-in user's clock state today
+router.get('/status', async (req, res) => {
+  try {
+    const me = await currentUser(req);
+    const shift = await getActiveShift(me.staffProfileId, me.farmId);
+    const [todayRows, entry] = await Promise.all([
+      db.select().from(timesheets).where(and(
+        eq(timesheets.staffProfileId, me.staffProfileId),
+        eq(timesheets.farmId, me.farmId),
+        eq(timesheets.date, today()),
+      )),
+      Promise.resolve(shift ? toEntry(shift, me.userId, me.userName) : undefined),
+    ]);
+    const todayEntries = todayRows.map(r => toEntry(r, me.userId, me.userName));
+
+    res.json({
+      clockedIn: !!shift,
+      onBreak: !!shift?.breaks.some(b => !b.end),
       activeTask: null,
-      todayHours: 0,
+      todayHours: Math.round(todayEntries.reduce((s, e) => s + e.netHours, 0) * 100) / 100,
+      clockInTime: entry?.clockIn,
+      breakHours: entry?.breakHours ?? 0,
+      timesheet: entry,
     });
+  } catch (error) {
+    handleError(res, error, 'Failed to fetch clock status');
   }
-  
-  const lastBreak = todayTimesheet.breaks[todayTimesheet.breaks.length - 1];
-  const onBreak = lastBreak && !lastBreak.end;
-  
-  const activeTask = todayTimesheet.tasks.find(t => !t.endTime);
-  
-  // Calculate hours worked today
-  const now = new Date();
-  const clockInTime = new Date(todayTimesheet.clockIn);
-  let todayHours = (now.getTime() - clockInTime.getTime()) / 3600000;
-  todayHours = Math.round(todayHours * 100) / 100;
-  
-  res.json({
-    clockedIn: !todayTimesheet.clockOut,
-    onBreak,
-    activeTask: activeTask ? {
-      taskId: activeTask.taskId,
-      taskTitle: activeTask.taskTitle,
-      startTime: activeTask.startTime,
-      duration: Math.round((now.getTime() - new Date(activeTask.startTime).getTime()) / 60000),
-    } : null,
-    todayHours,
-    clockInTime: todayTimesheet.clockIn,
-    breakHours: todayTimesheet.breakHours,
-    timesheet: todayTimesheet,
-  });
 });
 
-// Clock in
-router.post('/clock-in', (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
-  const userName = getUserName(userId);
-  const { location, notes } = req.body;
-  const today = new Date().toISOString().split('T')[0];
-  
-  // Check if already clocked in
-  const existingTimesheet = timesheets.find(ts => ts.userId === userId && ts.date === today && !ts.clockOut);
-  if (existingTimesheet) {
-    return res.status(400).json({ error: 'Already clocked in today' });
+// POST /api/time-tracking/clock-in
+router.post('/clock-in', async (req, res) => {
+  try {
+    const me = await currentUser(req);
+    const body = z.object({ location: z.string().optional(), notes: z.string().optional() }).parse(req.body ?? {});
+    const shift = await clockIn({ staffProfileId: me.staffProfileId, farmId: me.farmId, ...body });
+    res.status(201).json(toEntry(shift, me.userId, me.userName));
+  } catch (error) {
+    handleError(res, error, 'Failed to clock in');
   }
-  
-  const now = new Date().toISOString();
-  
-  // Create time entry
-  const entry: TimeEntry = {
-    id: `entry-${entryIdCounter++}`,
-    userId,
-    userName,
-    type: 'clock_in',
-    timestamp: now,
-    location,
-    notes,
-  };
-  timeEntries.push(entry);
-  
-  // Create or update timesheet
-  const timesheet: TimesheetEntry = {
-    id: `ts-${timesheetIdCounter++}`,
-    date: today,
-    userId,
-    userName,
-    clockIn: now,
-    breaks: [],
-    tasks: [],
-    totalHours: 0,
-    breakHours: 0,
-    netHours: 0,
-    status: 'active',
-  };
-  timesheets.push(timesheet);
-  
-  res.json({ success: true, entry, timesheet });
 });
 
-// Clock out
-router.post('/clock-out', (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
-  const userName = getUserName(userId);
-  const { notes } = req.body;
-  const today = new Date().toISOString().split('T')[0];
-  
-  const timesheet = timesheets.find(ts => ts.userId === userId && ts.date === today && !ts.clockOut);
-  if (!timesheet) {
-    return res.status(400).json({ error: 'Not clocked in' });
+// POST /api/time-tracking/clock-out - Ends any open break, then the shift
+router.post('/clock-out', async (req, res) => {
+  try {
+    const me = await currentUser(req);
+    const shift = await getActiveShift(me.staffProfileId, me.farmId);
+    if (!shift) {
+      return res.status(400).json({ error: 'No active shift found. Please clock in first.' });
+    }
+    const breaks = closeOpenBreak(shift.breaks, new Date());
+    await db.update(timesheets).set({ breaks }).where(eq(timesheets.id, shift.id));
+    const ended = await clockOut(me.staffProfileId, me.farmId, completedBreakMinutes(breaks));
+    res.json(toEntry(ended, me.userId, me.userName));
+  } catch (error) {
+    handleError(res, error, 'Failed to clock out');
   }
-  
-  const now = new Date().toISOString();
-  
-  // End any active break
-  const activeBreak = timesheet.breaks.find(b => !b.end);
-  if (activeBreak) {
-    activeBreak.end = now;
-    activeBreak.duration = Math.round((new Date(now).getTime() - new Date(activeBreak.start).getTime()) / 60000);
-    timesheet.breakHours = timesheet.breaks.reduce((sum, b) => sum + (b.duration || 0), 0) / 60;
-  }
-  
-  // End any active task
-  const activeTask = timesheet.tasks.find(t => !t.endTime);
-  if (activeTask) {
-    activeTask.endTime = now;
-    activeTask.duration = Math.round((new Date(now).getTime() - new Date(activeTask.startTime).getTime()) / 60000);
-  }
-  
-  // Update timesheet
-  timesheet.clockOut = now;
-  timesheet.totalHours = Math.round((new Date(now).getTime() - new Date(timesheet.clockIn).getTime()) / 3600000 * 100) / 100;
-  timesheet.netHours = calculateNetHours(timesheet);
-  timesheet.status = 'completed';
-  
-  // Create time entry
-  const entry: TimeEntry = {
-    id: `entry-${entryIdCounter++}`,
-    userId,
-    userName,
-    type: 'clock_out',
-    timestamp: now,
-    notes,
-  };
-  timeEntries.push(entry);
-  
-  res.json({ success: true, entry, timesheet });
 });
 
-// Start break
-router.post('/break/start', (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
-  const today = new Date().toISOString().split('T')[0];
-  
-  const timesheet = timesheets.find(ts => ts.userId === userId && ts.date === today && !ts.clockOut);
-  if (!timesheet) {
-    return res.status(400).json({ error: 'Not clocked in' });
+// POST /api/time-tracking/break/start
+router.post('/break/start', async (req, res) => {
+  try {
+    const me = await currentUser(req);
+    const shift = await getActiveShift(me.staffProfileId, me.farmId);
+    if (!shift) {
+      return res.status(400).json({ error: 'Clock in before starting a break' });
+    }
+    if (shift.breaks.some(b => !b.end)) {
+      return res.status(400).json({ error: 'Already on a break' });
+    }
+    const [updated] = await db
+      .update(timesheets)
+      .set({ breaks: [...shift.breaks, { start: new Date().toISOString() }], updatedAt: new Date() })
+      .where(eq(timesheets.id, shift.id))
+      .returning();
+    res.json(toEntry(updated, me.userId, me.userName));
+  } catch (error) {
+    handleError(res, error, 'Failed to start break');
   }
-  
-  const activeBreak = timesheet.breaks.find(b => !b.end);
-  if (activeBreak) {
-    return res.status(400).json({ error: 'Already on break' });
-  }
-  
-  const now = new Date().toISOString();
-  timesheet.breaks.push({ start: now });
-  
-  // Pause active task
-  const activeTask = timesheet.tasks.find(t => !t.endTime);
-  if (activeTask) {
-    activeTask.endTime = now;
-    activeTask.duration = Math.round((new Date(now).getTime() - new Date(activeTask.startTime).getTime()) / 60000);
-  }
-  
-  res.json({ success: true, breakStart: now });
 });
 
-// End break
-router.post('/break/end', (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
-  const today = new Date().toISOString().split('T')[0];
-  
-  const timesheet = timesheets.find(ts => ts.userId === userId && ts.date === today && !ts.clockOut);
-  if (!timesheet) {
-    return res.status(400).json({ error: 'Not clocked in' });
+// POST /api/time-tracking/break/end
+router.post('/break/end', async (req, res) => {
+  try {
+    const me = await currentUser(req);
+    const shift = await getActiveShift(me.staffProfileId, me.farmId);
+    if (!shift?.breaks.some(b => !b.end)) {
+      return res.status(400).json({ error: 'Not on a break' });
+    }
+    const breaks = closeOpenBreak(shift.breaks, new Date());
+    const [updated] = await db
+      .update(timesheets)
+      .set({ breaks, breakMinutes: completedBreakMinutes(breaks), updatedAt: new Date() })
+      .where(eq(timesheets.id, shift.id))
+      .returning();
+    res.json(toEntry(updated, me.userId, me.userName));
+  } catch (error) {
+    handleError(res, error, 'Failed to end break');
   }
-  
-  const activeBreak = timesheet.breaks.find(b => !b.end);
-  if (!activeBreak) {
-    return res.status(400).json({ error: 'Not on break' });
-  }
-  
-  const now = new Date().toISOString();
-  activeBreak.end = now;
-  activeBreak.duration = Math.round((new Date(now).getTime() - new Date(activeBreak.start).getTime()) / 60000);
-  
-  // Update total break hours
-  timesheet.breakHours = Math.round(timesheet.breaks.reduce((sum, b) => sum + (b.duration || 0), 0) / 60 * 100) / 100;
-  
-  res.json({ success: true, breakEnd: now, breakDuration: activeBreak.duration });
 });
 
-// ============================================
-// TASK TIME TRACKING
-// ============================================
+// POST /api/time-tracking/task/log - Manual entry: adds to that day's shift, or records
+// the time as its own entry when there is no shift that day
+router.post('/task/log', async (req, res) => {
+  try {
+    const me = await currentUser(req);
+    const time = z.string().regex(/^\d{2}:\d{2}$/, 'Use HH:MM');
+    const body = z.object({
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD'),
+      taskTitle: z.string().min(1).max(200),
+      startTime: time,
+      endTime: time,
+      category: z.string().max(50).default('general'),
+    }).parse(req.body);
+    if (body.endTime <= body.startTime) {
+      return res.status(400).json({ error: 'End time must be after start time' });
+    }
 
-// Start task timer
-router.post('/task/start', (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
-  const { taskId, taskTitle, category } = req.body;
-  const today = new Date().toISOString().split('T')[0];
-  
-  const timesheet = timesheets.find(ts => ts.userId === userId && ts.date === today && !ts.clockOut);
-  if (!timesheet) {
-    return res.status(400).json({ error: 'Not clocked in. Please clock in first.' });
-  }
-  
-  // Check if on break
-  const activeBreak = timesheet.breaks.find(b => !b.end);
-  if (activeBreak) {
-    return res.status(400).json({ error: 'Cannot start task while on break' });
-  }
-  
-  // End any active task
-  const activeTask = timesheet.tasks.find(t => !t.endTime);
-  if (activeTask) {
-    const now = new Date().toISOString();
-    activeTask.endTime = now;
-    activeTask.duration = Math.round((new Date(now).getTime() - new Date(activeTask.startTime).getTime()) / 60000);
-  }
-  
-  const now = new Date().toISOString();
-  const newTask = {
-    taskId,
-    taskTitle,
-    startTime: now,
-    category,
-  };
-  timesheet.tasks.push(newTask);
-  
-  res.json({ success: true, task: newTask });
-});
-
-// Stop task timer
-router.post('/task/stop', (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
-  const { taskId, notes } = req.body;
-  const today = new Date().toISOString().split('T')[0];
-  
-  const timesheet = timesheets.find(ts => ts.userId === userId && ts.date === today && !ts.clockOut);
-  if (!timesheet) {
-    return res.status(400).json({ error: 'Not clocked in' });
-  }
-  
-  const task = timesheet.tasks.find(t => t.taskId === taskId && !t.endTime);
-  if (!task) {
-    return res.status(400).json({ error: 'Task not found or already stopped' });
-  }
-  
-  const now = new Date().toISOString();
-  task.endTime = now;
-  task.duration = Math.round((new Date(now).getTime() - new Date(task.startTime).getTime()) / 60000);
-  
-  res.json({ success: true, task, duration: task.duration });
-});
-
-// Log manual time entry
-router.post('/task/log', (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
-  const { taskId, taskTitle, date, startTime, endTime, duration, category, notes } = req.body;
-  
-  let timesheet = timesheets.find(ts => ts.userId === userId && ts.date === date);
-  
-  if (!timesheet) {
-    // Create timesheet for that date
-    timesheet = {
-      id: `ts-${timesheetIdCounter++}`,
-      date,
-      userId,
-      userName: getUserName(userId),
-      clockIn: `${date}T${startTime}:00.000Z`,
-      clockOut: `${date}T${endTime}:00.000Z`,
-      breaks: [],
-      tasks: [],
-      totalHours: 0,
-      breakHours: 0,
-      netHours: 0,
-      status: 'completed',
+    const task: TaskLog = {
+      taskTitle: body.taskTitle,
+      startTime: toDateTime(body.date, body.startTime),
+      endTime: toDateTime(body.date, body.endTime),
+      duration: differenceInMinutes(new Date(toDateTime(body.date, body.endTime)), new Date(toDateTime(body.date, body.startTime))),
+      category: body.category,
     };
-    timesheets.push(timesheet);
+
+    const [shift] = await db
+      .select()
+      .from(timesheets)
+      .where(and(
+        eq(timesheets.staffProfileId, me.staffProfileId),
+        eq(timesheets.farmId, me.farmId),
+        eq(timesheets.date, body.date),
+      ))
+      .orderBy(desc(timesheets.createdAt))
+      .limit(1);
+
+    let row: Timesheet;
+    if (shift) {
+      [row] = await db
+        .update(timesheets)
+        .set({ taskLog: [...shift.taskLog, task], updatedAt: new Date() })
+        .where(eq(timesheets.id, shift.id))
+        .returning();
+    } else {
+      const entry = await logTimeEntry({
+        staffProfileId: me.staffProfileId,
+        farmId: me.farmId,
+        date: body.date,
+        startTime: body.startTime,
+        endTime: body.endTime,
+        taskDescription: body.taskTitle,
+        recordedById: me.userId,
+      });
+      [row] = await db.update(timesheets).set({ taskLog: [task] }).where(eq(timesheets.id, entry.id)).returning();
+    }
+    res.status(201).json(toEntry(row, me.userId, me.userName));
+  } catch (error) {
+    handleError(res, error, 'Failed to log time');
   }
-  
-  const taskEntry = {
-    taskId: taskId || `manual-${Date.now()}`,
-    taskTitle: taskTitle || 'Manual Entry',
-    startTime: `${date}T${startTime}:00.000Z`,
-    endTime: `${date}T${endTime}:00.000Z`,
-    duration: duration || Math.round((new Date(`${date}T${endTime}`).getTime() - new Date(`${date}T${startTime}`).getTime()) / 60000),
-    category,
-  };
-  
-  timesheet.tasks.push(taskEntry);
-  
-  res.json({ success: true, task: taskEntry });
 });
 
-// ============================================
-// TIMESHEET ENDPOINTS
-// ============================================
-
-// Get timesheets
-router.get('/timesheets', (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
-  const { startDate, endDate, allUsers } = req.query;
-  
-  let filtered = timesheets;
-  
-  // Filter by user (unless admin viewing all)
-  if (allUsers !== 'true') {
-    filtered = filtered.filter(ts => ts.userId === userId);
+// GET /api/time-tracking/timesheets - The signed-in user's recent shifts
+router.get('/timesheets', async (req, res) => {
+  try {
+    const me = await currentUser(req);
+    const rows = await db
+      .select()
+      .from(timesheets)
+      .where(and(eq(timesheets.staffProfileId, me.staffProfileId), eq(timesheets.farmId, me.farmId)))
+      .orderBy(desc(timesheets.date), desc(timesheets.createdAt))
+      .limit(60);
+    res.json({ timesheets: rows.map(r => toEntry(r, me.userId, me.userName)) });
+  } catch (error) {
+    handleError(res, error, 'Failed to fetch timesheets');
   }
-  
-  // Filter by date range
-  if (startDate) {
-    filtered = filtered.filter(ts => ts.date >= startDate);
-  }
-  if (endDate) {
-    filtered = filtered.filter(ts => ts.date <= endDate);
-  }
-  
-  // Sort by date descending
-  filtered.sort((a, b) => b.date.localeCompare(a.date));
-  
-  // Calculate summary
-  const summary = {
-    totalHours: Math.round(filtered.reduce((sum, ts) => sum + ts.netHours, 0) * 100) / 100,
-    totalDays: filtered.length,
-    averageHoursPerDay: filtered.length > 0 
-      ? Math.round(filtered.reduce((sum, ts) => sum + ts.netHours, 0) / filtered.length * 100) / 100 
-      : 0,
-    pendingApproval: filtered.filter(ts => ts.status === 'pending_approval').length,
-  };
-  
-  res.json({ timesheets: filtered, summary });
 });
 
-// Get single timesheet
-router.get('/timesheets/:id', (req, res) => {
-  const { id } = req.params;
-  const timesheet = timesheets.find(ts => ts.id === id);
-  
-  if (!timesheet) {
-    return res.status(404).json({ error: 'Timesheet not found' });
-  }
-  
-  res.json(timesheet);
-});
+// GET /api/time-tracking/reports/weekly - This week (Mon-Sun) for the signed-in user
+router.get('/reports/weekly', async (req, res) => {
+  try {
+    const me = await currentUser(req);
+    const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+    const weekEnd = addDays(weekStart, 6);
+    const rows = await db
+      .select()
+      .from(timesheets)
+      .where(and(
+        eq(timesheets.staffProfileId, me.staffProfileId),
+        eq(timesheets.farmId, me.farmId),
+        gte(timesheets.date, format(weekStart, 'yyyy-MM-dd')),
+        lte(timesheets.date, format(weekEnd, 'yyyy-MM-dd')),
+      ));
+    const entries = rows.map(r => toEntry(r, me.userId, me.userName));
 
-// Submit timesheet for approval
-router.post('/timesheets/:id/submit', (req, res) => {
-  const { id } = req.params;
-  const timesheet = timesheets.find(ts => ts.id === id);
-  
-  if (!timesheet) {
-    return res.status(404).json({ error: 'Timesheet not found' });
-  }
-  
-  if (timesheet.status !== 'completed') {
-    return res.status(400).json({ error: 'Timesheet must be completed before submission' });
-  }
-  
-  timesheet.status = 'pending_approval';
-  
-  res.json({ success: true, timesheet });
-});
-
-// Approve timesheet
-router.post('/timesheets/:id/approve', (req, res) => {
-  const { id } = req.params;
-  const approverId = (req.user as any)?.id || 'user-1';
-  const timesheet = timesheets.find(ts => ts.id === id);
-  
-  if (!timesheet) {
-    return res.status(404).json({ error: 'Timesheet not found' });
-  }
-  
-  timesheet.status = 'approved';
-  timesheet.approvedBy = approverId;
-  timesheet.approvedAt = new Date().toISOString();
-  
-  res.json({ success: true, timesheet });
-});
-
-// ============================================
-// REPORTS
-// ============================================
-
-// Get weekly summary
-router.get('/reports/weekly', (req, res) => {
-  const userId = (req.user as any)?.id || 'demo-user';
-  const { week } = req.query; // Format: YYYY-WW
-  
-  // Get current week if not specified
-  const now = new Date();
-  const startOfWeek = new Date(now);
-  startOfWeek.setDate(now.getDate() - now.getDay());
-  startOfWeek.setHours(0, 0, 0, 0);
-  
-  const endOfWeek = new Date(startOfWeek);
-  endOfWeek.setDate(startOfWeek.getDate() + 6);
-  
-  const weekTimesheets = timesheets.filter(ts => {
-    const tsDate = new Date(ts.date);
-    return ts.userId === userId && tsDate >= startOfWeek && tsDate <= endOfWeek;
-  });
-  
-  // Build daily breakdown
-  const dailyBreakdown = [];
-  for (let i = 0; i < 7; i++) {
-    const date = new Date(startOfWeek);
-    date.setDate(startOfWeek.getDate() + i);
-    const dateStr = date.toISOString().split('T')[0];
-    const daySheet = weekTimesheets.find(ts => ts.date === dateStr);
-    
-    dailyBreakdown.push({
-      date: dateStr,
-      dayName: date.toLocaleDateString('en-NZ', { weekday: 'short' }),
-      hours: daySheet?.netHours || 0,
-      status: daySheet?.status || 'none',
+    const dailyBreakdown = Array.from({ length: 7 }, (_, i) => {
+      const date = format(addDays(weekStart, i), 'yyyy-MM-dd');
+      const day = entries.filter(e => e.date === date);
+      return {
+        date,
+        dayName: addDays(weekStart, i).toLocaleDateString('en-NZ', { weekday: 'short' }),
+        hours: Math.round(day.reduce((s, e) => s + e.netHours, 0) * 100) / 100,
+        status: day[0]?.status ?? 'none',
+      };
     });
-  }
-  
-  // Category breakdown
-  const categoryHours: Record<string, number> = {};
-  weekTimesheets.forEach(ts => {
-    ts.tasks.forEach(task => {
+
+    const categoryHours: Record<string, number> = {};
+    for (const task of entries.flatMap(e => e.tasks)) {
       const cat = task.category || 'general';
       categoryHours[cat] = (categoryHours[cat] || 0) + (task.duration || 0) / 60;
+    }
+
+    res.json({
+      weekStart: format(weekStart, 'yyyy-MM-dd'),
+      weekEnd: format(weekEnd, 'yyyy-MM-dd'),
+      totalHours: Math.round(dailyBreakdown.reduce((s, d) => s + d.hours, 0) * 100) / 100,
+      dailyBreakdown,
+      categoryBreakdown: Object.entries(categoryHours).map(([category, hours]) => ({
+        category,
+        hours: Math.round(hours * 100) / 100,
+      })),
     });
-  });
-  
-  res.json({
-    weekStart: startOfWeek.toISOString().split('T')[0],
-    weekEnd: endOfWeek.toISOString().split('T')[0],
-    totalHours: Math.round(weekTimesheets.reduce((sum, ts) => sum + ts.netHours, 0) * 100) / 100,
-    dailyBreakdown,
-    categoryBreakdown: Object.entries(categoryHours).map(([category, hours]) => ({
-      category,
-      hours: Math.round(hours * 100) / 100,
-    })),
-    timesheets: weekTimesheets,
-  });
+  } catch (error) {
+    handleError(res, error, 'Failed to fetch weekly report');
+  }
 });
 
-// Get staff overview (for managers)
-router.get('/reports/staff-overview', (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
-  
-  const staffStatus = USERS.map(user => {
-    const todaySheet = timesheets.find(ts => ts.userId === user.id && ts.date === today);
-    
-    return {
-      userId: user.id,
-      userName: user.name,
-      clockedIn: todaySheet && !todaySheet.clockOut,
-      clockInTime: todaySheet?.clockIn,
-      hoursToday: todaySheet?.netHours || todaySheet?.totalHours || 0,
-      activeTask: todaySheet?.tasks.find(t => !t.endTime)?.taskTitle,
-      onBreak: todaySheet?.breaks.some(b => !b.end),
-    };
-  });
-  
-  res.json({
-    date: today,
-    staff: staffStatus,
-    totalClockedIn: staffStatus.filter(s => s.clockedIn).length,
-    totalStaff: USERS.length,
-  });
+// GET /api/time-tracking/reports/staff-overview - Who is working on the farm today
+router.get('/reports/staff-overview', async (req, res) => {
+  try {
+    const farmId = getFarmId(req)!;
+    const memberIds = await listFarmUserIds(farmId);
+    const members = memberIds.length === 0 ? [] : await db
+      .select({ userId: users.id, userName: users.name, staffProfileId: staffProfiles.id })
+      .from(users)
+      .leftJoin(staffProfiles, eq(staffProfiles.userId, users.id))
+      .where(inArray(users.id, memberIds));
+
+    const profileIds = members.flatMap(m => (m.staffProfileId ? [m.staffProfileId] : []));
+    const todayRows = profileIds.length === 0 ? [] : await db
+      .select()
+      .from(timesheets)
+      .where(and(
+        eq(timesheets.farmId, farmId),
+        inArray(timesheets.staffProfileId, profileIds),
+        eq(timesheets.date, today()),
+      ));
+
+    const staff = members.map(m => {
+      const rows = todayRows.filter(r => r.staffProfileId === m.staffProfileId);
+      const entries = rows.map(r => toEntry(r, m.userId, m.userName));
+      const open = rows.find(r => !r.endTime);
+      return {
+        userId: m.userId,
+        userName: m.userName,
+        clockedIn: !!open,
+        clockInTime: open ? toDateTime(open.date, open.startTime) : undefined,
+        hoursToday: Math.round(entries.reduce((s, e) => s + e.netHours, 0) * 100) / 100,
+        activeTask: undefined,
+        onBreak: !!open?.breaks.some(b => !b.end),
+      };
+    });
+
+    res.json({
+      date: today(),
+      totalStaff: staff.length,
+      totalClockedIn: staff.filter(s => s.clockedIn).length,
+      staff,
+    });
+  } catch (error) {
+    handleError(res, error, 'Failed to fetch staff overview');
+  }
 });
 
 export default router;
