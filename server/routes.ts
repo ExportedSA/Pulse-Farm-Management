@@ -116,10 +116,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize Sentry for error tracking
   initSentry();
   
-  // Trust proxy for rate limiting to work correctly behind reverse proxies
-  if (process.env.TRUST_PROXY) {
-    app.set('trust proxy', true);
-    logger.info('Trust proxy enabled for reverse proxy deployments');
+  // Behind a reverse proxy (Railway), take the client's address from X-Forwarded-For so rate
+  // limits apply per person. TRUST_PROXY is how many proxies to trust (Railway: 1), or Express's
+  // address names (e.g. "loopback"). Never `true`: that trusts any X-Forwarded-For a client sends,
+  // so anyone could dodge the sign-in limits by making up an address.
+  const trustProxy = process.env.TRUST_PROXY?.trim();
+  if (trustProxy && trustProxy !== '0' && trustProxy !== 'false') {
+    app.set('trust proxy', /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy === 'true' ? 1 : trustProxy);
+    logger.info({ trustProxy: app.get('trust proxy') }, 'Trusting reverse proxy for client addresses');
   }
   
   // Security middleware (must be early)

@@ -1,5 +1,9 @@
 import cors from 'cors';
 import { CorsOptions } from 'cors';
+import type { Request, Response, NextFunction } from 'express';
+
+// Marks the refusal so it is answered with 403 below, not passed on as a server error (500)
+class OriginNotAllowed extends Error {}
 
 // Get allowed origins from environment
 const getAllowedOrigins = (): string[] => {
@@ -46,7 +50,7 @@ const corsOptions: CorsOptions = {
       callback(null, true);
     } else {
       // Origin not allowed
-      callback(new Error('Not allowed by CORS'), false);
+      callback(new OriginNotAllowed('Not allowed by CORS'), false);
     }
   },
   
@@ -81,8 +85,17 @@ const corsOptions: CorsOptions = {
   optionsSuccessStatus: 204,
 };
 
-// Export the configured CORS middleware
-export default cors(corsOptions);
+// Export the configured CORS middleware. A page on another website calling Pulse gets a plain
+// 403 here; it never reaches the error handler, so it isn't logged or reported as a crash.
+const corsMiddleware = cors(corsOptions);
+export default function corsConfig(req: Request, res: Response, next: NextFunction) {
+  corsMiddleware(req, res, (err?: unknown) => {
+    if (err instanceof OriginNotAllowed) {
+      return res.status(403).json({ error: 'Requests from this website are not allowed' });
+    }
+    next(err as any);
+  });
+}
 
 // Export a function to get current CORS settings for debugging
 export function getCorsConfig() {

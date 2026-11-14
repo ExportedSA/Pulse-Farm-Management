@@ -23,12 +23,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <title>Pulse - Dairy Farm Management</title>
-    <!-- Polyfill for Node.js globals in browser -->
-    <script>
-      window.global = window;
-      window.process = { env: {} };
-      window.Buffer = window.Buffer || { isBuffer: () => false };
-    </script>
+    <!-- Node.js globals some libraries expect (a file, since the security policy blocks inline scripts) -->
+    <script src="/node-globals.js"></script>
   </head>
   <body>
     <div id="root"></div>
