@@ -93,6 +93,11 @@ How it works (`server/services/fileStorage.ts`, the only code that saves, serves
   only when a row of the person's current farm links to that address (jobs, photo attachments, voice notes,
   chat messages, attachments). A file nothing links to answers 404.
 - Without `S3_BUCKET_NAME` (development), files are kept in `./uploads` (or `UPLOADS_DIR`), served the same way.
+- Showing a file inside a page (a picture, a voice note) means the browser follows that redirect to the bucket's
+  own address. Two things let it through: the security policy (`server/config/helmet.ts`) names the bucket's
+  address for audio and scripted downloads, worked out from the storage variables; and the service worker
+  (`client/public/sw.js`) leaves `/uploads/` requests to the browser, since a fetch made by the worker is held
+  to the same policy. Without either, files still open as links but don't show in pages.
 
 Environment for live:
 
@@ -106,15 +111,19 @@ Environment for live:
 `S3_FORCE_PATH_STYLE=1` is there for other S3-compatible services that need it. If `S3_BUCKET_NAME` is set but the
 keys or region are missing, the server refuses to start.
 
-Setting up the bucket (not done yet; needs the account owner):
+Setting up the bucket (needs the account owner; done for live on Cloudflare R2):
 - Turn on **Block all public access** (S3) or leave public access off (R2). No bucket policy that allows public
-  reads, and no CORS rule is needed (the browser only follows the redirect to load the file).
+  reads, and no CORS rule is needed: pages show files with `<img>`, `<audio>` and links, which only follow the
+  redirect. A page script that read a file with `fetch()` would need a CORS rule on the bucket for the site's
+  address; nothing does today.
 - Give the key access to this bucket only: `s3:PutObject`, `s3:GetObject` and `s3:DeleteObject` on
   `arn:aws:s3:::<bucket>/*`. R2: an "Object Read & Write" token limited to the bucket.
 - Files already on a developer's disk are not copied to the bucket. Live starts empty, so nothing needs moving.
 
 Tested by `tests/backend/uploads-isolation.test.ts`: farm B and signed-out visitors can't fetch farm A's files,
-with local disk and with S3 (a fake bucket in memory; the test sends nothing to AWS).
+with local disk and with S3 (a fake bucket in memory; the test sends nothing to AWS). And by
+`tests/backend/uploads-in-pages.test.ts`: the security policy allows the address signed links point at, and the
+service worker leaves `/uploads/` alone.
 
 ## Checked locally (2026-11-12)
 

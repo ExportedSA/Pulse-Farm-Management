@@ -81,6 +81,14 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   
+  // Uploaded files are private and never cached here. With a storage bucket, /uploads/<file> answers
+  // with a redirect to a short-lived signed link on the bucket's own address; fetching that from this
+  // worker is blocked by the site's security policy, so pictures and voice notes would not load.
+  // Leave these requests to the browser.
+  if (url.origin === self.location.origin && url.pathname.startsWith('/uploads/')) {
+    return;
+  }
+
   // Handle static files
   if (url.origin === self.location.origin) {
     event.respondWith(
