@@ -387,16 +387,24 @@ export function parseNaitCsv(text: string): { animals: NaitAnimal[]; columns: { 
       if (idAt >= 0) break;
     }
     if (idAt < 0 && visualAt < 0) continue;
-    const birthAt = head.findIndex(c => /birth|\bdob\b/i.test(c));
+    // NAIT's export has "Date Of Birth" and "Registered Birth Date" (not "Birthplace"): the first one filled in
+    const birthAt = head.map((c, i) => (/birth|\bdob\b/i.test(c) && !/place/i.test(c) ? i : -1)).filter(i => i >= 0);
     const sexAt = head.findIndex(c => /^\s*(sex|gender)/i.test(c));
+    // Animals NAIT lists that have died, been slaughtered or exported, or gone missing (and not been found)
+    // aren't at the location any more
+    const goneAt = head.map((c, i) => (/date of death|slaughter|export date|missing date/i.test(c) ? i : -1)).filter(i => i >= 0);
+    const foundAt = head.findIndex(c => /found date/i.test(c));
     const animals: NaitAnimal[] = [];
     for (const r of rows.slice(h + 1)) {
       const id = (idAt >= 0 ? r[idAt] : "") || (visualAt >= 0 ? r[visualAt] : "") || "";
       if (!normaliseTag(id)) continue;
+      const gone = goneAt.filter(i => r[i]);
+      if (gone.length && !(gone.every(i => /missing/i.test(head[i])) && foundAt >= 0 && r[foundAt])) continue;
+      const birth = birthAt.map(i => r[i]).find(Boolean);
       animals.push({
         id,
         visualId: visualAt >= 0 ? r[visualAt] || null : null,
-        birthDate: birthAt >= 0 && r[birthAt] ? toIsoDate(r[birthAt]) : null,
+        birthDate: birth ? toIsoDate(birth) : null,
         sex: sexAt >= 0 ? r[sexAt] || null : null,
       });
     }
