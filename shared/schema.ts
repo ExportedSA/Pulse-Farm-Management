@@ -369,6 +369,7 @@ export const animals = pgTable('animals', {
   // records started). startDate is the day it arrived. See shared/stock.ts.
   arrival: varchar('arrival', { length: 20 }),
   stockClass: varchar('stock_class', { length: 80 }), // set by hand, instead of from age and sex
+  stockClassAsAt: date('stock_class_as_at'), // the day it was set: an age class moves up from there
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   version: integer('version').default(0).notNull(),
@@ -2034,6 +2035,7 @@ export const stockTransactionTypeEnum = pgEnum('stock_transaction_type', [
   'birth',
   'adjustment',
   'rations', // killed on farm for the farm's own use
+  'killed', // sent to the works (on a killsheet)
 ]);
 
 export const stockTransactions = pgTable('stock_transactions', {
@@ -2049,6 +2051,9 @@ export const stockTransactions = pgTable('stock_transactions', {
   // Made from an animal's record: its arrival or departure (see server/domain/stock.ts)
   animalId: uuid('animal_id').references(() => animals.id),
   source: varchar('source', { length: 20 }),
+  // Head on a killsheet that aren't in the register, and calves born that aren't (bobbies)
+  killsheetId: uuid('killsheet_id').references(() => killsheets.id),
+  calvingId: uuid('calving_id').references(() => calvingRecords.id),
   deletedAt: timestamp('deleted_at'),
   type: stockTransactionTypeEnum('type').notNull(),
   date: date('date').notNull(),
@@ -2109,6 +2114,19 @@ export const stockSeasonClasses = pgTable('stock_season_classes', {
   opening: integer('opening').notNull(),
   closing: integer('closing'),
 });
+
+// NAIT's list of animals at the farm's location, uploaded from its export, to check against
+export const naitLocationSnapshots = pgTable('nait_location_snapshots', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull().default(currentFarm),
+  asAt: date('as_at').notNull(),
+  fileName: varchar('file_name', { length: 255 }),
+  head: integer('head').notNull(),
+  animals: jsonb('animals').$type<{ id: string; visualId?: string | null; birthDate?: string | null; sex?: string | null }[]>().default([]).notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+export type NaitLocationSnapshot = typeof naitLocationSnapshots.$inferSelect;
 
 export const insertStockTransactionSchema = createInsertSchema(stockTransactions).omit({
   id: true,

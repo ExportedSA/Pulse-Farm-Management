@@ -209,6 +209,8 @@ router.post("/", requireAuth, async (req, res) => {
 
     const animal = await createAnimal({
       ...data,
+      // A class set by hand is the class from today (an age class moves up from here)
+      ...(data.stockClass ? { stockClassAsAt: new Date().toISOString().slice(0, 10) } : {}),
       farmId,
     });
 
@@ -277,7 +279,10 @@ router.patch("/:id", requireAuth, async (req, res) => {
       }
     }
 
-    const animal = await updateAnimal(id, data, farmId);
+    // A class set by hand is the class from the day it's set (an age class moves up from there)
+    const classChange = data.stockClass !== undefined && (data.stockClass || null) !== (existing.stockClass || null)
+      ? { stockClassAsAt: data.stockClass ? new Date().toISOString().slice(0, 10) : null } : {};
+    const animal = await updateAnimal(id, { ...data, ...classChange } as typeof data, farmId);
     if (!animal) {
       return res.status(404).json({ error: "Animal not found" });
     }
