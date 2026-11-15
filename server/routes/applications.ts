@@ -184,6 +184,7 @@ const detailsInput = z.object({
   baleCount: optNum(100000), baleSize: text(60), baleWeightKg: optNum(5000), weightBasis: basis,
   dmPercent: z.number().min(0).max(100).optional().nullable(), dmBasis: basis,
   weighbridgeTonnes: optNum(1000000), additive: text(160), destination: text(160),
+  feedType: text(80), // what was cut: pasture, lucerne, a crop…
   purpose: text(160), observations: text(2000), followUp: text(2000),
 }).strict();
 const appInput = z.object({

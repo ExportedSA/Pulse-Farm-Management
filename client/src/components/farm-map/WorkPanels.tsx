@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { FARM_MAP_KEY, type MapState } from "@/lib/farm-map";
 import { ACTIVITY_LABELS, JOB_STATUSES, WIND_DIRECTIONS, jobsApi, type Activity, type Job, type JobSummary } from "@/lib/jobs";
+import { FEED_TYPES, workJobProblem } from "@/lib/record-checks";
 import { JOBS_KEY, type JobDraft } from "./JobPanels";
 import type { Overlay } from "./FarmMapCanvas";
 
@@ -26,6 +27,8 @@ const num = (v: string) => (v === "" ? null : Number(v));
 const selectClass = "h-9 w-full rounded-md border bg-background px-2 text-sm";
 const isLiquid = (a: Activity) => a === "effluent" || a === "slurry";
 const isHarvest = (a: Activity) => a === "baleage" || a === "silage";
+// Bales, tonnes and volumes are needed when the work is recorded as done (see lib/record-checks.ts)
+const req = (label: string, needed: boolean) => (needed ? `${label} *` : label);
 
 const METHODS: Record<string, string[]> = {
   effluent: ["Travelling irrigator", "Pods", "K-line", "Fixed sprinklers", "Umbilical", "Tanker", "Other"],
@@ -76,6 +79,7 @@ export function NewWorkForm({ activity, state, draft, setDraft, jobs, onDrawPart
       put("purpose", v.purpose); put("observations", v.observations); put("followUp", v.followUp);
     }
     if (isHarvest(activity)) {
+      put("feedType", v.feedType);
       if (v.dm) { d.dmPercent = Number(v.dm); d.dmBasis = v.dmBasis; }
       put("additive", v.additive); put("destination", v.destination);
     }
@@ -86,6 +90,8 @@ export function NewWorkForm({ activity, state, draft, setDraft, jobs, onDrawPart
     if (draft.lines.length === 0 && !draft.run) return toast.error("Tap the paddocks on the map, or draw the area");
     if (draft.run && !(Number(v.wettedWidth) > 0)) return toast.error("Enter the wetted width of the run");
     if (activity === "mowing" && v.purpose === "feed" && !linkedJobId) return toast.error("Choose the baleage or silage job this cut is for");
+    const problem = workJobProblem(activity, status, v);
+    if (problem) return toast.error(problem);
     setSaving(true);
     try {
       const job = await jobsApi.create({
@@ -153,7 +159,7 @@ export function NewWorkForm({ activity, state, draft, setDraft, jobs, onDrawPart
           <div className="grid grid-cols-2 gap-2">
             <Field label="Method"><select className={selectClass} value={v.method} onChange={set("method")}>{METHODS[activity].map(m => <option key={m}>{m}</option>)}</select></Field>
             <Field label="Machine setting"><Input value={v.machineSetting ?? ""} onChange={set("machineSetting")} placeholder="e.g. Fast, Slow" /></Field>
-            <Field label="Volume (m³)"><Input type="number" inputMode="decimal" value={v.volume ?? ""} onChange={set("volume")} /></Field>
+            <Field label={req("Volume (m³)", status === "completed")}><Input type="number" inputMode="decimal" value={v.volume ?? ""} onChange={set("volume")} /></Field>
             <Field label="Volume from"><select className={selectClass} value={v.volumeSource} onChange={set("volumeSource")}>
               {["flow meter", "pump hours", "tanker loads", "estimate", "other"].map(s => <option key={s}>{s}</option>)}</select></Field>
             {activity === "slurry" && <>
@@ -201,7 +207,7 @@ export function NewWorkForm({ activity, state, draft, setDraft, jobs, onDrawPart
           <Field label="Cut"><Input type="date" value={v.cutOn ?? ""} onChange={set("cutOn")} /></Field>
           <Field label="Baled"><Input type="date" value={v.baledOn ?? ""} onChange={set("baledOn")} /></Field>
           <Field label="Wrapped"><Input type="date" value={v.wrappedOn ?? ""} onChange={set("wrappedOn")} /></Field>
-          <Field label="Bales"><Input type="number" inputMode="numeric" value={v.baleCount ?? ""} onChange={set("baleCount")} /></Field>
+          <Field label={req("Bales", status === "completed")}><Input type="number" inputMode="numeric" value={v.baleCount ?? ""} onChange={set("baleCount")} /></Field>
           <Field label="Bale size" className="col-span-2"><Input value={v.baleSize ?? ""} onChange={set("baleSize")} placeholder="e.g. 1.2 m round" /></Field>
           <Field label="Bale weight (kg)"><Input type="number" inputMode="decimal" value={v.baleWeight ?? ""} onChange={set("baleWeight")} /></Field>
           <Field label="Weight is" className="col-span-2"><select className={selectClass} value={v.weightBasis} onChange={set("weightBasis")}><option value="estimated">estimated</option><option value="measured">measured (weighed)</option></select></Field>
@@ -211,13 +217,15 @@ export function NewWorkForm({ activity, state, draft, setDraft, jobs, onDrawPart
         <section className="grid grid-cols-2 gap-2">
           <Field label="Cut"><Input type="date" value={v.cutOn ?? ""} onChange={set("cutOn")} /></Field>
           <Field label="Harvested"><Input type="date" value={v.harvestedOn ?? ""} onChange={set("harvestedOn")} /></Field>
-          <Field label="Weighbridge (fresh t)" className="col-span-2"><Input type="number" inputMode="decimal" value={v.weighbridge ?? ""} onChange={set("weighbridge")} /></Field>
+          <Field label={req("Weighbridge (fresh t)", status === "completed")} className="col-span-2"><Input type="number" inputMode="decimal" value={v.weighbridge ?? ""} onChange={set("weighbridge")} /></Field>
           <Field label="Or loads"><Input type="number" inputMode="decimal" value={v.loads ?? ""} onChange={set("loads")} /></Field>
           <Field label="× tonnes per load (estimate)"><Input type="number" inputMode="decimal" value={v.loadTonnes ?? ""} onChange={set("loadTonnes")} /></Field>
         </section>
       )}
       {isHarvest(activity) && (
         <section className="grid grid-cols-2 gap-2">
+          <Field label="Crop / feed type *" className="col-span-2"><select className={selectClass} value={v.feedType ?? ""} onChange={set("feedType")}>
+            <option value="">Choose…</option>{FEED_TYPES.map(t => <option key={t}>{t}</option>)}</select></Field>
           <Field label="Dry matter %"><Input type="number" inputMode="decimal" value={v.dm ?? ""} onChange={set("dm")} /></Field>
           <Field label="DM % is"><select className={selectClass} value={v.dmBasis} onChange={set("dmBasis")}><option value="estimated">estimated</option><option value="measured">measured (tested)</option></select></Field>
           <Field label="Additive"><Input value={v.additive ?? ""} onChange={set("additive")} /></Field>
@@ -366,6 +374,7 @@ export function WorkJobView({ job, canEdit, onClose, onOpenJob }: { job: Job; ca
             {w.totals.notes.map((n, i) => <p key={i} className="text-xs text-amber-800">{n}</p>)}
           </section>
           <dl className="grid grid-cols-[7rem_1fr] gap-x-2 text-xs">
+            {row("Crop / feed", d.feedType)}
             {row("Cut", d.cutOn)}{row("Baled", d.baledOn)}{row("Wrapped", d.wrappedOn)}{row("Harvested", d.harvestedOn)}
             {row("Bales", d.baleCount != null ? `${d.baleCount}${d.baleSize ? ` × ${d.baleSize}` : ""}` : null)}
             {row("Bale weight", d.baleWeightKg != null ? <>{d.baleWeightKg} kg {basisTag(d.weightBasis)}</> : null)}

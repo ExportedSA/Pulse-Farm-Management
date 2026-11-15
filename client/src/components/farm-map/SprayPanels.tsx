@@ -13,6 +13,7 @@ import {
   JOB_STATUSES, QTY_UNITS, RESTRICTION_LABELS, SPRAY_UNITS, WIND_DIRECTIONS, activesText, jobsApi,
   type CatalogueProduct, type Job, type JobSummary, type Restriction,
 } from "@/lib/jobs";
+import { sprayJobProblem } from "@/lib/record-checks";
 import { JOBS_KEY, JobView, ProductPicker, type JobDraft } from "./JobPanels";
 import { WorkJobView } from "./WorkPanels";
 import { JobExtras } from "./JobExtras";
@@ -78,6 +79,8 @@ export function NewSprayForm({ state, draft, setDraft, onDrawPart, onCreated, on
     if (draft.lines.length === 0) return toast.error("Tap the paddocks on the map, or draw the area sprayed");
     const rows = mix.filter(r => r.product);
     if (rows.length === 0) return toast.error("Add the products in the tank");
+    const problem = sprayJobProblem(status, rows, target);
+    if (problem) return toast.error(problem);
     if (status === "completed" && !operator.trim() && !contractor.trim()) return toast.error("Enter who applied it");
     setSaving(true);
     try {
@@ -154,7 +157,7 @@ export function NewSprayForm({ state, draft, setDraft, onDrawPart, onCreated, on
 
       <section className="grid grid-cols-2 gap-2">
         <div className="space-y-1"><Label htmlFor="sp-crop">3. Crop or pasture</Label><Input id="sp-crop" value={crop} onChange={e => setCrop(e.target.value)} /></div>
-        <div className="space-y-1"><Label htmlFor="sp-target">Target</Label><Input id="sp-target" value={target} onChange={e => setTarget(e.target.value)} placeholder="Weed, pest or disease" /></div>
+        <div className="space-y-1"><Label htmlFor="sp-target">Target{status === "completed" ? " *" : ""}</Label><Input id="sp-target" value={target} onChange={e => setTarget(e.target.value)} placeholder="Weed, pest or disease" /></div>
         <div className="space-y-1"><Label htmlFor="sp-water">Water rate (L/ha)</Label><Input id="sp-water" type="number" inputMode="decimal" value={waterRate} onChange={e => setWaterRate(e.target.value)} /></div>
         <div className="space-y-1"><Label htmlFor="sp-tank">Tank volume (L)</Label><Input id="sp-tank" type="number" inputMode="decimal" value={tankVolume} onChange={e => setTankVolume(e.target.value)} /></div>
       </section>

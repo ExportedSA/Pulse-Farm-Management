@@ -60,7 +60,7 @@ export async function activityReport(farmId: string, f: ReportFilters) {
       quantity = t.volumeM3 != null ? `${round(t.volumeM3 * share)} m³ of ${t.volumeM3} m³; ${t.depthMm ?? '—'} mm${t.estimate ? ' (estimate)' : ''}` : 'volume unknown';
     } else if (isHarvest(r.activity)) {
       const t = harvestTotals(r.activity, r.details ?? {});
-      what = r.activity === 'baleage' ? `${r.details?.baleCount ?? '—'} bales` : 'silage';
+      what = (r.activity === 'baleage' ? `${r.details?.baleCount ?? '—'} bales` : 'silage') + (r.details?.feedType ? ` (${r.details.feedType})` : '');
       quantity = `${t.freshT ?? '—'} t fresh${t.freshBasis === 'estimated' ? ' (est.)' : ''}; ${t.dmT ?? '—'} t DM${t.dmBasis === 'estimated' ? ' (est.)' : ''}`;
     } else {
       what = r.details?.purpose === 'feed' ? 'mowing for feed' : r.details?.purpose ?? r.activity;

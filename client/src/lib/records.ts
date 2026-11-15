@@ -2,6 +2,7 @@
 // photos) captured without signal are kept on the device and uploaded later.
 import type { AreaGeometry } from "@shared/geo";
 import { MONTHLY_CHECK_ITEMS, SEASON_MONTHS } from "@shared/dairy-diary";
+import { FEED_TYPES } from "./record-checks";
 
 export type RecordType =
   | "spray" | "fertiliser" | "feed_in" | "feed_out" | "baleage" | "effluent" | "monthly_check"
@@ -68,7 +69,10 @@ export const RECORD_TYPES: RecordTypeDef[] = [
     type: "baleage", label: "Baleage / silage", color: "#a87d10", defaultTags: ["Feed"], mapped: true, titleFrom: "kind",
     fields: [
       { key: "kind", label: "Made", kind: "select", options: ["Baleage", "Silage pit", "Hay", "Balage (wrapped)"], required: true },
+      { key: "feedType", label: "Crop / feed type", kind: "select", options: FEED_TYPES, required: true },
+      // Required unless it's a silage pit (see recordProblems)
       { key: "bales", label: "Bales", kind: "number" },
+      { key: "tonnes", label: "Or tonnes (silage pit)", kind: "number", unit: "t" },
       { key: "kgDmPerBale", label: "kg DM per bale", kind: "number" },
       { key: "contractor", label: "Contractor", kind: "text" },
       { key: "wrapType", label: "Wrap", kind: "text" },
@@ -219,7 +223,9 @@ export function detailSummary(record: Pick<FarmRecord, "type" | "details">): str
       break;
     case "baleage":
       if (has(d.kind)) parts.push(d.kind);
+      if (has(d.feedType)) parts.push(d.feedType);
       if (has(d.bales)) parts.push(`${d.bales} bales`);
+      if (has(d.tonnes)) parts.push(`${d.tonnes} t`);
       if (has(d.contractor)) parts.push(d.contractor);
       break;
     case "effluent":
