@@ -15,6 +15,7 @@ import { AreaDrawer } from "./AreaDrawer";
 import { fetchPaddockMap, PADDOCK_MAP_KEY } from "@/lib/paddock-map";
 import { TankMixEditor, ProductPicker, type SprayProduct } from "./RecordInputs";
 import { RestrictionWarning } from "@/components/farm-map/SprayPanels";
+import { recordProblems } from "@/lib/record-checks";
 import {
   RECORD_TYPES,
   MONTHLY_CHECK_ITEMS,
@@ -51,23 +52,11 @@ function initialDetails(type: RecordType): Record<string, any> {
 }
 
 /**
- * Checks beyond required fields: a spray needs at least one product with a rate,
- * fertiliser needs a product and either a rate or the total applied
+ * Checks beyond required fields (see lib/record-checks.ts): a spray needs a rate for every
+ * product, fertiliser a product and a rate or total, baleage its bale count, effluent its depth or volume
  */
 function extraProblems(type: RecordType, d: Record<string, any>): string[] {
-  const has = (v: unknown) => v !== undefined && v !== null && v !== "";
-  if (type === "spray") {
-    const products: SprayProduct[] = d.products ?? [];
-    if (!products.some(p => p.product.trim() && has(p.rate))) return ["at least one product with its rate"];
-    if (products.some(p => p.product.trim() && !has(p.rate))) return ["a rate for every product"];
-  }
-  if (type === "fertiliser") {
-    const problems = [];
-    if (!has(d.product)) problems.push("Product");
-    if (!has(d.rate) && !has(d.amountApplied)) problems.push("Rate or total applied");
-    return problems;
-  }
-  return [];
+  return recordProblems(type, d);
 }
 
 function FieldInput({ field, value, onChange }: { field: FieldDef; value: any; onChange: (v: any) => void }) {

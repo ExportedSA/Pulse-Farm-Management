@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { useToast } from '@/hooks/use-toast';
+import { toast as notice } from 'sonner';
+import { watchForUpdates } from '@/lib/sw-update';
 
 interface PWAContextType {
   isOnline: boolean;
@@ -90,8 +92,15 @@ export function PWAProvider({ children }: PWAProviderProps) {
         }
       });
       
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        window.location.reload();
+      // A new version took over: say so, and let the person reload when it suits them (an
+      // automatic reload could lose unsaved work, such as a paddock being drawn)
+      const stopWatching = watchForUpdates(navigator.serviceWorker, () => {
+        notice('Pulse has been updated', {
+          id: 'pulse-update',
+          description: 'Reload to use the latest version.',
+          duration: Infinity,
+          action: { label: 'Reload', onClick: () => window.location.reload() },
+        });
       });
 
       navigator.serviceWorker.addEventListener('message', (event) => {
@@ -112,37 +121,15 @@ export function PWAProvider({ children }: PWAProviderProps) {
         }
       });
 
+      // sw.js takes over as soon as it's installed, so a worker is rarely left waiting; if one is,
+      // updateServiceWorker() lets it take over and the notice above follows
       navigator.serviceWorker.ready.then((registration) => {
         if (registration.waiting) {
           setWaitingWorker(registration.waiting);
           setIsUpdateAvailable(true);
         }
-
-        registration.addEventListener('updatefound', () => {
-          const newWorker = registration.installing;
-          if (newWorker) {
-            newWorker.addEventListener('statechange', () => {
-              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                setWaitingWorker(newWorker);
-                setIsUpdateAvailable(true);
-                toast({
-                  title: 'Update available',
-                  description: 'A new version of Pulse is ready. Click to update.',
-                  action: (
-                    <button
-                      onClick={updateServiceWorker}
-                      className="text-sm font-medium"
-                      data-testid="button-update-sw"
-                    >
-                      Update
-                    </button>
-                  ),
-                });
-              }
-            });
-          }
-        });
       });
+      return stopWatching;
     }
   }, [toast]);
 
