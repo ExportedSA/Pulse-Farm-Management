@@ -1175,6 +1175,11 @@ export const animalTreatments = pgTable('animal_treatments', {
   lastDoseDate: varchar('last_dose_date', { length: 10 }),
   milkWithdrawalDays: integer('milk_withdrawal_days'),
   milkWithdrawalEndDate: varchar('milk_withdrawal_end_date', { length: 10 }),
+  // To the minute, worked out by the server from the last dose (shared/withholding.ts, migration 0035)
+  lastDoseAt: timestamp('last_dose_at', { withTimezone: true }),
+  milkWithholdingHours: integer('milk_withholding_hours'),
+  milkClearAt: timestamp('milk_clear_at', { withTimezone: true }),
+  returnedToVatAt: timestamp('returned_to_vat_at', { withTimezone: true }),
   retreatmentOf: uuid('retreatment_of').references((): any => animalTreatments.id),
   retreatmentReason: text('retreatment_reason'),
   awaitingTreatment: boolean('awaiting_treatment').default(false),
@@ -2693,7 +2698,10 @@ export const insertAnimalTreatmentSchema = createInsertSchema(animalTreatments, 
   batchId: z.string().uuid().optional().nullable(),
   doseAmount: z.string().optional().nullable(),
   doseUnit: z.string().optional().nullable(),
-}).omit({ id: true, createdAt: true, updatedAt: true, version: true });
+  // Sent by the app as an ISO time; the server works out the rest
+  lastDoseAt: z.coerce.date().optional().nullable(),
+  milkWithholdingHours: z.number().int().min(0).max(24 * 365).optional().nullable(),
+}).omit({ id: true, createdAt: true, updatedAt: true, version: true, milkClearAt: true, returnedToVatAt: true });
 
 export const insertReproductionEventSchema = createInsertSchema(reproductionEvents, {
   animalId: z.string().min(1, "Animal ID required"),

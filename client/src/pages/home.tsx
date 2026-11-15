@@ -26,8 +26,38 @@ import CompletedTreatments from "@/components/CompletedTreatments";
 import Alerts from "@/pages/alerts";
 import { uid, load, save, today, toCSV, parseCSV, download, requestNotificationPermission, showLocalNotification, addDays, daysUntil } from "@/lib/utils";
 import type { RecordItem, Product, User, ReminderSettings, Condition, AnimalTreatment, InsertAnimalTreatment } from "@shared/schema";
+import { clearAfterDosesGiven, daysToHours, formatFarmTime, milkClearAt, parseFarmTime, returnToVatProblem } from "@shared/withholding";
 
 export type TreatmentPhase = 'awaiting' | 'treatment' | 'withholding' | 'monitoring' | 'returnToVat';
+
+// Treatments on the server have UUIDs; ones saved on this device while offline have short local ids
+const isServerId = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+// Fields the server works out itself, or that don't fit its columns, left out of what's sent
+function toServerPatch(patch: Record<string, any>): Record<string, any> {
+  const {
+    id: _id, createdAt: _c, updatedAt: _u, version: _v, deletedAt: _d, farmId: _f,
+    milkClearAt: _m, milkWithdrawalEndDate: _e, returnedToVatAt: _r, lastDoseDate, completedDate, lastDoseAt, ...rest
+  } = patch;
+  const out: Record<string, any> = { ...rest };
+  if (lastDoseAt !== undefined) out.lastDoseAt = lastDoseAt instanceof Date ? lastDoseAt.toISOString() : lastDoseAt;
+  if (typeof lastDoseDate === 'string') out.lastDoseDate = lastDoseDate.slice(0, 10);
+  if (typeof completedDate === 'string') out.completedDate = completedDate.slice(0, 10);
+  return out;
+}
+
+// For a treatment kept on this device only: the milk withholding worked out the same way the server does
+function withLocalWithholding<T extends Record<string, any>>(t: T): T {
+  const clear = milkClearAt(t as any);
+  return { ...t, milkClearAt: clear ? clear.toISOString() : null, milkWithdrawalEndDate: clear ? clear.toISOString().slice(0, 10) : t.milkWithdrawalEndDate };
+}
+
+// What to say after a dose: the next step, or when the milk can go back in the vat
+function doseMessage(t: AnimalTreatment): string {
+  const left = (t.totalDoses || 1) - (t.dosesGiven || 0);
+  if (left > 0) return `Dose recorded. ${left} still to give`;
+  return t.milkClearAt ? `Last dose recorded. Milk can go back in the vat from ${formatFarmTime(new Date(t.milkClearAt))}` : "Last dose recorded";
+}
 
 export const getTreatmentPhase = (treatment: AnimalTreatment): TreatmentPhase => {
   if (treatment.awaitingTreatment) return 'awaiting';
@@ -44,7 +74,14 @@ export const getTreatmentPhase = (treatment: AnimalTreatment): TreatmentPhase =>
   const totalDoses = treatment.totalDoses || 1;
   
   if (dosesGiven < totalDoses) return 'treatment';
-  
+
+  // The server's clear time, to the minute after the last dose (shared/withholding.ts)
+  if (treatment.milkClearAt) {
+    return new Date(treatment.milkClearAt).getTime() > Date.now() ? 'withholding' : 'returnToVat';
+  }
+  // Withholding set but the last dose time not known: still withheld, never guessed clear
+  if ((treatment.milkWithholdingHours ?? 0) > 0) return 'withholding';
+
   const withdrawalEnd = treatment.milkWithdrawalEndDate;
   const withdrawalDays = daysUntil(withdrawalEnd);
   if (withdrawalEnd && withdrawalDays !== undefined && withdrawalDays > 0) {
@@ -112,6 +149,63 @@ export default function Home() {
   const { data: apiUsers } = useQuery<User[]>({
     queryKey: ['/api/users'],
   });
+
+  // Treatments from the server, so every device and person sees the same doses and withholding.
+  // Ones saved on this device while offline (not on the server yet) are kept alongside.
+  const { data: apiTreatments, refetch: refetchTreatments } = useQuery<AnimalTreatment[]>({
+    queryKey: ['/api/treatments'],
+    refetchInterval: 60_000,
+  });
+  useEffect(() => {
+    if (!apiTreatments) return;
+    setAnimalTreatments(local => [...apiTreatments, ...local.filter(t => !isServerId(t.id))]);
+  }, [apiTreatments]);
+  // A treatment as the server now has it
+  const replaceTreatment = (updated: AnimalTreatment) =>
+    setAnimalTreatments(list => list.map(t => (t.id === updated.id ? updated : t)));
+
+  // Change a treatment: on the server when it's there (so every device sees it), else on this
+  // device only (saved while offline). Returns false if the server said no.
+  const changeTreatment = async (id: string, patch: Partial<AnimalTreatment>): Promise<boolean> => {
+    if (!isServerId(id)) {
+      setAnimalTreatments(list => list.map(t => (t.id === id ? withLocalWithholding({ ...t, ...patch } as any) : t)));
+      return true;
+    }
+    try {
+      const res = await fetch(`/api/treatments/${id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify(toServerPatch(patch)),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(body.error || "Couldn't save the change");
+        return false;
+      }
+      replaceTreatment(body);
+      return true;
+    } catch {
+      toast.error("No connection: the change wasn't saved. Try again when you're online.");
+      return false;
+    }
+  };
+
+  // A dose or return to vat, which the server checks (POST /api/treatments/:id/<action>)
+  const treatmentAction = async (id: string, action: "doses" | "return-to-vat", payload: object): Promise<AnimalTreatment | null> => {
+    try {
+      const res = await fetch(`/api/treatments/${id}/${action}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(payload),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(body.error || "That couldn't be saved");
+        return null;
+      }
+      return body;
+    } catch {
+      toast.error("No connection: nothing was saved. Try again when you're online.");
+      return null;
+    }
+  };
 
   // Sync API data to state when loaded (localStorage save happens in useEffect below)
   useEffect(() => {
@@ -475,39 +569,26 @@ export default function Home() {
   const addAnimalTreatment = async (treatment: InsertAnimalTreatment & { id?: string }) => {
     // If updating an existing treatment (has ID), update it instead of creating new
     if (treatment.id && selectedTreatmentForEdit) {
-      const product = treatment.productId 
+      const product = treatment.productId
         ? products.find(p => p.id === treatment.productId)
         : products.find(p => p.name === treatment.treatmentType);
-      const milkWithdrawalDays = product?.milkWithdrawalDays ?? product?.withdrawalDays ?? 0;
-      const totalDoses = treatment.totalDoses || 1;
-      const lastDoseDate = treatment.dateTime?.slice(0, 10);
-      const milkWithdrawalEndDate = milkWithdrawalDays > 0 && lastDoseDate
-        ? addDays(lastDoseDate, milkWithdrawalDays)
-        : undefined;
-
-      setAnimalTreatments((treatments) =>
-        treatments.map((t) => {
-          if (t.id === treatment.id) {
-            return {
-              ...t,
-              ...treatment,
-              awaitingTreatment: false,
-              dosesGiven: 0,
-              totalDoses,
-              productId: product?.id,
-              milkWithdrawalDays,
-              milkWithdrawalEndDate,
-              lastDoseDate,
-            };
-          }
-          return t;
-        })
-      );
-      
+      const plan = { ...treatment, awaitingTreatment: false, productId: product?.id ?? treatment.productId };
+      if (isServerId(treatment.id)) {
+        // On the server already: the server works out the withholding from the doses
+        const { id, ...patch } = plan;
+        if (await changeTreatment(id!, toServerPatch(patch as any))) {
+          setSelectedTreatmentForEdit(null);
+          setActiveTab("treatment-current");
+          toast.success("Treatment plan added - cow moved to treatment list");
+        }
+        return;
+      }
+      // Awaiting on this device only: the treatment itself is saved on the server, as a new one
+      setAnimalTreatments(list => list.filter(t => t.id !== treatment.id));
       setSelectedTreatmentForEdit(null);
       setActiveTab("treatment-current");
-      toast.success("Treatment plan added - cow moved to treatment list");
-      return;
+      const { id: _localId, ...fresh } = plan;
+      treatment = fresh as any;
     }
 
     if (treatment.awaitingTreatment) {
@@ -551,34 +632,43 @@ export default function Home() {
       : products.find(p => p.name === treatment.treatmentType);
     const milkWithdrawalDays = product?.milkWithdrawalDays ?? product?.withdrawalDays ?? 0;
     const totalDoses = treatment.totalDoses || 1;
-    
+    // The first dose, when it was given as the treatment was recorded: sent as a time with its zone
+    // (the form gives farm time), so the server can count the withholding from it
+    const firstDoseGiven = (treatment.dosesGiven ?? 0) >= 1;
+    const body = toServerPatch({
+      ...treatment,
+      productId: product?.id ?? treatment.productId,
+      lastDoseAt: firstDoseGiven ? parseFarmTime(treatment.lastDoseDate || treatment.dateTime)?.toISOString() : undefined,
+    } as any);
+    // Kept on this device until it reaches the server; withholding worked out the same way
+    const deviceCopy = (): AnimalTreatment => withLocalWithholding({
+      ...treatment,
+      id: uid(),
+      status: 'active' as const,
+      condition: treatment.condition || '',
+      treatmentType: treatment.treatmentType || '',
+      treatmentPlan: treatment.treatmentPlan || '',
+      productId: product?.id,
+      dosesGiven: treatment.dosesGiven ?? 0,
+      totalDoses,
+      milkWithholdingHours: daysToHours(milkWithdrawalDays),
+      lastDoseAt: (body as any).lastDoseAt ?? null,
+    } as any);
+
     try {
       // Attempt to post to backend API (Service Worker handles offline queueing)
       const response = await fetch('/api/treatments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(treatment),
+        body: JSON.stringify(body),
       });
-      
+
       if (response.status === 202) {
         // Offline - queued by Service Worker for background sync
         const result = await response.json();
         if (result.queued) {
-          const item: AnimalTreatment = {
-            ...treatment,
-            id: uid(), // Temporary local ID until sync completes
-            status: 'active' as const,
-            condition: treatment.condition || '',
-            treatmentType: treatment.treatmentType || '',
-            treatmentPlan: treatment.treatmentPlan || '',
-            productId: product?.id,
-            dosesGiven: 0,
-            totalDoses,
-            milkWithdrawalDays,
-            milkWithdrawalEndDate: milkWithdrawalDays > 0 ? addDays(treatment.dateTime.slice(0, 10), milkWithdrawalDays) : undefined,
-          };
-          setAnimalTreatments((t) => [item, ...t]);
+          setAnimalTreatments((t) => [deviceCopy(), ...t]);
           toast.success("Treatment queued for sync when online");
           return;
         }
@@ -592,144 +682,103 @@ export default function Home() {
         return;
       }
       
-      // Success (2xx) - use backend response with authoritative ID and lifecycle event
-      const apiTreatment = await response.json();
-      const enrichedTreatment: AnimalTreatment = {
-        ...apiTreatment,
-        status: 'active' as const,
-        dosesGiven: 0,
-        totalDoses,
-        milkWithdrawalDays,
-        milkWithdrawalEndDate: milkWithdrawalDays > 0 ? addDays(apiTreatment.administeredDate || apiTreatment.dateTime?.slice(0, 10) || treatment.dateTime.slice(0, 10), milkWithdrawalDays) : undefined,
-      };
-      setAnimalTreatments((t) => [enrichedTreatment, ...t]);
+      // Success (2xx): the server's copy, with its doses and milk withholding worked out
+      const apiTreatment: AnimalTreatment = await response.json();
+      setAnimalTreatments((t) => [apiTreatment, ...t]);
+      refetchTreatments();
       toast.success("Treatment recorded");
     } catch (error: any) {
       // Network error - fallback to local storage with error toast
       console.error('Network error creating treatment:', error);
-      const item: AnimalTreatment = {
-        ...treatment,
-        id: uid(),
-        status: 'active' as const,
-        condition: treatment.condition || '',
-        treatmentType: treatment.treatmentType || '',
-        treatmentPlan: treatment.treatmentPlan || '',
-        productId: product?.id,
-        dosesGiven: 0,
-        totalDoses,
-        milkWithdrawalDays,
-        milkWithdrawalEndDate: milkWithdrawalDays > 0 ? addDays(treatment.dateTime.slice(0, 10), milkWithdrawalDays) : undefined,
-      };
-      setAnimalTreatments((t) => [item, ...t]);
+      setAnimalTreatments((t) => [deviceCopy(), ...t]);
       toast.error("Network error - treatment saved locally");
     }
   };
 
-  const administerDose = (treatmentId: string) => {
-    let administered = false;
-    setAnimalTreatments((treatments) =>
-      treatments.map((t) => {
-        if (t.id === treatmentId) {
-          const dosesGiven = t.dosesGiven || 0;
-          const totalDoses = t.totalDoses || 1;
-          
-          if (dosesGiven >= totalDoses) {
-            toast.warning("All doses already administered");
-            return t;
-          }
-          
-          administered = true;
-          return {
-            ...t,
-            dosesGiven: dosesGiven + 1,
-            lastDoseDate: new Date().toISOString(),
-          };
-        }
-        return t;
-      })
-    );
-    if (administered) {
-      toast.success("Dose administered");
+  // A dose given now. On the server, which keeps the time of the last dose and moves the milk clear
+  // time to after it; on this device only for a treatment saved while offline.
+  const administerDose = async (treatmentId: string) => {
+    const t = animalTreatments.find(x => x.id === treatmentId);
+    if (!t) return;
+    if ((t.dosesGiven || 0) >= (t.totalDoses || 1)) {
+      toast.warning("All doses already administered");
+      return;
     }
+    const at = new Date().toISOString();
+    if (isServerId(treatmentId)) {
+      const updated = await treatmentAction(treatmentId, "doses", { administeredAt: at });
+      if (!updated) return;
+      replaceTreatment(updated);
+      toast.success(doseMessage(updated));
+      return;
+    }
+    const updated = withLocalWithholding({ ...t, dosesGiven: (t.dosesGiven || 0) + 1, lastDoseAt: at } as any);
+    replaceTreatment(updated);
+    toast.success(doseMessage(updated));
   };
 
-  const retreatCow = (treatmentId: string, reason: string) => {
+  const retreatCow = async (treatmentId: string, reason: string) => {
     const oldTreatment = animalTreatments.find(t => t.id === treatmentId);
     if (!oldTreatment) return;
-
-    setAnimalTreatments((treatments) =>
-      treatments.map((t) => {
-        if (t.id === treatmentId) {
-          return {
-            ...t,
-            status: 'completed' as const,
-            completedDate: new Date().toISOString(),
-            retreatmentReason: reason,
-            clinicalNotes: `${t.clinicalNotes || ''}\n\nRetreated: ${reason}`.trim(),
-          };
-        }
-        return t;
-      })
-    );
-
+    const ok = await changeTreatment(treatmentId, {
+      status: 'completed',
+      completedDate: today(),
+      retreatmentReason: reason,
+      clinicalNotes: `${oldTreatment.clinicalNotes || ''}\n\nRetreated: ${reason}`.trim(),
+    });
+    if (!ok) return;
     setActiveTab("treatment-entry");
     toast.info(`Previous treatment recorded with retreat reason. Enter new treatment for this cow (remember to note this is a retreat in clinical notes).`);
   };
 
-  const returnToVat = (treatmentId: string) => {
-    setAnimalTreatments((treatments) =>
-      treatments.map((t) => {
-        if (t.id === treatmentId) {
-          return {
-            ...t,
-            status: 'completed' as const,
-            completedDate: new Date().toISOString(),
-          };
-        }
-        return t;
-      })
-    );
+  // Back in the vat: only once all doses are given and the milk withholding has ended after the
+  // last dose. The server refuses it earlier; offline, the same check is made here.
+  const returnToVat = async (treatmentId: string) => {
+    const t = animalTreatments.find(x => x.id === treatmentId);
+    if (!t) return;
+    if (isServerId(treatmentId)) {
+      const updated = await treatmentAction(treatmentId, "return-to-vat", {});
+      if (!updated) return;
+      replaceTreatment(updated);
+      toast.success("Cow returned to milking mob");
+      return;
+    }
+    const problem = returnToVatProblem(t as any);
+    if (problem) {
+      toast.error(`Not yet: ${problem}`);
+      return;
+    }
+    replaceTreatment({ ...t, status: 'completed', completedDate: today(), returnedToVatAt: new Date() } as any);
     toast.success("Cow returned to milking mob");
   };
 
-  const returnToHerd = (treatmentId: string, notes: string) => {
+  const returnToHerd = async (treatmentId: string, notes: string) => {
     const trimmedNotes = notes.trim();
     if (!trimmedNotes) {
       toast.error("Observation notes are required");
       return;
     }
-    
-    setAnimalTreatments((treatments) =>
-      treatments.map((t) => {
-        if (t.id === treatmentId) {
-          return {
-            ...t,
-            status: 'completed' as const,
-            completedDate: new Date().toISOString(),
-            returnedToHerd: true,
-            returnToHerdNotes: trimmedNotes,
-            awaitingTreatment: false,
-            treatmentType: '',
-            treatmentPlan: '',
-            productId: undefined,
-            dosesGiven: 0,
-            totalDoses: undefined,
-            lastDoseDate: undefined,
-            milkWithdrawalDays: undefined,
-            milkWithdrawalEndDate: undefined,
-            monitoring: false,
-            monitoringDays: undefined,
-            monitoringStartDate: undefined,
-            monitoringEndDate: undefined,
-          };
-        }
-        return t;
-      })
-    );
-    toast.success("Cow returned to herd");
+    // Offered only for cows awaiting treatment: nothing was given, so there is no withholding
+    const ok = await changeTreatment(treatmentId, {
+      status: 'completed',
+      completedDate: today(),
+      returnedToHerd: true,
+      returnToHerdNotes: trimmedNotes,
+      awaitingTreatment: false,
+      treatmentType: '',
+      treatmentPlan: '',
+      productId: null,
+      dosesGiven: 0,
+      totalDoses: null,
+      monitoring: false,
+      monitoringDays: null,
+      monitoringStartDate: null,
+      monitoringEndDate: null,
+    } as any);
+    if (ok) toast.success("Cow returned to herd");
   };
 
-  const resumeTreatment = (treatmentId: string) => {
+  const resumeTreatment = async (treatmentId: string) => {
     const treatment = animalTreatments.find(t => t.id === treatmentId);
     if (!treatment) {
       toast.error("Treatment not found");
@@ -744,26 +793,10 @@ export default function Home() {
     }
 
     // For monitoring treatments, convert to active treatment
-    setAnimalTreatments((treatments) =>
-      treatments.map((t) => {
-        if (t.id === treatmentId) {
-          if (t.monitoring) {
-            return {
-              ...t,
-              monitoring: false,
-              dosesGiven: 0,
-              clinicalNotes: `${t.clinicalNotes || ''}\n\nConverted from monitoring to active treatment`.trim(),
-            };
-          }
-          return {
-            ...t,
-            awaitingTreatment: false,
-          };
-        }
-        return t;
-      })
-    );
-    
+    const ok = await changeTreatment(treatmentId, treatment.monitoring
+      ? { monitoring: false, dosesGiven: 0, clinicalNotes: `${treatment.clinicalNotes || ''}\n\nConverted from monitoring to active treatment`.trim() }
+      : { awaitingTreatment: false });
+    if (!ok) return;
     if (treatment.monitoring) {
       toast.success("Cow moved from monitoring to active treatment");
     } else {
@@ -771,7 +804,7 @@ export default function Home() {
     }
   };
 
-  const startMonitoring = (treatmentId: string, days: number) => {
+  const startMonitoring = async (treatmentId: string, days: number) => {
     if (!days || days < 1) {
       toast.error("Monitoring days must be at least 1");
       return;
@@ -785,48 +818,41 @@ export default function Home() {
 
     const monitoringStart = treatment.dateTime.slice(0, 10);
     const monitoringEnd = addDays(monitoringStart, days);
-    
-    setAnimalTreatments((treatments) =>
-      treatments.map((t) => {
-        if (t.id === treatmentId) {
-          return {
-            ...t,
-            monitoring: true,
-            monitoringDays: days,
-            monitoringStartDate: monitoringStart,
-            monitoringEndDate: monitoringEnd,
-            awaitingTreatment: false,
-            clinicalNotes: `${t.clinicalNotes || ''}\n\nMonitoring started: ${days} days until ${monitoringEnd}`.trim(),
-          };
-        }
-        return t;
-      })
-    );
-    toast.success(`Cow added to monitoring for ${days} days`);
+    const ok = await changeTreatment(treatmentId, {
+      monitoring: true,
+      monitoringDays: days,
+      monitoringStartDate: monitoringStart,
+      monitoringEndDate: monitoringEnd,
+      awaitingTreatment: false,
+      clinicalNotes: `${treatment.clinicalNotes || ''}\n\nMonitoring started: ${days} days until ${monitoringEnd}`.trim(),
+    });
+    if (ok) toast.success(`Cow added to monitoring for ${days} days`);
   };
 
-  const completeMonitoring = (treatmentId: string) => {
+  // Monitoring ends with the cow back in the milking mob. If any dose was given, its milk withholding
+  // still has to have ended (counted from the last dose given, even if the course was stopped).
+  const completeMonitoring = async (treatmentId: string) => {
     const treatment = animalTreatments.find(t => t.id === treatmentId);
     if (!treatment) {
       toast.error("Treatment not found");
       return;
     }
-
-    setAnimalTreatments((treatments) =>
-      treatments.map((t) => {
-        if (t.id === treatmentId) {
-          return {
-            ...t,
-            status: 'completed' as const,
-            completedDate: new Date().toISOString(),
-            monitoring: false,
-            clinicalNotes: `${t.clinicalNotes || ''}\n\nMonitoring completed: ${t.monitoringDays || 0} days, returned to milking mob`.trim(),
-          };
-        }
-        return t;
-      })
-    );
-    toast.success("Monitoring completed, cow returned to milking mob");
+    const clear = clearAfterDosesGiven(treatment as any);
+    if (clear && clear.getTime() > Date.now()) {
+      toast.error(`Not yet: milk withholding ends ${formatFarmTime(clear)}`);
+      return;
+    }
+    if ((treatment.dosesGiven ?? 0) > 0 && !clear && (treatment.milkWithholdingHours ?? 0) > 0) {
+      toast.error("Not yet: the time of the last dose isn't recorded, so the end of the milk withholding isn't known");
+      return;
+    }
+    const ok = await changeTreatment(treatmentId, {
+      status: 'completed',
+      completedDate: today(),
+      monitoring: false,
+      clinicalNotes: `${treatment.clinicalNotes || ''}\n\nMonitoring completed: ${treatment.monitoringDays || 0} days, returned to milking mob`.trim(),
+    });
+    if (ok) toast.success("Monitoring completed, cow returned to milking mob");
   };
 
   const addCondition = (condition: { name: string; requiresBodyPart?: boolean; bodyPartType?: 'udder' | 'foot' }) => {
