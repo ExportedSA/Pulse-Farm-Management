@@ -38,6 +38,31 @@ export function getStorageType(): 'local' | 's3' {
   return isUsingS3() ? 's3' : 'local';
 }
 
+/**
+ * The web addresses signed links point at (the bucket's own), or none on local disk. `/uploads/<key>`
+ * answers with a redirect there, so the site's security policy has to allow them for audio and for
+ * downloads made by page scripts (see server/config/helmet.ts).
+ */
+export function storageOrigins(): string[] {
+  const name = bucket();
+  if (!name) return [];
+  // The S3 client puts the bucket in the host name, unless told not to or the name has a dot in it
+  const inPath = process.env.S3_FORCE_PATH_STYLE === '1' || name.includes('.');
+  const endpoint = process.env.S3_ENDPOINT;
+  if (endpoint) {
+    let url: URL;
+    try {
+      url = new URL(endpoint);
+    } catch {
+      return [];
+    }
+    return inPath ? [url.origin] : [`${url.protocol}//${name}.${url.host}`, url.origin];
+  }
+  const region = process.env.AWS_REGION;
+  if (!region) return [];
+  return [inPath ? `https://s3.${region}.amazonaws.com` : `https://${name}.s3.${region}.amazonaws.com`];
+}
+
 let client: { key: string; s3: S3Client } | null = null;
 
 function s3(): S3Client {
@@ -48,14 +73,15 @@ function s3(): S3Client {
     throw new Error('S3_BUCKET_NAME is set but storage credentials are missing. Set AWS_ACCESS_KEY_ID, '
       + 'AWS_SECRET_ACCESS_KEY and AWS_REGION (or S3_ENDPOINT for Cloudflare R2).');
   }
-  const key = [endpoint, region, accessKeyId].join('|');
+  const forcePathStyle = process.env.S3_FORCE_PATH_STYLE === '1';
+  const key = [endpoint, region, accessKeyId, forcePathStyle].join('|');
   if (client?.key !== key) {
     client = {
       key,
       s3: new S3Client({
         region,
         endpoint,
-        forcePathStyle: process.env.S3_FORCE_PATH_STYLE === '1',
+        forcePathStyle,
         credentials: { accessKeyId, secretAccessKey },
       }),
     };
