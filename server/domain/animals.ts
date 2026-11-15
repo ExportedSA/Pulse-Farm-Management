@@ -85,6 +85,7 @@ export async function createAnimal(params: {
   arrival?: string | null;
   startDate?: string | null;
   stockClass?: string | null;
+  stockClassAsAt?: string | null;
 }): Promise<Animal> {
   const [animal] = await db.insert(animals).values({
     ...params,

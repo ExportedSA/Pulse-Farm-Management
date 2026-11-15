@@ -3,8 +3,10 @@ import { z } from 'zod';
 import { requireFarm, getFarmId, getUserId } from '../middleware/auth';
 import { uploadAttachments } from '../middleware/upload';
 import { STOCK_MOVEMENT_TYPES } from '@shared/stock';
+import multer from 'multer';
 import {
-  StockError, adjustToCount, closeSeason, createMovement, deleteMovement, recordCount, reopenSeason, seasonReport,
+  StockError, adjustToCount, closeSeason, countCalvings, countKillsheet, createMovement, deleteMovement, deleteNaitSnapshot,
+  markKillsheetAnimalsLeft, naitCheck, recordCount, reopenSeason, rolloverPreview, saveNaitSnapshot, seasonReport,
   setBalanceDate, setOpening, startSeason, stockView, updateMovementAsd,
 } from '../domain/stock';
 import logger from '../config/logger';
@@ -115,11 +117,26 @@ router.put('/seasons/:id/opening', async (req, res) => {
   }
 });
 
-// POST /api/stock-recon/seasons/:id/close - close on the closing numbers and open the next season
+// GET /api/stock-recon/seasons/:id/rollover - what closing the season will move up, to check first
+router.get('/seasons/:id/rollover', async (req, res) => {
+  try {
+    if (!uuid.safeParse(req.params.id).success) return notFound(res);
+    const preview = await rolloverPreview(getFarmId(req)!, req.params.id);
+    if (!preview) return notFound(res);
+    res.json(preview);
+  } catch (error) {
+    handleError(res, error, 'Failed to work out the move-up');
+  }
+});
+
+// POST /api/stock-recon/seasons/:id/close - close on the closing numbers and open the next season,
+// once the move-up has been checked ({ confirm: true }); mobs move up too unless moveMobs is false
 router.post('/seasons/:id/close', async (req, res) => {
   try {
     if (!uuid.safeParse(req.params.id).success) return notFound(res);
-    const result = await closeSeason(getFarmId(req)!, getUserId(req)!, req.params.id);
+    const { confirm, moveMobs } = z.object({ confirm: z.boolean().optional(), moveMobs: z.boolean().optional() }).parse(req.body ?? {});
+    if (confirm !== true) return res.status(400).json({ error: 'Check the move-up to the next season first, then confirm it' });
+    const result = await closeSeason(getFarmId(req)!, getUserId(req)!, req.params.id, { moveMobs });
     if (!result) return notFound(res);
     res.json(result);
   } catch (error) {
@@ -204,6 +221,87 @@ router.post('/counts/:id/adjust', async (req, res) => {
     res.json(result);
   } catch (error) {
     handleError(res, error, 'Failed to adjust the tally');
+  }
+});
+
+const linesSchema = z.array(z.object({ stockClass, quantity: z.number().int().min(1) })).min(1).max(20);
+
+// POST /api/stock-recon/killsheets/:id/count - count head on a killsheet that aren't in the register
+router.post('/killsheets/:id/count', async (req, res) => {
+  try {
+    if (!uuid.safeParse(req.params.id).success) return notFound(res);
+    const { lines } = z.object({ lines: linesSchema }).parse(req.body);
+    const result = await countKillsheet(getFarmId(req)!, getUserId(req)!, req.params.id, lines);
+    if (!result) return notFound(res);
+    res.status(201).json(result);
+  } catch (error) {
+    handleError(res, error, 'Failed to count the killsheet');
+  }
+});
+
+// POST /api/stock-recon/killsheets/:id/mark-left - animals on a killsheet still on the farm: sent to the works
+router.post('/killsheets/:id/mark-left', async (req, res) => {
+  try {
+    if (!uuid.safeParse(req.params.id).success) return notFound(res);
+    const result = await markKillsheetAnimalsLeft(getFarmId(req)!, req.params.id);
+    if (!result) return notFound(res);
+    res.json(result);
+  } catch (error) {
+    handleError(res, error, 'Failed to update the animals on the killsheet');
+  }
+});
+
+// POST /api/stock-recon/calvings/count - calves born that aren't in the register (bobbies): born, then sold or died
+router.post('/calvings/count', async (req, res) => {
+  try {
+    const input = z.object({
+      calvingIds: z.array(uuid).min(1).max(500),
+      outcome: z.enum(['sale', 'death']),
+      leftOn: day.nullish(),
+    }).parse(req.body);
+    res.status(201).json(await countCalvings(getFarmId(req)!, getUserId(req)!, input));
+  } catch (error) {
+    handleError(res, error, 'Failed to count the calves');
+  }
+});
+
+// GET /api/stock-recon/nait?season=<id> - Pulse's numbers against NAIT, from what Pulse has
+router.get('/nait', async (req, res) => {
+  try {
+    const season = typeof req.query.season === 'string' && uuid.safeParse(req.query.season).success ? req.query.season : undefined;
+    res.json(await naitCheck(getFarmId(req)!, season));
+  } catch (error) {
+    handleError(res, error, 'Failed to check against NAIT');
+  }
+});
+
+// NAIT's export is a CSV of every animal at the location: a few hundred kB for a big herd
+const csvUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } }).single('file');
+
+// POST /api/stock-recon/nait/snapshots - multipart: `file` (NAIT's CSV) and `asAt` (the day it was downloaded)
+router.post('/nait/snapshots', (req, res, next) => csvUpload(req, res, (err: any) => {
+  if (err) return res.status(400).json({ error: err.message });
+  next();
+}), async (req, res) => {
+  try {
+    const { asAt } = z.object({ asAt: day }).parse(req.body);
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: "Choose NAIT's CSV file" });
+    const result = await saveNaitSnapshot(getFarmId(req)!, getUserId(req)!, { asAt, fileName: file.originalname, text: file.buffer.toString('utf8') });
+    res.status(201).json(result);
+  } catch (error) {
+    handleError(res, error, "Failed to read NAIT's list");
+  }
+});
+
+// DELETE /api/stock-recon/nait/snapshots/:id - remove an uploaded NAIT list
+router.delete('/nait/snapshots/:id', async (req, res) => {
+  try {
+    if (!uuid.safeParse(req.params.id).success) return notFound(res);
+    if (!(await deleteNaitSnapshot(getFarmId(req)!, req.params.id))) return notFound(res);
+    res.json({ success: true });
+  } catch (error) {
+    handleError(res, error, "Failed to remove NAIT's list");
   }
 });
 

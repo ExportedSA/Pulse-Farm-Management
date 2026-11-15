@@ -36,7 +36,7 @@ const FEMALE_BY_AGE = ["Rising one-year heifers", "Rising two-year heifers", "Mi
 const MALE_BY_AGE = ["Rising one-year steers and bulls", "Rising two-year steers and bulls", "Rising three-year and older steers and bulls"];
 
 export const STOCK_IN_TYPES = ["purchase", "transfer_in", "birth"] as const;
-export const STOCK_OUT_TYPES = ["sale", "transfer_out", "death", "rations"] as const;
+export const STOCK_OUT_TYPES = ["sale", "killed", "transfer_out", "death", "rations"] as const;
 export const STOCK_MOVEMENT_TYPES = [...STOCK_IN_TYPES, ...STOCK_OUT_TYPES, "adjustment"] as const;
 export type StockMovementType = typeof STOCK_MOVEMENT_TYPES[number];
 
@@ -45,6 +45,7 @@ export const STOCK_MOVEMENT_LABELS: Record<StockMovementType, string> = {
   transfer_in: "Arrived (grazing / transfer)",
   birth: "Born",
   sale: "Sold",
+  killed: "Sent to the works",
   transfer_out: "Left (grazing / transfer)",
   death: "Died",
   rations: "Killed for rations",
@@ -54,12 +55,13 @@ export const STOCK_MOVEMENT_LABELS: Record<StockMovementType, string> = {
 // Movements between farms need an Animal Status Declaration
 export const ASD_TYPES: StockMovementType[] = ["purchase", "transfer_in", "sale", "transfer_out"];
 
-// The season report's columns, in order: what came in, then what went out
+// The season report's movement columns, in order: what came in, then what went out
 export const REPORT_COLUMNS: { type: StockMovementType; label: string }[] = [
   { type: "birth", label: "Natural increase" },
   { type: "purchase", label: "Purchases" },
   { type: "transfer_in", label: "Transfers in" },
   { type: "sale", label: "Sales" },
+  { type: "killed", label: "Killed (works)" },
   { type: "death", label: "Deaths" },
   { type: "rations", label: "Killed for rations" },
   { type: "transfer_out", label: "Transfers out" },
@@ -83,13 +85,14 @@ export const ARRIVAL_TYPE: Record<Arrival, StockMovementType> = { born: "birth",
 // How an animal left (animals.removal_fate), and the movement it makes
 export const DEPARTURES = {
   Sold: "sale",
+  "Sent to works": "killed",
   Died: "death",
   "Killed for rations": "rations",
   "Transferred out": "transfer_out",
 } as const satisfies Record<string, StockMovementType>;
 export type Departure = keyof typeof DEPARTURES;
 export const DEPARTURE_STATUS: Record<Departure, "sold" | "deceased"> = {
-  Sold: "sold", Died: "deceased", "Killed for rations": "deceased", "Transferred out": "sold",
+  Sold: "sold", "Sent to works": "sold", Died: "deceased", "Killed for rations": "deceased", "Transferred out": "sold",
 };
 export function departureType(removalFate: string | null | undefined, status: string): StockMovementType {
   if (removalFate && removalFate in DEPARTURES) return DEPARTURES[removalFate as Departure];
@@ -129,20 +132,39 @@ export function nextSeason(endsOn: string, balanceDate = DEFAULT_BALANCE_DATE) {
   return seasonFor(addDays(endsOn, 1), balanceDate);
 }
 
+// The year a day's season ends in
+const seasonYear = (day: string, balanceDate: string) => Number(seasonFor(day, balanceDate).endsOn.slice(0, 4));
+const AGE_LADDERS = [FEMALE_BY_AGE, MALE_BY_AGE];
+/** Whether a class is one of the classes by age, which move up a year at each balance date */
+export const isAgeClass = (stockClass: string) => AGE_LADDERS.some(l => l.includes(stockClass));
+
 /**
  * An animal's class on a day: the class set by hand, or the one for its sex and age. Null when
  * that can't be worked out (no sex, no date of birth, or a day before it was born). A year of
  * birth alone isn't enough, because the year can fall in either of two seasons.
+ *
+ * A class by age set by hand (e.g. rising one-year heifers) is its class in the season of the day
+ * it was set (stockClassAsAt), and it moves up a year at each balance date after that. Before that
+ * day it was a year younger each season, except in a top class (mixed-age cows), whose age then
+ * isn't known. Other classes set by hand (breeding bulls, a farm's own) stay as they are.
  */
 export function classFor(
-  animal: { sex?: string | null; dateOfBirth?: string | null; stockClass?: string | null },
+  animal: { sex?: string | null; dateOfBirth?: string | null; stockClass?: string | null; stockClassAsAt?: string | null },
   day: string,
   balanceDate = DEFAULT_BALANCE_DATE,
 ): string | null {
-  if (animal.stockClass) return animal.stockClass;
+  if (animal.stockClass) {
+    const ladder = AGE_LADDERS.find(l => l.includes(animal.stockClass!));
+    const asAt = animal.stockClassAsAt && /^\d{4}-\d{2}-\d{2}/.test(animal.stockClassAsAt) ? animal.stockClassAsAt.slice(0, 10) : null;
+    if (!ladder || !asAt) return animal.stockClass;
+    const steps = seasonYear(day, balanceDate) - seasonYear(asAt, balanceDate);
+    const i = ladder.indexOf(animal.stockClass);
+    if (steps >= 0) return ladder[Math.min(i + steps, ladder.length - 1)];
+    return i === ladder.length - 1 ? animal.stockClass : ladder[Math.max(i + steps, 0)];
+  }
   const dob = animal.dateOfBirth && /^\d{4}-\d{2}-\d{2}$/.test(animal.dateOfBirth) ? animal.dateOfBirth : null;
   if (!dob || day < dob) return null;
-  const age = Number(seasonFor(day, balanceDate).endsOn.slice(0, 4)) - Number(seasonFor(dob, balanceDate).endsOn.slice(0, 4));
+  const age = seasonYear(day, balanceDate) - seasonYear(dob, balanceDate);
   const byAge = animal.sex === "female" ? FEMALE_BY_AGE : animal.sex === "male" ? MALE_BY_AGE : null;
   return byAge ? byAge[Math.min(age, byAge.length - 1)] : null;
 }
@@ -193,4 +215,221 @@ export function rollForward(closing: Record<string, number>): Record<string, num
     opening[next] = (opening[next] ?? 0) + head;
   }
   return opening;
+}
+
+// ----- Moving up a class at the balance date -----
+
+export interface RolloverPlan {
+  // Head moving from one class to the next
+  moves: { from: string; to: string; head: number }[];
+  // Head staying in their class (mixed-age cows, breeding bulls, a farm's own classes)
+  stay: { stockClass: string; head: number }[];
+  // The next season's opening numbers
+  opening: Record<string, number>;
+}
+
+/** What closing a season does to each class: shown to the farm before it's confirmed */
+export function rolloverPlan(closing: Record<string, number>): RolloverPlan {
+  const moves: RolloverPlan["moves"] = [];
+  const stay: RolloverPlan["stay"] = [];
+  for (const [stockClass, head] of Object.entries(closing)) {
+    if (head <= 0) continue;
+    const to = nextClass(stockClass);
+    if (to === stockClass) stay.push({ stockClass, head });
+    else moves.push({ from: stockClass, to, head });
+  }
+  return { moves, stay, opening: rollForward(closing) };
+}
+
+// ----- The season report -----
+
+export interface ReportRow {
+  stockClass: string;
+  // Last season's closing number, and the head moved into (+) or out of (−) the class at the
+  // balance date. Null in the farm's first season, whose opening numbers were counted.
+  lastClosing: number | null;
+  rollover: number | null;
+  opening: number;
+  byType: Partial<Record<StockMovementType, number>>;
+  closing: number;
+  // lastClosing + rollover = opening, and opening + movements = closing
+  balances: boolean;
+}
+
+const classOrder = (c: string) => (STOCK_CLASSES.includes(c) ? STOCK_CLASSES.indexOf(c) : c === UNCLASSIFIED ? 1e6 : 1e3);
+const byClassOrder = (a: { stockClass: string }, b: { stockClass: string }) =>
+  classOrder(a.stockClass) - classOrder(b.stockClass) || a.stockClass.localeCompare(b.stockClass);
+
+/** A season's numbers per class for the accounts, from last season's closing to this one's */
+export function reportRows(lastClosing: Record<string, number> | null, totals: ClassTotals[]): ReportRow[] {
+  const rows = new Map<string, ReportRow>();
+  const row = (stockClass: string) => {
+    if (!rows.has(stockClass)) {
+      rows.set(stockClass, { stockClass, lastClosing: null, rollover: null, opening: 0, byType: {}, closing: 0, balances: true });
+    }
+    return rows.get(stockClass)!;
+  };
+  for (const t of totals) Object.assign(row(t.stockClass), { opening: t.opening, byType: { ...t.byType }, closing: t.closing });
+  if (lastClosing) {
+    Object.keys(lastClosing).forEach(row);
+    for (const r of Array.from(rows.values())) {
+      r.lastClosing = lastClosing[r.stockClass] ?? 0;
+      r.rollover = r.opening - r.lastClosing;
+    }
+  }
+  for (const r of Array.from(rows.values())) {
+    const moved = Object.entries(r.byType).reduce((sum, [type, q]) => sum + signedQuantity(type, q ?? 0), 0);
+    r.balances = r.opening + moved === r.closing && (r.lastClosing === null || r.lastClosing + (r.rollover ?? 0) === r.opening);
+  }
+  return Array.from(rows.values())
+    .filter(r => r.opening || r.closing || r.lastClosing || Object.values(r.byType).some(Boolean))
+    .sort(byClassOrder);
+}
+
+// ----- Mobs against the tally -----
+
+export interface MobForCheck { id: string; name: string; stockClass: string | null; headCount: number | null; tagged: number; head: number }
+
+export interface MobCheck {
+  // Per class: head in its mobs against the tally (difference = mobs − tally)
+  classes: { stockClass: string; tally: number; mobs: number; difference: number }[];
+  // Mobs with no class, so not counted against any class
+  unclassed: MobForCheck[];
+  // Mobs whose head count isn't the number of animals tagged into them
+  countMismatch: (MobForCheck & { difference: number })[];
+}
+
+export function mobCheck(tally: { stockClass: string; closing: number }[], mobs: MobForCheck[]): MobCheck {
+  const classes = new Map<string, { stockClass: string; tally: number; mobs: number; difference: number }>();
+  const row = (stockClass: string) => {
+    if (!classes.has(stockClass)) classes.set(stockClass, { stockClass, tally: 0, mobs: 0, difference: 0 });
+    return classes.get(stockClass)!;
+  };
+  for (const t of tally) row(t.stockClass).tally += t.closing;
+  for (const m of mobs) if (m.stockClass) row(m.stockClass).mobs += m.head;
+  for (const c of Array.from(classes.values())) c.difference = c.mobs - c.tally;
+  return {
+    classes: Array.from(classes.values()).filter(c => c.tally !== 0 || c.mobs !== 0).sort(byClassOrder),
+    unclassed: mobs.filter(m => !m.stockClass),
+    countMismatch: mobs.filter(m => m.headCount != null && m.tagged > 0 && m.headCount !== m.tagged)
+      .map(m => ({ ...m, difference: (m.headCount ?? 0) - m.tagged })),
+  };
+}
+
+// ----- Killsheets -----
+
+/**
+ * Head on a killsheet not yet counted: those not matched to an animal in the register and not
+ * counted by a movement made from the killsheet. Negative when more were counted than it lists.
+ */
+export function killsheetUncounted(k: { animalCount: number }, inRegister: number, counted: number) {
+  return k.animalCount - inRegister - counted;
+}
+
+// ----- NAIT -----
+
+export interface NaitAnimal { id: string; visualId?: string | null; birthDate?: string | null; sex?: string | null }
+
+/** A tag or NAIT number as compared: letters and digits only, upper case */
+export const normaliseTag = (s: string | null | undefined) => (s ?? "").toUpperCase().replace(/[^0-9A-Z]/g, "");
+
+function csvRows(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  const src = text.replace(/^﻿/, "");
+  // Comma-separated, or tab or semicolon when the first line has more of those
+  const first = src.split(/\r?\n/)[0];
+  const many = (c: string) => first.split(c).length - 1;
+  const sep = many("\t") > many(",") ? "\t" : many(";") > many(",") ? ";" : ",";
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (quoted) {
+      if (ch === '"' && src[i + 1] === '"') { cell += '"'; i++; }
+      else if (ch === '"') quoted = false;
+      else cell += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === sep) { row.push(cell.trim()); cell = ""; }
+    else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && src[i + 1] === "\n") i++;
+      row.push(cell.trim()); cell = "";
+      if (row.some(c => c !== "")) rows.push(row);
+      row = [];
+    } else cell += ch;
+  }
+  row.push(cell.trim());
+  if (row.some(c => c !== "")) rows.push(row);
+  return rows;
+}
+
+const toIsoDate = (s: string) => {
+  const nz = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})/);
+  if (nz) return `${nz[3]}-${nz[2].padStart(2, "0")}-${nz[1].padStart(2, "0")}`;
+  const iso = s.match(/^\d{4}-\d{2}-\d{2}/);
+  return iso ? iso[0] : null;
+};
+
+/**
+ * Reads NAIT's export of the animals at a location (CSV). The columns are found by their
+ * headings: the animal's NAIT number (RFID / EID / lifetime ID), and if there, its visual tag,
+ * birth date and sex.
+ */
+export function parseNaitCsv(text: string): { animals: NaitAnimal[]; columns: { id: string; visualId: string | null } } {
+  const rows = csvRows(text);
+  const idPatterns = [/rfid|\beid\b|electronic/i, /nait.*(no|num|id)|animal.*(no|num|id)|lifetime|\blid\b/i, /tag/i];
+  for (let h = 0; h < Math.min(rows.length, 15); h++) {
+    const head = rows[h];
+    const visualAt = head.findIndex(c => /visual|\bvid\b|management|farm tag/i.test(c));
+    let idAt = -1;
+    for (const p of idPatterns) {
+      idAt = head.findIndex((c, i) => i !== visualAt && p.test(c));
+      if (idAt >= 0) break;
+    }
+    if (idAt < 0 && visualAt < 0) continue;
+    const birthAt = head.findIndex(c => /birth|\bdob\b/i.test(c));
+    const sexAt = head.findIndex(c => /^\s*(sex|gender)/i.test(c));
+    const animals: NaitAnimal[] = [];
+    for (const r of rows.slice(h + 1)) {
+      const id = (idAt >= 0 ? r[idAt] : "") || (visualAt >= 0 ? r[visualAt] : "") || "";
+      if (!normaliseTag(id)) continue;
+      animals.push({
+        id,
+        visualId: visualAt >= 0 ? r[visualAt] || null : null,
+        birthDate: birthAt >= 0 && r[birthAt] ? toIsoDate(r[birthAt]) : null,
+        sex: sexAt >= 0 ? r[sexAt] || null : null,
+      });
+    }
+    return { animals, columns: { id: idAt >= 0 ? head[idAt] : head[visualAt], visualId: visualAt >= 0 ? head[visualAt] : null } };
+  }
+  throw new Error("Couldn't find the animals' NAIT numbers (RFID or tag) in this file. Upload NAIT's list of animals at your location as CSV.");
+}
+
+export interface PulseAnimalForNait { animalId: string; label: string; ids: (string | null | undefined)[]; visualId?: string | null }
+
+/** NAIT's animals at the location against the animals on the farm in Pulse, matched by tag */
+export function compareNait(nait: NaitAnimal[], pulse: PulseAnimalForNait[]) {
+  const byId = new Map<string, PulseAnimalForNait>();
+  const byVisual = new Map<string, PulseAnimalForNait>();
+  for (const a of pulse) {
+    for (const id of a.ids) {
+      const k = normaliseTag(id);
+      if (k) byId.set(k, a);
+    }
+    // Short herd numbers (e.g. 123) would match the wrong animal, so only longer visual tags count
+    const v = normaliseTag(a.visualId);
+    if (v.length >= 6) byVisual.set(v, a);
+  }
+  const lookup = (s: string | null | undefined) => {
+    const k = normaliseTag(s);
+    return k ? byId.get(k) ?? byVisual.get(k) : undefined;
+  };
+  const found = new Set<string>();
+  const onlyInNait: NaitAnimal[] = [];
+  for (const n of nait) {
+    const match = lookup(n.id) ?? lookup(n.visualId);
+    if (match && !found.has(match.animalId)) found.add(match.animalId);
+    else onlyInNait.push(n);
+  }
+  return { matched: found.size, onlyInNait, onlyInPulse: pulse.filter(a => !found.has(a.animalId)) };
 }

@@ -11,9 +11,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import {
-  ASD_TYPES, STOCK_CLASSES, STOCK_MOVEMENT_LABELS, STOCK_MOVEMENT_TYPES, isStockIn, isValidBalanceDate, rollForward,
-  type ClassTotals, type StockMovementType,
+  ASD_TYPES, STOCK_CLASSES, STOCK_MOVEMENT_LABELS, STOCK_MOVEMENT_TYPES, isStockIn, isValidBalanceDate,
+  type ClassTotals, type MobCheck, type StockMovementType,
 } from "@shared/stock";
+import { MobDifferences, NaitCheck, RecordsToCount, RolloverDialog, type ToCount } from "./stock-reconciliation-checks";
 
 // Stock reconciliation by season: opening numbers per class, movements (entered here with their
 // ASD, or made from the animal register), closing numbers, and checks against stocktakes, NAIT,
@@ -37,9 +38,12 @@ interface View {
   };
   classes?: ClassTotals[];
   totals?: { opening: number; closing: number };
+  toCount?: ToCount;
   checks?: {
     register: Record<string, number>;
+    registerAtOpening: Record<string, number>;
     mobs: Mob[];
+    mobCheck: MobCheck;
     stocktakes: { id: string; stockClass: string; count: number; countedAt: string; tally: number; difference: number }[];
     nait: { id: string; count: number; countedAt: string; tally: number } | null;
   };
@@ -500,45 +504,6 @@ function OpeningDialog({ open, onOpenChange, seasonId, classes }: { open: boolea
   );
 }
 
-function CloseDialog({ open, onOpenChange, view }: { open: boolean; onOpenChange: (v: boolean) => void; view: View }) {
-  const refresh = useRefresh();
-  const season = view.season!;
-  const closing = Object.fromEntries((view.classes ?? []).map(c => [c.stockClass, c.closing]));
-  const next = rollForward(closing);
-  const close = useMutation({
-    mutationFn: () => api(`/api/stock-recon/seasons/${season.id}/close`, { method: "POST" }),
-    onSuccess: () => { toast.success("Season closed; the next one is open"); refresh(); onOpenChange(false); },
-    onError: (e: Error) => toast.error(e.message),
-  });
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Close the {seasonName(season)}</DialogTitle>
-          <DialogDescription>
-            It closes on the numbers below, and the next season opens with each class moved up a year. You can reopen it to correct it later.
-          </DialogDescription>
-        </DialogHeader>
-        <table className="w-full text-sm">
-          <thead><tr className="text-left border-b"><th className="py-1">Next season opens with</th><th className="text-right">Head</th></tr></thead>
-          <tbody>
-            {Object.entries(next).map(([c, n]) => <tr key={c} className="border-b"><td className="py-1">{c}</td><td className="text-right tabular-nums">{n}</td></tr>)}
-          </tbody>
-        </table>
-        {view.issues.length > 0 && (
-          <p className="text-sm text-amber-800">{view.issues.length} animal record{view.issues.length === 1 ? "" : "s"} can't be counted properly yet (listed on the page). Fix them first if they belong to this season.</p>
-        )}
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button className="bg-pulse-forest hover:bg-pulse-forest-dark" onClick={() => close.mutate()} disabled={close.isPending}>
-            <Lock className="h-4 w-4 mr-1" />Close season
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 function MobDialog({ mob, onClose }: { mob: Mob | "new" | null; onClose: () => void }) {
   const refresh = useRefresh();
   const { data: pastures = [] } = useQuery<{ id: string; name: string }[]>({ queryKey: ["/api/pastures"], queryFn: () => api("/api/pastures"), enabled: !!mob });
@@ -695,6 +660,13 @@ export default function StockReconciliationPage() {
   const season = data?.season;
   const checks = data?.checks;
   const isCurrent = !!season && !season.closedAt && season.asAt === data?.today;
+  // Opening numbers that differ from the animals in the register on the season's first day
+  const openingDiffs = useMemo(() => {
+    if (!data?.classes || !checks) return [];
+    const names = Array.from(new Set([...data.classes.map(c => c.stockClass), ...Object.keys(checks.registerAtOpening)]));
+    return names.map(c => ({ stockClass: c, opening: data.classes!.find(r => r.stockClass === c)?.opening ?? 0, register: checks.registerAtOpening[c] ?? 0 }))
+      .filter(d => d.opening !== d.register);
+  }, [data, checks]);
   const mobsByClass = useMemo(() => {
     const out: Record<string, number> = {};
     for (const m of checks?.mobs ?? []) if (m.stockClass) out[m.stockClass] = (out[m.stockClass] ?? 0) + m.head;
@@ -839,13 +811,20 @@ export default function StockReconciliationPage() {
           <p className="text-xs text-muted-foreground">
             Register is the animals recorded individually in Pulse; it's lower than the tally when some stock isn't tagged in the register.
           </p>
-
-          {checks!.nait && (
-            <p className={cn("text-sm", checks!.nait.count === checks!.nait.tally ? "text-muted-foreground" : "text-amber-800 dark:text-amber-300")}>
-              NAIT showed {checks!.nait.count} cattle at the farm's location on {day(checks!.nait.countedAt)}; the tally that day was {checks!.nait.tally}
-              {checks!.nait.count === checks!.nait.tally ? ", matching." : `: ${Math.abs(checks!.nait.count - checks!.nait.tally)} ${checks!.nait.count > checks!.nait.tally ? "more in NAIT" : "fewer in NAIT"}. Check for movements not yet recorded in NAIT or here.`}
-            </p>
+          {openingDiffs.length > 0 && Object.keys(checks!.registerAtOpening).length > 0 && (
+            <details className="text-sm">
+              <summary className="cursor-pointer text-muted-foreground">
+                Opening numbers differ from the register on {day(season.startsOn)} in {openingDiffs.length} class{openingDiffs.length === 1 ? "" : "es"}
+              </summary>
+              <ul className="mt-1 pl-5 list-disc">
+                {openingDiffs.map(d => (
+                  <li key={d.stockClass}>{d.stockClass}: opening {d.opening}, register {d.register} ({d.opening > d.register ? `${d.opening - d.register} not in the register` : `${d.register - d.opening} more in the register`})</li>
+                ))}
+              </ul>
+            </details>
           )}
+
+          {data.toCount && <RecordsToCount toCount={data.toCount} closed={!!season.closedAt} />}
 
           {data.issues.length > 0 && (
             <section className="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-1 dark:bg-amber-950/30">
@@ -868,6 +847,7 @@ export default function StockReconciliationPage() {
               <h2 id="mobs-heading" className="font-semibold flex items-center gap-1"><Users className="h-4 w-4" />Mobs</h2>
               <Button variant="outline" size="sm" onClick={() => setMobFor("new")}><Plus className="h-4 w-4 mr-1" />Mob</Button>
             </div>
+            {checks!.mobs.length > 0 && <MobDifferences check={checks!.mobCheck} />}
             {checks!.mobs.length === 0 ? (
               <p className="text-sm text-muted-foreground">No mobs yet. Add the mobs you run, and each class's mobs are checked against its tally.</p>
             ) : (
@@ -885,6 +865,8 @@ export default function StockReconciliationPage() {
             )}
           </section>
 
+          <NaitCheck seasonId={season.id} manual={checks!.nait} />
+
           <section className="space-y-2" aria-labelledby="movements-heading">
             <h2 id="movements-heading" className="font-semibold">Movements this season</h2>
             {(data.movements ?? []).length === 0 ? (
@@ -897,7 +879,7 @@ export default function StockReconciliationPage() {
           </section>
 
           <OpeningDialog open={editingOpening} onOpenChange={setEditingOpening} seasonId={season.id} classes={data.classes ?? []} />
-          {season.canClose && <CloseDialog open={closing} onOpenChange={setClosing} view={data} />}
+          {season.canClose && <RolloverDialog open={closing} onOpenChange={setClosing} seasonId={season.id} seasonLabel={seasonName(season)} />}
         </>
       )}
 
