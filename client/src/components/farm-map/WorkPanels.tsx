@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { FARM_MAP_KEY, type MapState } from "@/lib/farm-map";
 import { ACTIVITY_LABELS, JOB_STATUSES, WIND_DIRECTIONS, jobsApi, type Activity, type Job, type JobSummary } from "@/lib/jobs";
-import { FEED_TYPES, workJobProblem } from "@/lib/record-checks";
+import { FEED_TYPES, workDoneProblem, workJobProblem } from "@/lib/record-checks";
 import { JOBS_KEY, type JobDraft } from "./JobPanels";
 import type { Overlay } from "./FarmMapCanvas";
 
@@ -291,6 +291,35 @@ export function WorkJobView({ job, canEdit, onClose, onOpenJob }: { job: Job; ca
   const d = w.details ?? {};
   const activity = job.activity as Activity;
   const [completedAt, setCompletedAt] = useState(localNow());
+  // What a planned job still needs to be marked done (bales, tonnes, volume, crop), typed in the done box
+  const [more, setMore] = useState<Record<string, string>>({ volumeSource: "flow meter" });
+  const setMoreField = (k: string) => (e: { target: { value: string } }) => setMore(x => ({ ...x, [k]: e.target.value }));
+  const needs = {
+    feedType: isHarvest(activity) && !d.feedType,
+    bales: activity === "baleage" && !(Number(d.baleCount) > 0),
+    tonnes: activity === "silage" && !(Number(d.weighbridgeTonnes) > 0) && !(Number(d.loads) > 0),
+    volume: isLiquid(activity) && !(Number(d.volumeM3) > 0) && !(Number(d.loads) > 0 && Number(d.loadSizeM3) > 0)
+      && !(Number(d.calibration?.depthMm) > 0 && d.calibration?.reference),
+  };
+  const doneDetails = (): Record<string, unknown> | undefined => {
+    const extra: Record<string, unknown> = {};
+    const n = (v?: string) => (v ? Number(v) : undefined);
+    if (needs.feedType && more.feedType) extra.feedType = more.feedType;
+    if (needs.bales && more.baleCount) extra.baleCount = n(more.baleCount);
+    if (needs.tonnes && more.weighbridge) extra.weighbridgeTonnes = n(more.weighbridge);
+    if (needs.tonnes && more.loads) extra.loads = n(more.loads);
+    if (needs.volume && more.volume) { extra.volumeM3 = n(more.volume); extra.volumeSource = more.volumeSource; }
+    if (Object.keys(extra).length === 0) return undefined;
+    // The server keeps which paddocks the job may cover itself, and replaces the rest
+    const { allowedPastureIds: _kept, ...saved } = d as Record<string, unknown>;
+    return { ...saved, ...extra };
+  };
+  const markDone = () => {
+    const details = doneDetails();
+    const problem = workDoneProblem(activity, details ?? d);
+    if (problem) return toast.error(problem);
+    act(() => jobsApi.update(job.id, { status: "completed", completedAt: new Date(completedAt).toISOString(), version: job.version, ...(details ? { details } : {}) }), "Recorded as done");
+  };
   const act = async (fn: () => Promise<unknown>, msg: string) => {
     try {
       const j = await fn();
@@ -405,7 +434,24 @@ export function WorkJobView({ job, canEdit, onClose, onOpenJob }: { job: Job; ca
         <div className="space-y-2 rounded-md border p-2">
           <Label htmlFor="wk-done-at">Finished at</Label>
           <Input id="wk-done-at" type="datetime-local" value={completedAt} max={localNow()} onChange={e => setCompletedAt(e.target.value)} />
-          <Button size="sm" className="bg-pulse-forest hover:bg-pulse-forest-dark" onClick={() => act(() => jobsApi.update(job.id, { status: "completed", completedAt: new Date(completedAt).toISOString(), version: job.version }), "Recorded as done")}><CheckCircle2 className="h-4 w-4 mr-1" />Done</Button>
+          {(needs.feedType || needs.bales || needs.tonnes || needs.volume) && (
+            <div className="grid grid-cols-2 gap-2">
+              <p className="col-span-2 text-xs text-muted-foreground">Still needed to record it as done:</p>
+              {needs.feedType && <Field label="Crop / feed type *" className="col-span-2"><select className={selectClass} value={more.feedType ?? ""} onChange={setMoreField("feedType")}>
+                <option value="">Choose…</option>{FEED_TYPES.map(t => <option key={t}>{t}</option>)}</select></Field>}
+              {needs.bales && <Field label="Bales *"><Input type="number" inputMode="numeric" value={more.baleCount ?? ""} onChange={setMoreField("baleCount")} /></Field>}
+              {needs.tonnes && <>
+                <Field label="Weighbridge (fresh t) *"><Input type="number" inputMode="decimal" value={more.weighbridge ?? ""} onChange={setMoreField("weighbridge")} /></Field>
+                <Field label="Or loads"><Input type="number" inputMode="decimal" value={more.loads ?? ""} onChange={setMoreField("loads")} /></Field>
+              </>}
+              {needs.volume && <>
+                <Field label="Volume (m³) *"><Input type="number" inputMode="decimal" value={more.volume ?? ""} onChange={setMoreField("volume")} /></Field>
+                <Field label="Volume from"><select className={selectClass} value={more.volumeSource} onChange={setMoreField("volumeSource")}>
+                  {["flow meter", "pump hours", "tanker loads", "estimate", "other"].map(s => <option key={s}>{s}</option>)}</select></Field>
+              </>}
+            </div>
+          )}
+          <Button size="sm" className="bg-pulse-forest hover:bg-pulse-forest-dark" onClick={markDone}><CheckCircle2 className="h-4 w-4 mr-1" />Done</Button>
         </div>
       )}
       {editable && (

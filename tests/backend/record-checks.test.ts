@@ -1,7 +1,7 @@
 // What records and farm-map jobs must have before they're saved (client/src/lib/record-checks.ts),
 // and that the server accepts the feed type on baleage and silage jobs.
 import { describe, it, expect } from 'vitest';
-import { recordProblems, sprayJobProblem, workJobProblem, FEED_TYPES } from '../../client/src/lib/record-checks';
+import { recordProblems, sprayDoneProblem, sprayJobProblem, workDoneProblem, workJobProblem, FEED_TYPES } from '../../client/src/lib/record-checks';
 import { RECORD_TYPES } from '../../client/src/lib/records';
 
 describe('quick records', () => {
@@ -55,6 +55,25 @@ describe('farm-map jobs', () => {
 
   it('topping and mowing need nothing extra', () => {
     expect(workJobProblem('topping', 'completed', {})).toBeNull();
+  });
+
+  it('marking a planned job done asks for the same things, judged on its saved details', () => {
+    // Saved details use the server's names (baleCount, weighbridgeTonnes, volumeM3, calibration…)
+    expect(workDoneProblem('baleage', { feedType: 'Pasture', cutOn: '2026-11-01' })).toMatch(/bales/);
+    expect(workDoneProblem('baleage', { feedType: 'Pasture', baleCount: 55, allowedPastureIds: [] })).toBeNull();
+    expect(workDoneProblem('baleage', { baleCount: 55 })).toMatch(/what was cut/); // planned before the crop was asked for
+    expect(workDoneProblem('silage', { feedType: 'Maize', weighbridgeTonnes: 310 })).toBeNull();
+    expect(workDoneProblem('effluent', { method: 'Travelling irrigator' })).toMatch(/volume/);
+    expect(workDoneProblem('effluent', { volumeM3: 90, volumeSource: 'estimate' })).toBeNull();
+    expect(workDoneProblem('effluent', { calibration: { depthMm: 4, reference: 'TEST bucket test' } })).toBeNull();
+    expect(workDoneProblem('slurry', { loads: 5, loadSizeM3: 12 })).toBeNull();
+    expect(workDoneProblem('topping', {})).toBeNull();
+  });
+
+  it('marking a planned spray done needs what it was for and who applied it', () => {
+    expect(sprayDoneProblem({ target: null, operator: 'TEST Sam', contractor: null })).toMatch(/sprayed for/);
+    expect(sprayDoneProblem({ target: 'TEST thistles', operator: '', contractor: null })).toMatch(/who applied/);
+    expect(sprayDoneProblem({ target: 'TEST thistles', operator: null, contractor: 'TEST Spraying Ltd' })).toBeNull();
   });
 
   it('spray jobs need a rate for every product, and when done, what it was for', () => {
