@@ -35,6 +35,7 @@ import { useApplicationOutbox } from "@/lib/application-outbox";
 import { HazardForm, HazardPanel, HazardsSection, hazardOverlays } from "@/components/farm-map/SafetyPanels";
 import { POI_TYPES, poiType, safety } from "@/lib/safety";
 import { ACTIVITY_LABELS, WORK_ACTIVITIES, jobsApi, type Activity, type Job, type JobSummary } from "@/lib/jobs";
+import { isView, lastViewKey, startView, type View } from "@/components/farm-map/startView";
 
 const DRAFT_KEY = "pulse-farm-map-draft";
 const JOB_DRAFT_KEY = "pulse-farm-map-job-draft";
@@ -96,6 +97,10 @@ export default function FarmMapPage() {
   const [measure, setMeasure] = useState<Measurement | null>(null);
   const [focus, setFocus] = useState<Focus | null>(null);
   const [mapView, setMapView] = useState<{ lat: number; lng: number; zoom: number } | null>(null);
+  // Where this person last looked at this farm on this device: the map starts there while the farm
+  // loads, and opens there when nothing has been drawn yet
+  const lastView = useMemo(() => { const v = readJson<View>(lastViewKey(currentFarm?.id)); return isView(v) ? v : null; }, [currentFarm?.id]);
+  useEffect(() => { if (currentFarm?.id && mapView) writeJson(lastViewKey(currentFarm.id), mapView); }, [mapView, currentFarm?.id]);
   const [attribution, setAttribution] = useState("");
   const [saveState, setSaveState] = useState<SaveState>(navigator.onLine ? "saved" : "offline");
   const [search, setSearch] = useState("");
@@ -214,16 +219,15 @@ export default function FarmMapPage() {
     }
   }, [state]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Frame the farm the first time the map loads
+  // Open on the farm the first time the map loads: everything drawn on it (not only paddocks), or
+  // failing that the last place looked at, or a saved view
   const framed = useRef(false);
   useEffect(() => {
     if (!state || framed.current) return;
-    const shapes = state.paddocks.filter(p => p.geometry).map(p => turf.feature(p.geometry!));
-    if (shapes.length > 0) {
-      framed.current = true;
-      setFocus({ rev: Date.now(), bounds: turf.bbox(turf.featureCollection(shapes)) as [number, number, number, number] });
-    }
-  }, [state]);
+    framed.current = true;
+    const start = startView(state, lastView);
+    if (start) setFocus({ rev: Date.now(), ...start });
+  }, [state]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: FARM_MAP_KEY });
   const run = async <T,>(work: () => Promise<T>, success?: string): Promise<T | undefined> => {
@@ -554,7 +558,7 @@ export default function FarmMapPage() {
             pending={pending}
             overlays={overlays}
             editRadius={edit ? edit.history[edit.index].r : null}
-            editRevision={editRevision} focus={focus} showLabels={showLabels}
+            editRevision={editRevision} focus={focus} initialView={lastView} showLabels={showLabels}
             onPick={onPick} onDrawn={onDrawn} onEditChange={onEditChange} onMeasure={setMeasure}
             onSplitLine={onSplitLine} onMove={setMapView} onAttribution={setAttribution}
           />
