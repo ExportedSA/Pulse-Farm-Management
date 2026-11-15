@@ -203,8 +203,9 @@ export const googleTileUrl = (s: { session: string; key: string }) => `https://t
  */
 export const defaultBasemap = () => (BASEMAPS.find(b => b.key === "google")?.available ? "google" : BASEMAPS.find(b => b.key === "linz")?.available ? "linz" : "esri");
 
-// Fence lines carry their type (and wires) so lengths can be totalled by type
-export const FENCE_TYPES = ["Post and wire", "Electric (permanent)", "Electric (temporary)", "Post and rail", "Netting", "Deer fence", "Boundary fence", "Other"];
+// Fence lines carry their type (and wires) so lengths can be totalled by type. The list is shared
+// with fencing records, so it lives with the record rules.
+export { FENCE_TYPES } from "./record-checks";
 
 // ===== Files: KML, KMZ, GeoJSON =====
 

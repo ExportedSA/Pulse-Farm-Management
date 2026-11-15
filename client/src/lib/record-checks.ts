@@ -5,6 +5,16 @@
 const has = (v: unknown) => v !== undefined && v !== null && String(v).trim() !== "";
 const positive = (v: unknown) => has(v) && Number(v) > 0;
 
+// Fence types, for fence lines on the farm map and fencing records
+export const FENCE_TYPES = ["Post and wire", "Electric (permanent)", "Electric (temporary)", "Post and rail", "Netting", "Deer fence", "Boundary fence", "Other"];
+
+// How a medicine was given, for medical (animal treatment) records
+export const TREATMENT_ROUTES = ["Injection (muscle)", "Injection (under the skin)", "Injection (vein)", "Oral / drench", "Intramammary (teat)", "Pour-on", "Bolus", "Topical", "Other"];
+
+// What kind of health and safety event a record is
+export const HS_KINDS = ["Injury", "Near miss", "Hazard spotted", "Incident (no injury)", "Toolbox talk / training", "Safety inspection"];
+export const HS_INJURY = ["No injury", "First aid only", "Medical treatment", "Lost time", "Notifiable to WorkSafe"];
+
 // What was cut, for baleage and silage (records and jobs)
 export const FEED_TYPES = [
   "Pasture", "Lucerne", "Clover", "Cereal (oats, barley, triticale)", "Maize", "Brassica / fodder crop", "Other (say in notes)",

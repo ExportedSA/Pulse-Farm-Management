@@ -195,6 +195,11 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray", preset
   const safeToGraze = type === "spray" && details.withholdingDays !== undefined && details.withholdingDays !== ""
     ? new Date(new Date(occurredAt).getTime() + Number(details.withholdingDays) * 24 * 60 * 60 * 1000)
     : null;
+  // Animal treatments: when milk can go back in the vat, and when the animals can go for meat
+  const afterDays = (days: unknown) => (type === "medical" && days !== undefined && days !== "" && Number(days) >= 0
+    ? new Date(new Date(occurredAt).getTime() + Number(days) * 24 * 60 * 60 * 1000) : null);
+  const milkClear = afterDays(details.milkWithholdingDays);
+  const meatClear = afterDays(details.meatWithholdingDays);
 
   const submit = async () => {
     if (missing.length > 0) {
@@ -336,6 +341,18 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray", preset
           {safeToGraze && (
             <p className="text-sm rounded-md border px-3 py-2 bg-muted">
               Safe to graze from <strong>{format(safeToGraze, "EEEE d MMMM")}</strong>. The area shows on the map as withheld until then.
+            </p>
+          )}
+          {(milkClear || meatClear) && (
+            <p className="text-sm rounded-md border px-3 py-2 bg-muted">
+              {milkClear && <>Milk can go in the vat from <strong>{format(milkClear, "EEEE d MMMM, h:mm a")}</strong>. </>}
+              {meatClear && <>Clear for slaughter from <strong>{format(meatClear, "EEEE d MMMM")}</strong>. </>}
+              Check the product label: some withholding times count milkings, not days.
+            </p>
+          )}
+          {type === "health_safety" && details.injury === "Notifiable to WorkSafe" && (
+            <p className="text-sm rounded-md border border-red-300 bg-red-50 dark:bg-red-950/30 px-3 py-2">
+              Notify WorkSafe as soon as possible, and leave the scene as it is unless you need to help someone or make it safe.
             </p>
           )}
 
