@@ -2,6 +2,7 @@
 import { db } from "./db";
 import { eq, and, desc, gte, lte, or, like, sql, inArray } from "drizzle-orm";
 import { hashPassword } from "./password";
+import { daysToHours, farmDate, milkClearAt, parseFarmTime } from "@shared/withholding";
 import {
   users, products, productBatches, conditions, animals, pastures, animalTreatments,
   treatmentEvents, reproductionEvents, naitRecords, naitQueue, milkWithholdings, pastureMovements, pastureHealthRecords,
@@ -883,8 +884,38 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(animalTreatments.dateTime));
   }
 
+  /**
+   * The milk withholding fields, worked out here from the last dose rather than taken from the device
+   * (shared/withholding.ts). The withholding comes from what was entered, else from the product.
+   */
+  async withholdingFields(data: Partial<InsertAnimalTreatment> & { lastDoseAt?: Date | string | null }, current?: AnimalTreatment) {
+    const merged: any = { ...(current ?? {}), ...data };
+    let hours: number | null =
+      data.milkWithholdingHours ?? (data.milkWithdrawalDays != null ? daysToHours(data.milkWithdrawalDays) : current?.milkWithholdingHours ?? null);
+    if (hours == null && merged.productId) {
+      const product = await this.getProduct(merged.productId);
+      hours = daysToHours(product?.milkWithdrawalDays ?? product?.withdrawalDays ?? null);
+    }
+    // The app used to put the last dose's date and time in last_dose_date (which keeps only a date)
+    const legacyLast = typeof data.lastDoseDate === 'string' && data.lastDoseDate.length > 10 ? data.lastDoseDate : undefined;
+    const lastRaw = data.lastDoseAt !== undefined ? data.lastDoseAt : legacyLast ?? current?.lastDoseAt ?? null;
+    const lastDoseAt = parseFarmTime(lastRaw as any);
+    const clear = milkClearAt({
+      dosesGiven: merged.dosesGiven, totalDoses: merged.totalDoses, lastDoseAt, dateTime: merged.dateTime, milkWithholdingHours: hours,
+    });
+    return {
+      milkWithholdingHours: hours,
+      milkWithdrawalDays: hours != null ? Math.ceil(hours / 24) : merged.milkWithdrawalDays ?? null,
+      lastDoseAt,
+      lastDoseDate: lastDoseAt ? farmDate(lastDoseAt) : (typeof merged.lastDoseDate === 'string' ? merged.lastDoseDate.slice(0, 10) : null),
+      milkClearAt: clear,
+      milkWithdrawalEndDate: clear ? farmDate(clear) : null,
+    };
+  }
+
   async createAnimalTreatment(data: InsertAnimalTreatment): Promise<AnimalTreatment> {
-    const [treatment] = await db.insert(animalTreatments).values(data).returning();
+    data = { ...data, ...(await this.withholdingFields(data)) } as InsertAnimalTreatment;
+    const [treatment] = await db.insert(animalTreatments).values(data as any).returning();
     
     // Create immutable audit event
     await this.createTreatmentEvent(treatment.id, 'created', {
@@ -903,11 +934,13 @@ export class DatabaseStorage implements IStorage {
   async updateAnimalTreatment(id: string, data: Partial<InsertAnimalTreatment>): Promise<AnimalTreatment> {
     const currentTreatment = await this.getAnimalTreatment(id);
     if (!currentTreatment) throw new Error("Treatment not found");
+    const withholding = await this.withholdingFields(data, currentTreatment);
 
     const [treatment] = await db
       .update(animalTreatments)
-      .set({ 
-        ...data, 
+      .set({
+        ...data,
+        ...withholding,
         updatedAt: new Date(),
         version: currentTreatment.version + 1
       })
@@ -1646,7 +1679,9 @@ export class DatabaseStorage implements IStorage {
 
     // 2) Overdue next dose > 12h (+ buffer)
     const needMoreDoses = (treatment.totalDoses || 1) > (treatment.dosesGiven || 0);
-    const hoursSinceLastDose = this.hoursSince(treatment.lastDoseDate);
+    const hoursSinceLastDose = treatment.lastDoseAt
+      ? (Date.now() - new Date(treatment.lastDoseAt).getTime()) / 3_600_000
+      : this.hoursSince(treatment.lastDoseDate);
     const overdueThreshold = 12 + (treatmentAlertBufferHours || 0);
     if (treatment.status === 'active' && needMoreDoses && hoursSinceLastDose !== null && hoursSinceLastDose > overdueThreshold) {
       await this.upsertAlert({
@@ -1662,10 +1697,11 @@ export class DatabaseStorage implements IStorage {
       await this.dismissAlertByTypeForTreatment(treatment.id, 'treatment_overdue');
     }
 
-    // 3) RTV Ready: doses complete and withdrawal ended
+    // 3) RTV Ready: doses complete and the milk withholding ended, to the minute, after the last dose.
+    // Older rows without a clear time are left as withheld rather than guessed.
     const dosesComplete = !needMoreDoses;
-    const withdrawalEnd = this.parseDate(treatment.milkWithdrawalEndDate);
-    if (dosesComplete && withdrawalEnd && withdrawalEnd.getTime() <= Date.now()) {
+    const withdrawalEnd = treatment.milkClearAt ? new Date(treatment.milkClearAt) : null;
+    if (treatment.status === 'active' && !treatment.returnedToVatAt && dosesComplete && withdrawalEnd && withdrawalEnd.getTime() <= Date.now()) {
       await this.upsertAlert({
         type: 'rtv_ready',
         severity: 'low',

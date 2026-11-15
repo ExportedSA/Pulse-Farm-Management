@@ -2,6 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { pool, farmDbContext } from "./db";
+import { farmDate, returnToVatProblem } from "@shared/withholding";
 import passport from "passport";
 import { sanitizeUser, sanitizeUsers } from "./auth-utils";
 import { requireAuth, optionalAuth, getFarmId, getUserId } from "./middleware/auth";
@@ -1405,6 +1406,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.error("Failed to update treatment:", error);
       res.status(500).json({ error: "Failed to update treatment" });
+    }
+  });
+
+  // POST /api/treatments/:id/doses - a dose was given (now, or at the time sent). The server keeps the
+  // time of the last dose and works out when the milk can go back in the vat (shared/withholding.ts).
+  app.post("/api/treatments/:id/doses", async (req, res) => {
+    try {
+      const { administeredAt } = z.object({ administeredAt: z.coerce.date().optional() }).parse(req.body ?? {});
+      const t = await storage.getAnimalTreatment(req.params.id);
+      if (!t) return res.status(404).json({ error: "Treatment not found" });
+      if (t.status !== 'active') return res.status(409).json({ error: "This treatment is finished" });
+      const given = t.dosesGiven ?? 0;
+      const total = Math.max(1, t.totalDoses ?? 1);
+      if (given >= total) return res.status(409).json({ error: "All doses have already been given" });
+      const at = administeredAt ?? new Date();
+      if (at.getTime() > Date.now() + 5 * 60_000) return res.status(400).json({ error: "A dose can't be given in the future" });
+      if (t.lastDoseAt && at.getTime() < new Date(t.lastDoseAt).getTime()) {
+        return res.status(400).json({ error: "That's before the previous dose" });
+      }
+      res.json(await storage.updateAnimalTreatment(t.id, { dosesGiven: given + 1, lastDoseAt: at } as any));
+    } catch (error: any) {
+      if (error.name === 'ZodError') return res.status(400).json({ error: "Enter when the dose was given" });
+      console.error("Failed to record dose:", error);
+      res.status(500).json({ error: "Failed to record the dose" });
+    }
+  });
+
+  // POST /api/treatments/:id/return-to-vat - the cow's milk goes back in the vat. Refused while doses
+  // are still to give, or before the milk withholding has ended after the last dose.
+  app.post("/api/treatments/:id/return-to-vat", async (req, res) => {
+    try {
+      const { at } = z.object({ at: z.coerce.date().optional() }).parse(req.body ?? {});
+      const t = await storage.getAnimalTreatment(req.params.id);
+      if (!t) return res.status(404).json({ error: "Treatment not found" });
+      if (t.status !== 'active' || t.returnedToVatAt) return res.status(409).json({ error: "This cow is already back in the vat" });
+      const when = at ?? new Date();
+      const problem = returnToVatProblem(
+        { dosesGiven: t.dosesGiven, totalDoses: t.totalDoses, lastDoseAt: t.lastDoseAt, dateTime: t.dateTime, milkWithholdingHours: t.milkWithholdingHours },
+        when,
+      );
+      if (problem) return res.status(409).json({ error: `Not yet: ${problem}` });
+      res.json(await storage.updateAnimalTreatment(t.id, { status: 'completed', completedDate: farmDate(when), returnedToVatAt: when } as any));
+    } catch (error: any) {
+      if (error.name === 'ZodError') return res.status(400).json({ error: "Enter when she went back in the vat" });
+      console.error("Failed to return to vat:", error);
+      res.status(500).json({ error: "Failed to return the cow to the vat" });
     }
   });
 
