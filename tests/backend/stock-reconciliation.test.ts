@@ -204,4 +204,26 @@ describe('NAIT', () => {
     const result = compareNait([{ id: '982000000000001', visualId: '12' }], [{ animalId: 'a', label: '12', ids: [], visualId: '12' }]);
     expect(result.matched).toBe(0);
   });
+
+  it('reads NAIT’s own animal export, leaving out animals that have left', () => {
+    // NAIT's export headings (a shortened set, in its order); the animals are made up
+    const head = ['NAIT RFID', 'NAIT Visual Tag Number', 'External Record Id', 'Date Of Birth', 'NAIT Number Of Birthplace',
+      'NAIT Number At Current Location', 'Registered Birth Date', 'Production Type', 'Gender', 'Export Date', 'Missing Date',
+      'Found Date', 'Slaughter', 'Date Of Death'];
+    const row = (cells: Record<string, string>) => head.map(h => `"${cells[h] ?? ''}"`).join(',');
+    const text = [
+      head.map(h => `"${h}"`).join(','),
+      row({ 'NAIT RFID': '982 000000000001', 'NAIT Visual Tag Number': 'TEST-23-1', 'Date Of Birth': '01/08/2023', 'NAIT Number Of Birthplace': '999001', 'Gender': 'F' }),
+      row({ 'NAIT RFID': '982 000000000002', 'NAIT Visual Tag Number': 'TEST-24-2', 'Registered Birth Date': '15/08/2024' }),
+      row({ 'NAIT RFID': '982 000000000003', 'NAIT Visual Tag Number': 'TEST-20-3', 'Date Of Death': '01/03/2026' }),
+      row({ 'NAIT RFID': '982 000000000004', 'NAIT Visual Tag Number': 'TEST-20-4', 'Slaughter': 'Y' }),
+      row({ 'NAIT RFID': '982 000000000005', 'NAIT Visual Tag Number': 'TEST-20-5', 'Missing Date': '01/02/2026' }),
+      row({ 'NAIT RFID': '982 000000000006', 'NAIT Visual Tag Number': 'TEST-20-6', 'Missing Date': '01/02/2026', 'Found Date': '05/02/2026' }),
+    ].join('\r\n');
+    const { animals, columns } = parseNaitCsv(text);
+    expect(columns).toEqual({ id: 'NAIT RFID', visualId: 'NAIT Visual Tag Number' });
+    expect(animals.map(a => a.visualId)).toEqual(['TEST-23-1', 'TEST-24-2', 'TEST-20-6']);
+    expect(animals[0]).toMatchObject({ birthDate: '2023-08-01', sex: 'F' });
+    expect(animals[1].birthDate).toBe('2024-08-15'); // from Registered Birth Date, not the birthplace
+  });
 });
