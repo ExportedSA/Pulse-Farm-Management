@@ -1,5 +1,6 @@
 const CACHE_NAME = 'pulse-farm-v2.0.0';
-const STATIC_CACHE = 'pulse-static-v2.0.0';
+// v2.1.0: drops the page shell older workers kept serving after a deploy
+const STATIC_CACHE = 'pulse-static-v2.1.0';
 const DATA_CACHE = 'pulse-data-v2.0.0';
 const OFFLINE_QUEUE = 'pulse-offline-queue';
 
@@ -89,6 +90,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Pages: always ask the server first, so a deploy shows up on the next load rather than the one
+  // after. The copy kept here is only for when there's no connection.
+  if (url.origin === self.location.origin && request.mode === 'navigate') {
+    event.respondWith(handlePageRequest(request));
+    return;
+  }
+
   // Handle static files
   if (url.origin === self.location.origin) {
     event.respondWith(
@@ -106,6 +114,22 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 });
+
+// Pages: network first. Every page of the app is the same shell (index.html), so the latest one is
+// kept under '/' and shown for any page when offline; failing that, the offline page.
+async function handlePageRequest(request) {
+  try {
+    const response = await fetch(request);
+    if (response.ok && response.type === 'basic') {
+      const cache = await caches.open(STATIC_CACHE);
+      await cache.put('/', response.clone());
+    }
+    return response;
+  } catch (error) {
+    const cache = await caches.open(STATIC_CACHE);
+    return (await cache.match('/')) || (await cache.match('/offline.html')) || Response.error();
+  }
+}
 
 // Handle API requests with offline support
 async function handleApiRequest(request) {

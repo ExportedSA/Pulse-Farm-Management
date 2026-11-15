@@ -61,6 +61,8 @@ interface Props {
   editRadius: number | null;
   editRevision: number;
   focus: Focus | null;
+  // Where to start before the farm's shapes have loaded (the last place looked at on this device)
+  initialView?: { lat: number; lng: number; zoom: number } | null;
   // Names on points of interest and hazards
   showLabels: boolean;
   onPick: (sel: Selection | null) => void;
@@ -114,7 +116,9 @@ export function FarmMapCanvas(props: Props) {
   // Map, once
   useEffect(() => {
     if (!containerRef.current) return;
-    const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true }).setView(DEFAULT_CENTER, 14);
+    const start = props.initialView;
+    const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true })
+      .setView(start ? [start.lat, start.lng] : DEFAULT_CENTER, start ? start.zoom : 14);
     dataRef.current = L.layerGroup().addTo(map);
     map.pm.setGlobalOptions({
       snappable: true,
