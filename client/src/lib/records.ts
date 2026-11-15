@@ -2,7 +2,7 @@
 // photos) captured without signal are kept on the device and uploaded later.
 import type { AreaGeometry } from "@shared/geo";
 import { MONTHLY_CHECK_ITEMS, SEASON_MONTHS } from "@shared/dairy-diary";
-import { FEED_TYPES } from "./record-checks";
+import { FEED_TYPES, FENCE_TYPES, HS_INJURY, HS_KINDS, TREATMENT_ROUTES } from "./record-checks";
 
 export type RecordType =
   | "spray" | "fertiliser" | "feed_in" | "feed_out" | "baleage" | "effluent" | "monthly_check"
@@ -131,11 +131,62 @@ export const RECORD_TYPES: RecordTypeDef[] = [
       { key: "expiryDate", label: "Expires", kind: "date" },
     ],
   },
-  { type: "fencing", label: "Fencing", color: "#7a5c2e", defaultTags: ["Fencing"], mapped: true, fields: [] },
+  {
+    type: "fencing", label: "Fencing", color: "#7a5c2e", defaultTags: ["Fencing"], mapped: true, titleFrom: "work",
+    fields: [
+      { key: "work", label: "Work done", kind: "select", required: true, options: ["New fence", "Repair", "Replaced", "Gate", "Removed", "Inspected"] },
+      { key: "fenceType", label: "Fence type", kind: "select", options: FENCE_TYPES },
+      { key: "lengthM", label: "Length", kind: "number", unit: "m" },
+      { key: "wires", label: "Wires", kind: "number" },
+      { key: "materials", label: "Materials used", kind: "text", placeholder: "e.g. 40 posts, 2 rolls 2.5 mm wire" },
+      { key: "doneBy", label: "Done by", kind: "text", placeholder: "Staff member or contractor" },
+      { key: "hours", label: "Hours", kind: "number" },
+      { key: "cost", label: "Cost", kind: "number", unit: "NZD" },
+    ],
+  },
   { type: "job_done", label: "Job done", color: "#2c6a3f", defaultTags: ["Job done"], mapped: false, fields: [] },
-  { type: "maintenance", label: "Maintenance", color: "#1971c2", defaultTags: ["Maintenance"], mapped: false, fields: [] },
-  { type: "medical", label: "Medical", color: "#b03a48", defaultTags: ["Medical"], mapped: false, fields: [] },
-  { type: "health_safety", label: "Health & safety", color: "#d9480f", defaultTags: ["Health & safety"], mapped: false, fields: [] },
+  {
+    type: "maintenance", label: "Maintenance", color: "#1971c2", defaultTags: ["Maintenance"], mapped: false, titleFrom: "item",
+    fields: [
+      { key: "item", label: "Machine or equipment", kind: "text", required: true, placeholder: "e.g. Tractor, quad bike, milk pump" },
+      { key: "work", label: "Work done", kind: "select", required: true, options: ["Service", "Repair", "Part replaced", "Inspection / WOF", "Other"] },
+      { key: "reading", label: "Hours or km reading", kind: "number" },
+      { key: "parts", label: "Parts used", kind: "text" },
+      { key: "doneBy", label: "Done by", kind: "text", placeholder: "Staff member or mechanic" },
+      { key: "cost", label: "Cost", kind: "number", unit: "NZD" },
+      { key: "nextDue", label: "Next service due", kind: "date" },
+    ],
+  },
+  {
+    // Animal treatments, as the dairy diary asks for them. People's injuries go under health & safety.
+    type: "medical", label: "Medical (animal treatment)", color: "#b03a48", defaultTags: ["Medical"], mapped: false, titleFrom: "product",
+    fields: [
+      { key: "animals", label: "Animals treated", kind: "text", required: true, placeholder: "Tag numbers, or the mob, e.g. Mob 2" },
+      { key: "count", label: "Number of animals", kind: "number" },
+      { key: "reason", label: "Reason / condition", kind: "text", required: true, placeholder: "e.g. mastitis, lameness, drench" },
+      { key: "product", label: "Product", kind: "text", required: true },
+      { key: "dose", label: "Dose", kind: "text", required: true, placeholder: "e.g. 20 mL each" },
+      { key: "route", label: "How given", kind: "select", options: TREATMENT_ROUTES },
+      { key: "milkWithholdingDays", label: "Milk withholding", kind: "number", unit: "days", required: true },
+      { key: "meatWithholdingDays", label: "Meat withholding", kind: "number", unit: "days", required: true },
+      { key: "batch", label: "Batch number", kind: "text" },
+      { key: "expiry", label: "Product expiry", kind: "date" },
+      { key: "vet", label: "Prescribing vet", kind: "text" },
+      { key: "givenBy", label: "Given by", kind: "text", required: true },
+    ],
+  },
+  {
+    type: "health_safety", label: "Health & safety", color: "#d9480f", defaultTags: ["Health & safety"], mapped: false, titleFrom: "kind",
+    fields: [
+      { key: "kind", label: "What happened", kind: "select", required: true, options: HS_KINDS },
+      { key: "people", label: "People involved", kind: "text" },
+      { key: "injury", label: "Injury", kind: "select", options: HS_INJURY },
+      { key: "cause", label: "Cause", kind: "text", placeholder: "e.g. slipped on wet yard, quad rolled" },
+      { key: "actionTaken", label: "Action taken", kind: "text", placeholder: "e.g. first aid, area fenced off" },
+      { key: "followUp", label: "Follow-up needed", kind: "text" },
+      { key: "reportedTo", label: "Reported to", kind: "text", placeholder: "Manager, WorkSafe…" },
+    ],
+  },
   { type: "note", label: "Note", color: "#868e96", defaultTags: [], mapped: false, fields: [] },
 ];
 
@@ -231,6 +282,29 @@ export function detailSummary(record: Pick<FarmRecord, "type" | "details">): str
     case "effluent":
       if (has(d.depthMm)) parts.push(`${d.depthMm} mm`);
       if (has(d.volumeM3)) parts.push(`${d.volumeM3} m³`);
+      break;
+    case "fencing":
+      if (has(d.work)) parts.push(d.work);
+      if (has(d.fenceType)) parts.push(d.fenceType);
+      if (has(d.lengthM)) parts.push(`${d.lengthM} m`);
+      if (has(d.doneBy)) parts.push(`by ${d.doneBy}`);
+      break;
+    case "maintenance":
+      if (has(d.item)) parts.push(d.item);
+      if (has(d.work)) parts.push(d.work.toLowerCase());
+      if (has(d.reading)) parts.push(`at ${d.reading}`);
+      if (has(d.nextDue)) parts.push(`next due ${d.nextDue}`);
+      break;
+    case "medical":
+      if (has(d.product)) parts.push([d.product, d.dose].filter(has).join(" "));
+      if (has(d.animals)) parts.push(has(d.count) ? `${d.animals} (${d.count})` : d.animals);
+      if (has(d.reason)) parts.push(`for ${d.reason}`);
+      if (has(d.milkWithholdingDays)) parts.push(`${d.milkWithholdingDays} day milk withholding`);
+      break;
+    case "health_safety":
+      if (has(d.kind)) parts.push(d.kind);
+      if (has(d.injury) && d.injury !== "No injury") parts.push(d.injury.toLowerCase());
+      if (has(d.people)) parts.push(d.people);
       break;
     case "job_done":
       if (has(d.completedBy)) parts.push(`Done by ${d.completedBy}`);

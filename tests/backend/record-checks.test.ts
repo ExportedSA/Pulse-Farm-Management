@@ -2,7 +2,7 @@
 // and that the server accepts the feed type on baleage and silage jobs.
 import { describe, it, expect } from 'vitest';
 import { recordProblems, sprayDoneProblem, sprayJobProblem, workDoneProblem, workJobProblem, FEED_TYPES } from '../../client/src/lib/record-checks';
-import { RECORD_TYPES } from '../../client/src/lib/records';
+import { RECORD_TYPES, detailSummary } from '../../client/src/lib/records';
 
 describe('quick records', () => {
   it('every record type has a date and time, and notes for anything without a field', () => {
@@ -28,6 +28,32 @@ describe('quick records', () => {
     expect(recordProblems('spray', { products: [{ product: 'TEST Tordon', rate: '' }] })).toEqual(['at least one product with its rate']);
     expect(recordProblems('fertiliser', { product: 'Urea' })).toEqual(['Rate or total applied']);
     expect(recordProblems('fertiliser', { product: 'Urea', rate: 80 })).toEqual([]);
+  });
+});
+
+describe('fencing, maintenance, medical and health & safety records', () => {
+  const required = (type: string) => RECORD_TYPES.find(t => t.type === type)!.fields.filter(f => f.required).map(f => f.key);
+
+  it('each has its own fields, and asks for the essentials', () => {
+    expect(required('fencing')).toEqual(['work']);
+    expect(required('maintenance')).toEqual(['item', 'work']);
+    // What the dairy diary asks for on a treatment
+    expect(required('medical')).toEqual(['animals', 'reason', 'product', 'dose', 'milkWithholdingDays', 'meatWithholdingDays', 'givenBy']);
+    expect(required('health_safety')).toEqual(['kind']);
+    for (const type of ['fencing', 'maintenance', 'medical', 'health_safety']) {
+      expect(RECORD_TYPES.find(t => t.type === type)!.fields.length).toBeGreaterThan(3);
+    }
+  });
+
+  it('shows a short summary in the records list', () => {
+    expect(detailSummary({ type: 'fencing', details: { work: 'Repair', fenceType: 'Electric (permanent)', lengthM: 120, doneBy: 'TEST Sam' } }))
+      .toBe('Repair · Electric (permanent) · 120 m · by TEST Sam');
+    expect(detailSummary({ type: 'maintenance', details: { item: 'TEST tractor', work: 'Service', reading: 4120, nextDue: '2027-05-01' } }))
+      .toBe('TEST tractor · service · at 4120 · next due 2027-05-01');
+    expect(detailSummary({ type: 'medical', details: { product: 'TEST Penicillin', dose: '20 mL', animals: 'Mob 2', count: 3, reason: 'mastitis', milkWithholdingDays: 4 } }))
+      .toBe('TEST Penicillin 20 mL · Mob 2 (3) · for mastitis · 4 day milk withholding');
+    expect(detailSummary({ type: 'health_safety', details: { kind: 'Near miss', injury: 'No injury', people: 'TEST Jo' } }))
+      .toBe('Near miss · TEST Jo');
   });
 });
 
