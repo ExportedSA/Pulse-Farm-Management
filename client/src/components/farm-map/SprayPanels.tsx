@@ -13,7 +13,7 @@ import {
   JOB_STATUSES, QTY_UNITS, RESTRICTION_LABELS, SPRAY_UNITS, WIND_DIRECTIONS, activesText, jobsApi,
   type CatalogueProduct, type Job, type JobSummary, type Restriction,
 } from "@/lib/jobs";
-import { sprayJobProblem } from "@/lib/record-checks";
+import { sprayDoneProblem, sprayJobProblem } from "@/lib/record-checks";
 import { JOBS_KEY, JobView, ProductPicker, type JobDraft } from "./JobPanels";
 import { WorkJobView } from "./WorkPanels";
 import { JobExtras } from "./JobExtras";
@@ -231,7 +231,22 @@ export function SprayJobView({ job, canEdit, onClose }: { job: Job; canEdit: boo
     try { const j = await w(); refresh(j as Job); toast.success(msg); return true; } catch (e: any) { saveMessage(e, toast); return false; }
   };
   const editable = canEdit && job.status !== "cancelled";
-  const usedChanged = sp.mix.some(m => (used[m.id]?.q ?? "") !== (m.actualQuantity != null ? String(m.actualQuantity) : "")) || loads !== (sp.tankLoads != null ? String(sp.tankLoads) : "");
+  // A planned spray needs what it was for and who applied it before it's recorded as done
+  const [doneTarget, setDoneTarget] = useState("");
+  const [doneBy, setDoneBy] = useState("");
+  const needsTarget = !sp.target?.trim();
+  const needsWho = !job.operator?.trim() && !job.contractor?.trim();
+  const markDone = () => {
+    const target = needsTarget ? doneTarget.trim() : sp.target;
+    const operator = needsWho ? doneBy.trim() : job.operator;
+    const problem = sprayDoneProblem({ target, operator, contractor: job.contractor });
+    if (problem) return toast.error(problem);
+    act(() => jobsApi.update(job.id, {
+      status: "completed", completedAt: new Date(completedAt).toISOString(), version: job.version,
+      ...(needsTarget ? { target } : {}), ...(needsWho ? { operator } : {}),
+    }), "Spray recorded as done");
+  };
+  const usedChanged =sp.mix.some(m => (used[m.id]?.q ?? "") !== (m.actualQuantity != null ? String(m.actualQuantity) : "")) || loads !== (sp.tankLoads != null ? String(sp.tankLoads) : "");
   const g = sp.summary.grazing;
   const evidence = { planned: "Planned on the map", manual: "Recorded by hand (not GPS evidence)", gps: "Imported GPS evidence" }[job.evidence];
 
@@ -330,7 +345,9 @@ export function SprayJobView({ job, canEdit, onClose }: { job: Job; canEdit: boo
         <div className="space-y-2 rounded-md border p-2">
           <Label htmlFor="sp-done-at">Finished at</Label>
           <Input id="sp-done-at" type="datetime-local" value={completedAt} max={localNow()} onChange={e => setCompletedAt(e.target.value)} />
-          <Button size="sm" className="bg-pulse-forest hover:bg-pulse-forest-dark" onClick={() => act(() => jobsApi.update(job.id, { status: "completed", completedAt: new Date(completedAt).toISOString(), version: job.version }), "Spray recorded as done")}><CheckCircle2 className="h-4 w-4 mr-1" />Sprayed</Button>
+          {needsTarget && <div className="space-y-1"><Label htmlFor="sp-done-target" className="text-xs">Sprayed for *</Label><Input id="sp-done-target" value={doneTarget} onChange={e => setDoneTarget(e.target.value)} placeholder="Weed, pest or disease" /></div>}
+          {needsWho && <div className="space-y-1"><Label htmlFor="sp-done-by" className="text-xs">Applied by *</Label><Input id="sp-done-by" value={doneBy} onChange={e => setDoneBy(e.target.value)} placeholder="Person or contractor" /></div>}
+          <Button size="sm" className="bg-pulse-forest hover:bg-pulse-forest-dark" onClick={markDone}><CheckCircle2 className="h-4 w-4 mr-1" />Sprayed</Button>
         </div>
       )}
       {editable && (

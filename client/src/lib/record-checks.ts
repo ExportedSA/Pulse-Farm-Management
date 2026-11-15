@@ -50,6 +50,33 @@ export function workJobProblem(activity: string, status: "planned" | "completed"
 }
 
 /**
+ * A saved work job's details in the new-job form's terms, so workJobProblem can judge them
+ */
+export function detailsAsForm(d: Record<string, any>): Record<string, string | undefined> {
+  const s = (x: unknown) => (x == null ? undefined : String(x));
+  return {
+    feedType: s(d.feedType), baleCount: s(d.baleCount), weighbridge: s(d.weighbridgeTonnes), loads: s(d.loads),
+    loadSize: s(d.loadSizeM3), volume: s(d.volumeM3), calDepth: s(d.calibration?.depthMm), calRef: s(d.calibration?.reference),
+  };
+}
+
+/**
+ * What a planned work job still needs before it can be marked done, or null. Same rules as recording
+ * it as done in the first place.
+ */
+export const workDoneProblem = (activity: string, details: Record<string, any>) =>
+  workJobProblem(activity, "completed", detailsAsForm(details));
+
+/**
+ * What a planned spray job still needs before it can be marked done, or null
+ */
+export function sprayDoneProblem(job: { target: string | null | undefined; operator: string | null | undefined; contractor: string | null | undefined }): string | null {
+  if (!has(job.target)) return "Enter what it was sprayed for (the weed, pest or disease)";
+  if (!has(job.operator) && !has(job.contractor)) return "Enter who applied it";
+  return null;
+}
+
+/**
  * A new spray job's problem, or null. Rates come from the label, so they're needed even to plan.
  */
 export function sprayJobProblem(status: "planned" | "completed", rows: { rate: string }[], target: string): string | null {
