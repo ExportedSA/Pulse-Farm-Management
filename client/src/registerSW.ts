@@ -10,21 +10,8 @@ export function registerServiceWorker() {
         await offlineStorage.init();
         console.log('Offline storage initialized');
 
-        // Check for updates
-        registration.addEventListener('updatefound', () => {
-          const newWorker = registration.installing;
-          if (newWorker) {
-            newWorker.addEventListener('statechange', () => {
-              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                // New version available
-                if (confirm('A new version of the app is available. Reload to update?')) {
-                  window.location.reload();
-                }
-              }
-            });
-          }
-        });
-
+        // A new version is announced in the app with a Reload button (see watchForUpdates in
+        // lib/pwa-context.tsx), not with a browser pop-up, which froze the whole page until answered.
       } catch (error) {
         console.log('SW registration failed:', error);
       }
