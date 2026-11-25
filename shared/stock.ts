@@ -249,10 +249,14 @@ export interface ReportRow {
   // balance date. Null in the farm's first season, whose opening numbers were counted.
   lastClosing: number | null;
   rollover: number | null;
+  // The move-up split: head moved up into the class from the class below, and head moved up
+  // out of it into the class above (rollover = rolledIn − rolledOut)
+  rolledIn: number | null;
+  rolledOut: number | null;
   opening: number;
   byType: Partial<Record<StockMovementType, number>>;
   closing: number;
-  // lastClosing + rollover = opening, and opening + movements = closing
+  // lastClosing + rolledIn − rolledOut = opening, and opening + movements = closing
   balances: boolean;
 }
 
@@ -265,21 +269,29 @@ export function reportRows(lastClosing: Record<string, number> | null, totals: C
   const rows = new Map<string, ReportRow>();
   const row = (stockClass: string) => {
     if (!rows.has(stockClass)) {
-      rows.set(stockClass, { stockClass, lastClosing: null, rollover: null, opening: 0, byType: {}, closing: 0, balances: true });
+      rows.set(stockClass, {
+        stockClass, lastClosing: null, rollover: null, rolledIn: null, rolledOut: null, opening: 0, byType: {}, closing: 0, balances: true,
+      });
     }
     return rows.get(stockClass)!;
   };
   for (const t of totals) Object.assign(row(t.stockClass), { opening: t.opening, byType: { ...t.byType }, closing: t.closing });
   if (lastClosing) {
+    // Where last season's closing head went at the balance date
+    const moves = rolloverPlan(lastClosing).moves;
+    for (const m of moves) { row(m.from); row(m.to); }
     Object.keys(lastClosing).forEach(row);
     for (const r of Array.from(rows.values())) {
       r.lastClosing = lastClosing[r.stockClass] ?? 0;
       r.rollover = r.opening - r.lastClosing;
+      r.rolledIn = moves.filter(m => m.to === r.stockClass).reduce((s, m) => s + m.head, 0);
+      r.rolledOut = moves.filter(m => m.from === r.stockClass).reduce((s, m) => s + m.head, 0);
     }
   }
   for (const r of Array.from(rows.values())) {
     const moved = Object.entries(r.byType).reduce((sum, [type, q]) => sum + signedQuantity(type, q ?? 0), 0);
-    r.balances = r.opening + moved === r.closing && (r.lastClosing === null || r.lastClosing + (r.rollover ?? 0) === r.opening);
+    r.balances = r.opening + moved === r.closing
+      && (r.lastClosing === null || r.lastClosing + (r.rolledIn ?? 0) - (r.rolledOut ?? 0) === r.opening);
   }
   return Array.from(rows.values())
     .filter(r => r.opening || r.closing || r.lastClosing || Object.values(r.byType).some(Boolean))
