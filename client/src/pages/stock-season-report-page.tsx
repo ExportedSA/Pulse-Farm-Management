@@ -25,10 +25,10 @@ const sum = (rows: ReportRow[], pick: (r: ReportRow) => number | null | undefine
 
 function toCsv(r: Report, firstSeason: boolean) {
   const quote = (v: string | number | null) => (v == null ? "" : typeof v === "number" ? String(v) : `"${v.replace(/"/g, '""')}"`);
-  const lead = firstSeason ? [] : ["Closing last season", "Rollover"];
+  const lead = firstSeason ? [] : ["Closing last season", "Rollover in", "Rollover out"];
   const header = ["Class", ...lead, "Opening", ...REPORT_COLUMNS.map(c => c.label), "Closing"];
   const line = (name: string, pick: (f: (r: ReportRow) => number | null | undefined) => number) => [
-    name, ...(firstSeason ? [] : [pick(x => x.lastClosing), pick(x => x.rollover)]), pick(x => x.opening),
+    name, ...(firstSeason ? [] : [pick(x => x.lastClosing), pick(x => x.rolledIn), pick(x => x.rolledOut)]), pick(x => x.opening),
     ...REPORT_COLUMNS.map(col => pick(x => x.byType[col.type] ?? 0)), pick(x => x.closing),
   ];
   const rows = r.rows.map(row => line(row.stockClass, f => f(row) ?? 0));
@@ -87,6 +87,7 @@ export default function StockSeasonReportPage() {
         <p className="text-xs mt-1">
           Head of cattle by IRD livestock class. Classes are as at the balance date at the end of the season; at each balance date
           every class moves up a year (rollover), so last season's closing numbers become this season's opening numbers one class up.
+          Rollover in is head that moved up into a class from the class below; rollover out is head that moved up out of it.
         </p>
       </header>
       {(pending.length > 0 || !data.balances) && (
@@ -104,7 +105,8 @@ export default function StockSeasonReportPage() {
             <tr className="text-left border-b align-bottom">
               <th className="py-1 pr-3">Class</th>
               {!firstSeason && <th className="pr-3 text-right">Closing last season</th>}
-              {!firstSeason && <th className="pr-3 text-right">Rollover</th>}
+              {!firstSeason && <th className="pr-3 text-right">Rollover in</th>}
+              {!firstSeason && <th className="pr-3 text-right">Rollover out</th>}
               <th className="pr-3 text-right">Opening</th>
               {REPORT_COLUMNS.map(c => <th key={c.type} className="pr-3 text-right">{c.label}</th>)}
               <th className="text-right">Closing</th>
@@ -115,7 +117,8 @@ export default function StockSeasonReportPage() {
               <tr key={r.stockClass} className="border-b break-inside-avoid">
                 <td className="py-1 pr-3 font-medium">{r.stockClass}{!r.balances && " ⚠"}</td>
                 {!firstSeason && <td className="pr-3 text-right tabular-nums">{r.lastClosing ?? 0}</td>}
-                {!firstSeason && <td className="pr-3 text-right tabular-nums">{signed(r.rollover)}</td>}
+                {!firstSeason && <td className="pr-3 text-right tabular-nums">{signed(r.rolledIn)}</td>}
+                {!firstSeason && <td className="pr-3 text-right tabular-nums">{signed(r.rolledOut == null ? null : -r.rolledOut)}</td>}
                 <td className="pr-3 text-right tabular-nums">{r.opening}</td>
                 {REPORT_COLUMNS.map(col => <td key={col.type} className="pr-3 text-right tabular-nums">{cell(r.byType[col.type])}</td>)}
                 <td className="text-right tabular-nums font-semibold">{r.closing}</td>
@@ -126,7 +129,8 @@ export default function StockSeasonReportPage() {
             <tr className="font-semibold border-t-2">
               <td className="py-1 pr-3">Total</td>
               {!firstSeason && <td className="pr-3 text-right tabular-nums">{sum(data.rows, r => r.lastClosing)}</td>}
-              {!firstSeason && <td className="pr-3 text-right tabular-nums">{signed(sum(data.rows, r => r.rollover))}</td>}
+              {!firstSeason && <td className="pr-3 text-right tabular-nums">{signed(sum(data.rows, r => r.rolledIn))}</td>}
+              {!firstSeason && <td className="pr-3 text-right tabular-nums">{signed(-sum(data.rows, r => r.rolledOut))}</td>}
               <td className="pr-3 text-right tabular-nums">{sum(data.rows, r => r.opening)}</td>
               {REPORT_COLUMNS.map(col => <td key={col.type} className="pr-3 text-right tabular-nums">{cell(sum(data.rows, r => r.byType[col.type]))}</td>)}
               <td className="text-right tabular-nums">{sum(data.rows, r => r.closing)}</td>

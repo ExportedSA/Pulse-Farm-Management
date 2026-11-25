@@ -83,6 +83,25 @@ describe('opening + movements = closing, for every class', () => {
     expect(by['Rising two-year steers and bulls']).toMatchObject({ lastClosing: 0, rollover: 5, opening: 5, closing: 0 });
     // The move-up only moves head between classes
     expect(rows.reduce((s, r) => s + (r.rollover ?? 0), 0)).toBe(0);
+    // Split into moved in and moved out: R2 heifers lose last year's 72 to the cows and gain 152 from R1
+    expect(by['Rising two-year heifers']).toMatchObject({ rolledIn: 152, rolledOut: 72 });
+    expect(by['Rising one-year heifers']).toMatchObject({ rolledIn: 0, rolledOut: 152 });
+    expect(by['Mixed-age cows']).toMatchObject({ rolledIn: 72, rolledOut: 0 });
+    expect(by['Rising two-year steers and bulls']).toMatchObject({ rolledIn: 5, rolledOut: 0 });
+    for (const r of rows) expect((r.rolledIn ?? 0) - (r.rolledOut ?? 0)).toBe(r.rollover);
+    const total = (k: 'rolledIn' | 'rolledOut') => rows.reduce((s, r) => s + (r[k] ?? 0), 0);
+    expect(total('rolledIn')).toBe(total('rolledOut'));
+  });
+
+  it('flags a class whose opening isn’t last season’s closing moved up', () => {
+    // 10 cows closed last season, but this season opened with 12
+    const [row] = reportRows({ 'Mixed-age cows': 10 }, [{ stockClass: 'Mixed-age cows', opening: 12, byType: {}, in: 0, out: 0, closing: 12 }]);
+    expect(row).toMatchObject({ rolledIn: 0, rolledOut: 0, rollover: 2, balances: false });
+  });
+
+  it('has no move-up in the farm’s first season', () => {
+    const [row] = reportRows(null, [{ stockClass: 'Mixed-age cows', opening: 12, byType: {}, in: 0, out: 0, closing: 12 }]);
+    expect(row).toMatchObject({ rolledIn: null, rolledOut: null, balances: true });
   });
 
   it('flags a class that doesn’t balance', () => {
