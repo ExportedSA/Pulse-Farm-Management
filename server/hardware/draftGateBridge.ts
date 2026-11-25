@@ -1,10 +1,10 @@
 import { gatewayPost, gatewaySubscribe } from "./coreGatewayBridge";
 import { DraftDirection } from "../types/hardware";
 
-export async function sendDraftCommand(direction: DraftDirection) {
-  return gatewayPost("/draft", { direction });
+export async function sendDraftCommand(direction: DraftDirection, baseUrl?: string | null) {
+  return gatewayPost("/draft", { direction }, baseUrl);
 }
 
-export function subscribeDraftEvents(cb: (event: any) => void) {
-  return gatewaySubscribe("draft-events", cb);
+export function subscribeDraftEvents(cb: (event: any) => void, baseUrl?: string | null) {
+  return gatewaySubscribe("draft-events", cb, baseUrl);
 }

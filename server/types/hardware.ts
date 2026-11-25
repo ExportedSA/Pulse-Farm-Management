@@ -15,3 +15,10 @@ export type EidEvent = {
   eid: string;
   timestamp: string;
 };
+
+/** The farm's gateway a request works with (its hardware_gateways row) */
+export type FarmGateway = {
+  id: string;
+  baseUrl: string | null; // null = the server's PULSE_GATEWAY_URL
+  simulated: boolean;
+};

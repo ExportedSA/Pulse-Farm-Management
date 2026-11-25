@@ -1,6 +1,6 @@
-// Tables for running Pulse as a service: invites, password resets and (later) billing.
+// Tables for running Pulse as a service: invites, password resets, billing and shed hardware.
 // Kept apart from schema.ts; the SQL is in scripts/migrations (0030 onwards).
-import { pgTable, uuid, varchar, timestamp, integer } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, timestamp, integer, boolean, text, jsonb } from 'drizzle-orm/pg-core';
 import { farms, users, userRoleEnum } from './schema';
 
 // An emailed invite to join a farm with a role. Only a hash of the link's secret is kept.
@@ -49,3 +49,30 @@ export const farmBilling = pgTable('farm_billing', {
 });
 
 export type FarmBilling = typeof farmBilling.$inferSelect;
+
+// A farm's shed hardware (migration 0038). Added by whoever runs the service, never from the app:
+// base_url is an address the server calls. NULL base_url = the server's PULSE_GATEWAY_URL.
+export const hardwareGateways = pgTable('hardware_gateways', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  name: varchar('name', { length: 100 }).default('Shed').notNull(),
+  baseUrl: text('base_url'),
+  simulated: boolean('simulated').default(false).notNull(),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+export type HardwareGateway = typeof hardwareGateways.$inferSelect;
+
+// Every feed or gate command sent to a farm's shed hardware, and whether it worked (migration 0038)
+export const hardwareCommands = pgTable('hardware_commands', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  gatewayId: uuid('gateway_id').references(() => hardwareGateways.id).notNull(),
+  userId: uuid('user_id').references(() => users.id),
+  command: varchar('command', { length: 30 }).notNull(),
+  params: jsonb('params').default({}).notNull(),
+  ok: boolean('ok').notNull(),
+  error: text('error'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});

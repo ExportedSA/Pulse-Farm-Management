@@ -17,8 +17,16 @@ export type DemoModeInfo = {
 
 async function handleJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
+    // The server explains a refusal in { error } (e.g. no shed hardware for this farm, or not allowed)
     const txt = await res.text();
-    throw new Error(`HTTP ${res.status}: ${txt}`);
+    let message = `HTTP ${res.status}: ${txt}`;
+    try {
+      const body = JSON.parse(txt);
+      if (typeof body?.error === "string") message = body.error;
+    } catch {
+      // not JSON: keep the raw text
+    }
+    throw new Error(message);
   }
   return res.json() as Promise<T>;
 }
