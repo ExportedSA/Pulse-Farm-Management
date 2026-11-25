@@ -1,14 +1,20 @@
 import WebSocket from "ws";
 import { log } from "../logger";
 
-const GATEWAY_URL = process.env.PULSE_GATEWAY_URL || "http://localhost:8000";
-const WS_URL = GATEWAY_URL.replace("http", "ws") + "/ws";
+// The server's own gateway. A farm reaches it only through its hardware_gateways row (base_url NULL);
+// a row with a base_url uses that gateway instead.
+const DEFAULT_GATEWAY_URL = process.env.PULSE_GATEWAY_URL || "http://localhost:8000";
 
 const isBackendOnly = process.env.BACKEND_ONLY === "1" || process.env.BACKEND_ONLY === "true";
 const isSimMode = process.env.PULSE_SIM_MODE === "1" || process.env.PULSE_SIM_MODE === "true";
 
-export async function gatewayGet<T = any>(path: string): Promise<T> {
-  const res = await fetch(GATEWAY_URL + path);
+/** The gateway address for a farm's row: its own base_url, or the server's gateway */
+export function gatewayUrl(baseUrl?: string | null): string {
+  return (baseUrl || DEFAULT_GATEWAY_URL).replace(/\/+$/, "");
+}
+
+export async function gatewayGet<T = any>(path: string, baseUrl?: string | null): Promise<T> {
+  const res = await fetch(gatewayUrl(baseUrl) + path);
   if (!res.ok) {
     throw new Error(`GET ${path} failed: ${res.status} ${res.statusText}`);
   }
@@ -17,9 +23,10 @@ export async function gatewayGet<T = any>(path: string): Promise<T> {
 
 export async function gatewayPost<T = any>(
   path: string,
-  body?: any
+  body?: any,
+  baseUrl?: string | null
 ): Promise<T> {
-  const res = await fetch(GATEWAY_URL + path, {
+  const res = await fetch(gatewayUrl(baseUrl) + path, {
     method: "POST",
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
@@ -32,7 +39,8 @@ export async function gatewayPost<T = any>(
 
 export function gatewaySubscribe(
   expectedType: string,
-  onMessage: (data: any) => void
+  onMessage: (data: any) => void,
+  baseUrl?: string | null
 ): WebSocket {
   // In backend-only or simulation mode, do not attempt to connect to the gateway.
   if (isBackendOnly || isSimMode) {
@@ -44,10 +52,11 @@ export function gatewaySubscribe(
     return dummy as WebSocket;
   }
 
-  const ws = new WebSocket(WS_URL);
+  const wsUrl = gatewayUrl(baseUrl).replace(/^http/, "ws") + "/ws";
+  const ws = new WebSocket(wsUrl);
 
   ws.on("open", () => {
-    log(`[gateway-ws] connected ${WS_URL} (type=${expectedType})`);
+    log(`[gateway-ws] connected ${wsUrl} (type=${expectedType})`);
   });
 
   ws.on("error", (err) => {

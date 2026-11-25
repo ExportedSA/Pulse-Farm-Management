@@ -1,0 +1,117 @@
+code,name,category,body_part
+CD,Calving Disorder - Unspecified,Calving Disorder,
+CS,Caesarean,Calving Disorder,
+CT,Calving Trouble,Calving Disorder,
+CP,Calving Paralysis,Calving Disorder,
+PU,Prolapsed Uterus,Calving Disorder,
+RM,Retained Membranes,Calving Disorder,
+RV,Rota Virus,Infectious Diseases,
+SA,Salmonella,Infectious Diseases,
+TB,Tuberculosis,Infectious Diseases,
+TR,TB Reactor,Infectious Diseases,
+YS,Yersinia,Infectious Diseases,
+CC,Coccidiosis,Infectious Diseases,
+BR,Brucellosis,Infectious Diseases,
+LI,Listeria,Infectious Diseases,
+LS,Leptospirosis,Infectious Diseases,
+LM,Other Lameness,Lameness,foot
+LN,Laminitis,Lameness,foot
+LC,Interdigital Crack,Lameness,foot
+OH,Overgrown Hoof,Lameness,foot
+BS,Sole Bruise,Lameness,foot
+DD,Digital Dermatitis,Lameness,foot
+FR,Between Claw/Footrot,Lameness,foot
+FU,Foot Ulcers,Lameness,foot
+WC,Hoof Crack,Lameness,foot
+WL,White Line Disease,Lameness,foot
+SU,Sole Penetration,Lameness,foot
+TC,Trace Element Deficiency - Unspecified,Metabolic Disorder,
+SD,Selenium Deficiency,Metabolic Disorder,
+CO,Cobalt/B12 Deficiency,Metabolic Disorder,
+DC,Downer Cow,Metabolic Disorder,
+CU,Copper Deficiency,Metabolic Disorder,
+PT,Pregnancy Toxaemia,Metabolic Disorder,
+MS,Magnesium/Grass Staggers,Metabolic Disorder,
+KT,Ketosis/Acidosis,Metabolic Disorder,
+ME,Metabolic Disorder - Unspecified,Metabolic Disorder,
+MF,Milk Fever,Metabolic Disorder,
+LU,Lungworm,Other Ailments,
+LV,Liver Disorder - Unspecified,Other Ailments,
+LA,Laceration/Cuts,Other Ailments,
+EY,Eye Injury,Other Ailments,
+LF,Liver Fluke,Other Ailments,
+LJ,Lumpy Jaw,Other Ailments,
+MO,Mouth Disorder - Unspecified,Other Ailments,
+ND,Nervous Disorder (Non Metabolic),Other Ailments,
+NI,Navel Infection,Other Ailments,
+OC,Other Condition - Unspecified,Other Ailments,
+OE,Oesophageal Disorder - Unspecified,Other Ailments,
+PR,Preventative,Other Ailments,
+PM,PEM (Polioencephalomalacia),Other Ailments,
+PN,Pneumonia Or Respiratory Illness,Other Ailments,
+OS,Ostertagia,Other Ailments,
+PA,Parasite - Unspecified,Other Ailments,
+PE,Pink Eye,Other Ailments,
+CV,Cardiovascular Disorder - Unspecified,Other Ailments,
+CE,Cancer Eye,Other Ailments,
+CN,Cancer - Unspecified,Other Ailments,
+BV,BVD (Bovine Viral Diarrhoea),Other Ailments,
+CA,CAE (Caprine Arthritis Encephalitis),Other Ailments,
+AC,Abscess - Unspecified,Other Ailments,
+AM,Abomasal Disorder - Unspecified,Other Ailments,
+AR,Arthritis,Other Ailments,
+BK,Blackleg,Other Ailments,
+BL,Bloat,Other Ailments,
+CR,Catarrh,Other Ailments,
+DI,Diarrhoea/Scours,Other Ailments,
+DO,Dry Off,Other Ailments,
+EB,EBL (Enzootic Bovine Leukosis),Other Ailments,
+FV,Fever,Other Ailments,
+GR,Grain Overload/Acidosis,Other Ailments,
+HE,Hernia,Other Ailments,
+IB,IBR (Infectious Bovine Rhinotracheitis),Other Ailments,
+IC,Induction Treatment,Other Ailments,
+IG,Indigestion,Other Ailments,
+IL,Intestinal Disorder - Unspecified,Other Ailments,
+IT,Severe Weight Loss/Ill Thrift,Other Ailments,
+JD,Johnes Disease,Other Ailments,
+SI,Sick - Undiagnosed,Other Ailments,
+TH,Theileria,Other Ailments,
+PY,Pulpy Kidney,Other Ailments,
+RD,Respiratory Disorder - Unspecified,Other Ailments,
+RE,Renal Disorder - Unspecified,Other Ailments,
+SV,Severe Injury,Other Ailments,
+TA,Tape Worm,Other Ailments,
+TN,Tail Injury,Other Ailments,
+TO,Toxoplasmosis,Other Ailments,
+WT,Wooden Tongue,Other Ailments,
+VA,Vaccination,Other Ailments,
+RU,Rumen Disorder - Unspecified,Other Ailments,
+VI,Vaginal Injury,Reproductive Disorder,
+UI,Uterine Infection,Reproductive Disorder,
+RP,Reproductive Disorder - Unspecified,Reproductive Disorder,
+EN,Endometriosis,Reproductive Disorder,
+AB,Abortion,Reproductive Disorder,
+OV,Ovarian Cyst,Reproductive Disorder,
+MR,Metri-Check,Reproductive Disorder,
+NC,Non Cycling/Anoestrus,Reproductive Disorder,
+LY,Lice,Skin Disorder,
+RW,Ringworm,Skin Disorder,
+SN,Skin Disorder - Unspecified,Skin Disorder,
+WA,Warts,Skin Disorder,
+SE,Spring Eczema,Toxicoses/Poisoning,
+FE,Facial Eczema,Toxicoses/Poisoning,
+NP,Nitrate Poisoning,Toxicoses/Poisoning,
+PH,Photosensitivity,Toxicoses/Poisoning,
+PO,Poisoning - Unspecified,Toxicoses/Poisoning,
+GS,Ryegrass Staggers,Toxicoses/Poisoning,
+MB,Mastitis - Subclinical,Udder Disorder,udder
+MC,Mastitis - Clinical,Udder Disorder,udder
+MK,Mastitis - Black,Udder Disorder,udder
+ST,Staph Aureus Infection,Udder Disorder,udder
+TI,Teat Injury,Udder Disorder,udder
+TL,Teat End Lesions/Cracks,Udder Disorder,udder
+RL,Ruptured Suspensory Ligament,Udder Disorder,udder
+UO,Udder Oedema,Udder Disorder,udder
+UA,Udder Abscess,Udder Disorder,udder
+UD,Udder Disorder - Unspecified,Udder Disorder,udder

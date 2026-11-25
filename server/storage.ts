@@ -2,7 +2,8 @@
 import { db } from "./db";
 import { eq, and, desc, gte, lte, or, like, sql, inArray } from "drizzle-orm";
 import { hashPassword } from "./password";
-import { daysToHours, farmDate, milkClearAt, parseFarmTime } from "@shared/withholding";
+import { daysToHours, farmDate, meatClearAt, milkClearAt, parseFarmTime } from "@shared/withholding";
+import { nextDoseDueAt } from "@shared/dose-schedule";
 import {
   users, products, productBatches, conditions, animals, pastures, animalTreatments,
   treatmentEvents, reproductionEvents, naitRecords, naitQueue, milkWithholdings, pastureMovements, pastureHealthRecords,
@@ -197,6 +198,8 @@ export interface IStorage {
 
   // Conditions
   getConditions(): Promise<Condition[]>;
+  importConditions(rows: { code?: string | null; name: string; category?: string | null; requiresBodyPart?: boolean; bodyPartType?: 'udder' | 'foot' | null }[]): Promise<{ added: number; updated: number }>;
+  getWithheldTreatments(now?: Date): Promise<AnimalTreatment[]>;
   getCondition(id: string): Promise<Condition | undefined>;
   createCondition(data: InsertCondition): Promise<Condition>;
   updateCondition(id: string, data: Partial<InsertCondition>): Promise<Condition>;
@@ -646,8 +649,65 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ===== CONDITIONS =====
+  // The diagnosis list in its own order: by group, then the list's order, then name
   async getConditions(): Promise<Condition[]> {
-    return await db.select().from(conditions);
+    // Only MINDA's list (it has codes): one name for each condition (migration 0037)
+    return await db.select().from(conditions)
+      .where(and(eq(conditions.isActive, true), sql`${conditions.code} IS NOT NULL`))
+      .orderBy(sql`${conditions.category} NULLS FIRST`, sql`${conditions.sortOrder} NULLS LAST`, conditions.name);
+  }
+
+  /**
+   * Adds a diagnosis list to the farm's own: rows matched by code (or by name when there's no code) are
+   * updated, the rest added. The shared list (no farm) is filled by scripts/import-diagnoses.ts.
+   */
+  async importConditions(rows: { code?: string | null; name: string; category?: string | null; requiresBodyPart?: boolean; bodyPartType?: 'udder' | 'foot' | null }[]) {
+    const existing = await db.select().from(conditions).where(sql`${conditions.farmId} IS NOT NULL`);
+    const byCode = new Map(existing.filter(c => c.code).map(c => [c.code!.toLowerCase(), c]));
+    const byName = new Map(existing.map(c => [c.name.toLowerCase(), c]));
+    let added = 0;
+    let updated = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const values = {
+        name: r.name.trim(),
+        code: r.code?.trim() || null,
+        category: r.category?.trim() || null,
+        sortOrder: i + 1,
+        isActive: true,
+        ...(r.requiresBodyPart !== undefined ? { requiresBodyPart: r.requiresBodyPart, bodyPartType: r.requiresBodyPart ? r.bodyPartType ?? null : null } : {}),
+      };
+      const match = (values.code && byCode.get(values.code.toLowerCase())) || byName.get(values.name.toLowerCase());
+      if (match) {
+        await db.update(conditions).set({ ...values, updatedAt: new Date() }).where(eq(conditions.id, match.id));
+        updated++;
+      } else {
+        const [row] = await db.insert(conditions).values(values as any).returning();
+        byName.set(row.name.toLowerCase(), row);
+        if (row.code) byCode.set(row.code.toLowerCase(), row);
+        added++;
+      }
+    }
+    return { added, updated };
+  }
+
+  /**
+   * Treatments whose animal is still withheld: milk not yet clear for the vat (cow still in treatment
+   * or withholding), or meat not yet clear for slaughter (whatever the treatment's state).
+   */
+  async getWithheldTreatments(now: Date = new Date()): Promise<AnimalTreatment[]> {
+    return await db.select().from(animalTreatments).where(and(
+      sql`${animalTreatments.deletedAt} IS NULL`,
+      or(
+        and(eq(animalTreatments.status, 'active'), sql`coalesce(${animalTreatments.awaitingTreatment}, false) = false`,
+          sql`${animalTreatments.returnedToVatAt} IS NULL`,
+          sql`(${animalTreatments.milkClearAt} IS NULL OR ${animalTreatments.milkClearAt} > ${now})`,
+          sql`coalesce(${animalTreatments.milkWithholdingHours}, 0) > 0`),
+        sql`${animalTreatments.meatClearAt} > ${now}`,
+        // Meat withholding set, but its end not known yet (doses still to give)
+        and(eq(animalTreatments.status, 'active'), sql`${animalTreatments.meatClearAt} IS NULL`, sql`coalesce(${animalTreatments.meatWithholdingHours}, 0) > 0`),
+      ),
+    )).orderBy(desc(animalTreatments.dateTime));
   }
 
   async getCondition(id: string): Promise<Condition | undefined> {
@@ -885,24 +945,45 @@ export class DatabaseStorage implements IStorage {
   }
 
   /**
-   * The milk withholding fields, worked out here from the last dose rather than taken from the device
-   * (shared/withholding.ts). The withholding comes from what was entered, else from the product.
+   * The withholding and dose schedule fields, worked out here from the last dose rather than taken from
+   * the device (shared/withholding.ts, shared/dose-schedule.ts). Each withholding comes from what was
+   * entered, else from the product. A change of product brings the new product's withholding.
    */
   async withholdingFields(data: Partial<InsertAnimalTreatment> & { lastDoseAt?: Date | string | null }, current?: AnimalTreatment) {
     const merged: any = { ...(current ?? {}), ...data };
+    const productChanged = data.productId !== undefined && data.productId !== current?.productId;
+    const kept = (v: number | null | undefined) => (productChanged ? null : v ?? null);
     let hours: number | null =
-      data.milkWithholdingHours ?? (data.milkWithdrawalDays != null ? daysToHours(data.milkWithdrawalDays) : current?.milkWithholdingHours ?? null);
-    if (hours == null && merged.productId) {
+      data.milkWithholdingHours ?? (data.milkWithdrawalDays != null ? daysToHours(data.milkWithdrawalDays) : kept(current?.milkWithholdingHours));
+    let meatHours: number | null = data.meatWithholdingHours !== undefined ? data.meatWithholdingHours ?? null : kept(current?.meatWithholdingHours);
+    // Milk withholding in milkings (as MINDA allows): the hours are the milkings times the hours between them
+    const milkings = data.milkWithholdingMilkings !== undefined ? data.milkWithholdingMilkings ?? null : kept(current?.milkWithholdingMilkings);
+    const milkingGap = data.milkingIntervalHours !== undefined ? data.milkingIntervalHours ?? null : current?.milkingIntervalHours ?? null;
+    if (data.milkWithholdingHours == null && milkings && milkingGap && (data.milkWithholdingMilkings !== undefined || data.milkingIntervalHours !== undefined)) {
+      hours = milkings * milkingGap;
+    }
+    if ((hours == null || (meatHours == null && data.meatWithholdingHours === undefined)) && merged.productId) {
       const product = await this.getProduct(merged.productId);
-      hours = daysToHours(product?.milkWithdrawalDays ?? product?.withdrawalDays ?? null);
+      if (hours == null) hours = daysToHours(product?.milkWithdrawalDays ?? product?.withdrawalDays ?? null);
+      if (meatHours == null) meatHours = daysToHours(product?.meatWithdrawalDays ?? null);
     }
     // The app used to put the last dose's date and time in last_dose_date (which keeps only a date)
     const legacyLast = typeof data.lastDoseDate === 'string' && data.lastDoseDate.length > 10 ? data.lastDoseDate : undefined;
     const lastRaw = data.lastDoseAt !== undefined ? data.lastDoseAt : legacyLast ?? current?.lastDoseAt ?? null;
     const lastDoseAt = parseFarmTime(lastRaw as any);
-    const clear = milkClearAt({
-      dosesGiven: merged.dosesGiven, totalDoses: merged.totalDoses, lastDoseAt, dateTime: merged.dateTime, milkWithholdingHours: hours,
-    });
+    const course = { dosesGiven: merged.dosesGiven, totalDoses: merged.totalDoses, lastDoseAt, dateTime: merged.dateTime };
+    const clear = milkClearAt({ ...course, milkWithholdingHours: hours });
+    // A course stopped early (monitoring, or finished) still has its meat withholding from the last dose given
+    const courseEnded = merged.status === 'completed' || merged.monitoring === true;
+    const meatClear = meatClearAt({ ...course, meatWithholdingHours: meatHours }, courseEnded);
+    const nextDose = (merged.status ?? 'active') === 'active' && !merged.awaitingTreatment && !merged.monitoring
+      ? nextDoseDueAt({ ...course, doseIntervalHours: merged.doseIntervalHours })
+      : null;
+    // The vet's name is kept with the treatment, as the staff member's is
+    let vetName: string | null | undefined = data.vetName;
+    if (data.veterinarianId && !data.vetName) {
+      vetName = (await this.getVeterinarian(data.veterinarianId))?.name ?? null;
+    }
     return {
       milkWithholdingHours: hours,
       milkWithdrawalDays: hours != null ? Math.ceil(hours / 24) : merged.milkWithdrawalDays ?? null,
@@ -910,10 +991,30 @@ export class DatabaseStorage implements IStorage {
       lastDoseDate: lastDoseAt ? farmDate(lastDoseAt) : (typeof merged.lastDoseDate === 'string' ? merged.lastDoseDate.slice(0, 10) : null),
       milkClearAt: clear,
       milkWithdrawalEndDate: clear ? farmDate(clear) : null,
+      meatWithholdingHours: meatHours,
+      meatClearAt: meatClear,
+      milkWithholdingMilkings: milkings,
+      milkingIntervalHours: milkings ? milkingGap : null,
+      nextDoseDueAt: nextDose,
+      ...(vetName !== undefined ? { vetName } : {}),
     };
   }
 
+  /**
+   * The animal a treatment entered by cow number is for: the farm's one current animal with that visual
+   * ID (or older cow ID). Null if there is none or more than one, rather than guess.
+   */
+  async animalIdForCow(cowId: string | null | undefined): Promise<string | null> {
+    const id = cowId?.trim();
+    if (!id) return null;
+    const found = await db.select({ id: animals.id }).from(animals)
+      .where(and(or(eq(animals.visualId, id), eq(animals.cowId, id)), eq(animals.status, 'active'), sql`${animals.deletedAt} IS NULL`))
+      .limit(2);
+    return found.length === 1 ? found[0].id : null;
+  }
+
   async createAnimalTreatment(data: InsertAnimalTreatment): Promise<AnimalTreatment> {
+    if (!data.animalId && data.cowId) data = { ...data, animalId: await this.animalIdForCow(data.cowId) } as InsertAnimalTreatment;
     data = { ...data, ...(await this.withholdingFields(data)) } as InsertAnimalTreatment;
     const [treatment] = await db.insert(animalTreatments).values(data as any).returning();
     
@@ -1677,21 +1778,32 @@ export class DatabaseStorage implements IStorage {
       await this.dismissAlertByTypeForTreatment(treatment.id, 'awaiting_treatment');
     }
 
-    // 2) Overdue next dose > 12h (+ buffer)
+    // 2) Next dose overdue: past its due time on the dose schedule (+ buffer). A course without an
+    // interval keeps the old rule, more than 12 hours since the last dose.
     const needMoreDoses = (treatment.totalDoses || 1) > (treatment.dosesGiven || 0);
-    const hoursSinceLastDose = treatment.lastDoseAt
-      ? (Date.now() - new Date(treatment.lastDoseAt).getTime()) / 3_600_000
-      : this.hoursSince(treatment.lastDoseDate);
-    const overdueThreshold = 12 + (treatmentAlertBufferHours || 0);
-    if (treatment.status === 'active' && needMoreDoses && hoursSinceLastDose !== null && hoursSinceLastDose > overdueThreshold) {
+    const buffer = treatmentAlertBufferHours || 0;
+    let overdueBy: number | null = null;
+    let overdueThreshold = 12 + buffer;
+    let hoursSinceLastDose: number | null = null;
+    if (treatment.nextDoseDueAt && (treatment.dosesGiven || 0) > 0) {
+      const late = (Date.now() - new Date(treatment.nextDoseDueAt).getTime()) / 3_600_000;
+      overdueThreshold = (treatment.doseIntervalHours ?? 0) + buffer;
+      if (late > buffer) overdueBy = late - buffer;
+    } else {
+      hoursSinceLastDose = treatment.lastDoseAt
+        ? (Date.now() - new Date(treatment.lastDoseAt).getTime()) / 3_600_000
+        : this.hoursSince(treatment.lastDoseDate);
+      if (hoursSinceLastDose !== null && hoursSinceLastDose > overdueThreshold) overdueBy = hoursSinceLastDose - overdueThreshold;
+    }
+    if (treatment.status === 'active' && needMoreDoses && overdueBy !== null) {
       await this.upsertAlert({
         type: 'treatment_overdue',
         severity: 'high',
         animalId: animalId as any,
         treatmentId: treatment.id as any,
         title: 'Treatment Overdue',
-        message: `Next dose overdue by ${Math.floor(hoursSinceLastDose - overdueThreshold)} hours`,
-        metadata: { overdueHours: Math.floor(hoursSinceLastDose), threshold: overdueThreshold },
+        message: `Next dose overdue by ${Math.floor(overdueBy)} hours`,
+        metadata: { overdueHours: Math.floor(overdueBy), threshold: overdueThreshold, nextDoseDueAt: treatment.nextDoseDueAt ?? null },
       });
     } else {
       await this.dismissAlertByTypeForTreatment(treatment.id, 'treatment_overdue');

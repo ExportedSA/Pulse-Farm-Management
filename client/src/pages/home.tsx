@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
-import { useParams, useLocation } from "wouter";
+import { useParams, useLocation, useSearch } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -26,7 +26,9 @@ import CompletedTreatments from "@/components/CompletedTreatments";
 import Alerts from "@/pages/alerts";
 import { uid, load, save, today, toCSV, parseCSV, download, requestNotificationPermission, showLocalNotification, addDays, daysUntil } from "@/lib/utils";
 import type { RecordItem, Product, User, ReminderSettings, Condition, AnimalTreatment, InsertAnimalTreatment } from "@shared/schema";
-import { clearAfterDosesGiven, daysToHours, formatFarmTime, milkClearAt, parseFarmTime, returnToVatProblem } from "@shared/withholding";
+import { clearAfterDosesGiven, daysToHours, formatFarmTime, meatClearAt, milkClearAt, parseFarmTime, returnToVatProblem } from "@shared/withholding";
+import { nextDoseDueAt } from "@shared/dose-schedule";
+import type { Animal } from "@shared/schema";
 
 export type TreatmentPhase = 'awaiting' | 'treatment' | 'withholding' | 'monitoring' | 'returnToVat';
 
@@ -37,7 +39,8 @@ const isServerId = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 function toServerPatch(patch: Record<string, any>): Record<string, any> {
   const {
     id: _id, createdAt: _c, updatedAt: _u, version: _v, deletedAt: _d, farmId: _f,
-    milkClearAt: _m, milkWithdrawalEndDate: _e, returnedToVatAt: _r, lastDoseDate, completedDate, lastDoseAt, ...rest
+    milkClearAt: _m, milkWithdrawalEndDate: _e, returnedToVatAt: _r, meatClearAt: _mc, nextDoseDueAt: _nd,
+    lastDoseDate, completedDate, lastDoseAt, ...rest
   } = patch;
   const out: Record<string, any> = { ...rest };
   if (lastDoseAt !== undefined) out.lastDoseAt = lastDoseAt instanceof Date ? lastDoseAt.toISOString() : lastDoseAt;
@@ -46,10 +49,22 @@ function toServerPatch(patch: Record<string, any>): Record<string, any> {
   return out;
 }
 
-// For a treatment kept on this device only: the milk withholding worked out the same way the server does
-function withLocalWithholding<T extends Record<string, any>>(t: T): T {
+// For a treatment kept on this device only: the withholding and next dose worked out the same way the server does
+function withLocalWithholding<T extends Record<string, any>>(t0: T): T {
+  // Withholding in milkings comes to the milkings times the hours between them, as the server works it out
+  const t: T = t0.milkWithholdingMilkings && t0.milkingIntervalHours && t0.milkWithholdingHours == null
+    ? { ...t0, milkWithholdingHours: t0.milkWithholdingMilkings * t0.milkingIntervalHours }
+    : t0;
   const clear = milkClearAt(t as any);
-  return { ...t, milkClearAt: clear ? clear.toISOString() : null, milkWithdrawalEndDate: clear ? clear.toISOString().slice(0, 10) : t.milkWithdrawalEndDate };
+  const meat = meatClearAt(t as any, t.status === 'completed' || t.monitoring === true);
+  const next = t.status === 'active' && !t.awaitingTreatment && !t.monitoring ? nextDoseDueAt(t as any) : null;
+  return {
+    ...t,
+    milkClearAt: clear ? clear.toISOString() : null,
+    milkWithdrawalEndDate: clear ? clear.toISOString().slice(0, 10) : t.milkWithdrawalEndDate,
+    meatClearAt: meat ? meat.toISOString() : null,
+    nextDoseDueAt: next ? next.toISOString() : null,
+  };
 }
 
 // What to say after a dose: the next step, or when the milk can go back in the vat
@@ -57,6 +72,18 @@ function doseMessage(t: AnimalTreatment): string {
   const left = (t.totalDoses || 1) - (t.dosesGiven || 0);
   if (left > 0) return `Dose recorded. ${left} still to give`;
   return t.milkClearAt ? `Last dose recorded. Milk can go back in the vat from ${formatFarmTime(new Date(t.milkClearAt))}` : "Last dose recorded";
+}
+
+// The server's reason for refusing a request ("403: {"error":"..."}" from apiRequest), else the fallback
+function serverMessage(error: unknown, fallback: string): string {
+  const text = error instanceof Error ? error.message : '';
+  try {
+    const body = JSON.parse(text.replace(/^\d{3}:\s*/, ''));
+    if (typeof body?.error === 'string') return body.error;
+  } catch {
+    // not JSON
+  }
+  return fallback;
 }
 
 export const getTreatmentPhase = (treatment: AnimalTreatment): TreatmentPhase => {
@@ -95,6 +122,16 @@ export default function Home() {
   const params = useParams<{ section?: string }>();
   const [, setLocation] = useLocation();
   const section = params.section || 'treatments';
+
+  // Quick "Medical" record from an animal (/app/treatments/treatment?animal=<id>): the treatment form
+  // opens filled in for it
+  const animalParam = new URLSearchParams(useSearch()).get('animal');
+  const { data: quickAnimal } = useQuery<Animal>({ queryKey: [`/api/animals/${animalParam}`], enabled: !!animalParam });
+  const prefillAnimal = useMemo(() => {
+    if (!animalParam || !quickAnimal) return null;
+    const cowId = quickAnimal.visualId || quickAnimal.cowId || quickAnimal.naitTag || quickAnimal.lifetimeId || "";
+    return { id: quickAnimal.id, cowId };
+  }, [animalParam, quickAnimal]);
 
   const [records, setRecords] = useState<RecordItem[]>(() => load("dairy_records", [] as RecordItem[]));
   const [products, setProducts] = useState<Product[]>(() =>
@@ -229,7 +266,7 @@ export default function Home() {
   // Mutations for creating/updating/deleting products
   const addProductMutation = useMutation({
     mutationFn: (product: { name: string; withdrawalDays?: number; milkWithdrawalDays?: number; meatWithdrawalDays?: number; useByDays?: number; treatmentPlan?: string; barcode?: string }) =>
-      apiRequest('/api/products', { method: 'POST', body: product }),
+      apiRequest('/api/products', 'POST', product),
     onMutate: async (product) => {
       // Capture snapshot and optimistically update local state
       let previousProducts: Product[] = [];
@@ -311,42 +348,52 @@ export default function Home() {
     }
   });
 
-  const addConditionMutation = useMutation({
-    mutationFn: (condition: { name: string; requiresBodyPart?: boolean; bodyPartType?: 'udder' | 'foot' }) =>
-      apiRequest('/api/conditions', { method: 'POST', body: condition }),
-    onMutate: async (condition) => {
-      // Capture snapshot and optimistically update local state
-      let previousConditions: Condition[] = [];
-      const tempCondition: Condition = {
-        ...condition,
-        id: uid(),
-        farmId: null,
-        createdAt: new Date(new Date().toISOString()) as any,
-        updatedAt: new Date(new Date().toISOString()) as any,
-        requiresBodyPart: condition.requiresBodyPart ?? null,
-        bodyPartType: condition.bodyPartType ?? null,
-      };
-      setConditions((cs) => {
-        previousConditions = [...cs];
-        return [...cs, tempCondition];
+  // Diagnoses are MINDA's list (migration 0037), shown read only on the Manage tab: nothing here
+  // adds, changes or removes them.
+
+  type ProductFields = { name: string; withdrawalDays?: number; milkWithdrawalDays?: number; meatWithdrawalDays?: number; useByDays?: number; treatmentPlan?: string; barcode?: string };
+
+  // Product changes are saved on the server; the list shows them straight away and goes back if
+  // the server refuses (for example, only owners and managers can change or remove products)
+  const updateProductMutation = useMutation({
+    mutationFn: ({ id, product }: { id: string; product: ProductFields }) =>
+      apiRequest(`/api/products/${id}`, 'PUT', product),
+    onMutate: async ({ id, product }) => {
+      let previousProducts: Product[] = [];
+      setProducts((ps) => {
+        previousProducts = [...ps];
+        return ps.map((p) => (p.id === id ? { ...p, ...product } : p));
       });
-      return { previousConditions };
+      return { previousProducts };
     },
-    onSuccess: (response) => {
-      const isQueued = response?.status === 202;
-      if (!isQueued) {
-        queryClient.invalidateQueries({ queryKey: ['/api/conditions'] });
-        toast.success('Condition added');
-      } else {
-        toast.success('Condition queued - will sync when online');
-      }
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/products'] });
+      toast.success('Product updated');
     },
-    onError: (_error, _variables, context) => {
-      if (context?.previousConditions) {
-        setConditions(context.previousConditions);
-      }
-      toast.error('Failed to add condition');
-    }
+    onError: (error, _variables, context) => {
+      if (context?.previousProducts) setProducts(context.previousProducts);
+      toast.error(serverMessage(error, 'Failed to update product'));
+    },
+  });
+
+  const removeProductMutation = useMutation({
+    mutationFn: (id: string) => apiRequest(`/api/products/${id}`, 'DELETE'),
+    onMutate: async (id) => {
+      let previousProducts: Product[] = [];
+      setProducts((ps) => {
+        previousProducts = [...ps];
+        return ps.filter((p) => p.id !== id);
+      });
+      return { previousProducts };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/products'] });
+      toast.success('Product removed');
+    },
+    onError: (error, _variables, context) => {
+      if (context?.previousProducts) setProducts(context.previousProducts);
+      toast.error(serverMessage(error, 'Failed to remove product'));
+    },
   });
 
   const [showScanner, setShowScanner] = useState(false);
@@ -542,14 +589,12 @@ export default function Home() {
     addProductMutation.mutate(product);
   };
 
-  const updateProduct = (id: string, product: { name: string; withdrawalDays?: number; milkWithdrawalDays?: number; meatWithdrawalDays?: number; useByDays?: number; treatmentPlan?: string; barcode?: string }) => {
-    setProducts((ps) => ps.map((p) => (p.id === id ? { ...p, ...product } : p)));
-    toast.success("Product updated");
+  const updateProduct = (id: string, product: ProductFields) => {
+    updateProductMutation.mutate({ id, product });
   };
 
   const removeProduct = (id: string) => {
-    setProducts((ps) => ps.filter((p) => p.id !== id));
-    toast.success("Product removed");
+    removeProductMutation.mutate(id);
   };
 
   const addUser = (name: string) => {
@@ -566,7 +611,10 @@ export default function Home() {
     toast.success("Staff member removed");
   };
 
-  const addAnimalTreatment = async (treatment: InsertAnimalTreatment & { id?: string }) => {
+  // Returns false when the treatment wasn't saved anywhere (the server refused it)
+  // quiet: one animal of a group record (the form says once how it went)
+  const addAnimalTreatment = async (treatment: InsertAnimalTreatment & { id?: string }, opts?: { quiet?: boolean }): Promise<boolean> => {
+    const done = (message: string) => { if (!opts?.quiet) toast.success(message); };
     // If updating an existing treatment (has ID), update it instead of creating new
     if (treatment.id && selectedTreatmentForEdit) {
       const product = treatment.productId
@@ -580,8 +628,9 @@ export default function Home() {
           setSelectedTreatmentForEdit(null);
           setActiveTab("treatment-current");
           toast.success("Treatment plan added - cow moved to treatment list");
+          return true;
         }
-        return;
+        return false;
       }
       // Awaiting on this device only: the treatment itself is saved on the server, as a new one
       setAnimalTreatments(list => list.filter(t => t.id !== treatment.id));
@@ -603,8 +652,8 @@ export default function Home() {
         awaitingTreatment: true,
       };
       setAnimalTreatments((t) => [item, ...t]);
-      toast.success("Cow added to awaiting treatment list");
-      return;
+      done("Cow added to awaiting treatment list");
+      return true;
     }
 
     if (treatment.monitoring && treatment.monitoringDays) {
@@ -622,8 +671,8 @@ export default function Home() {
         monitoringEndDate: monitoringEnd,
       };
       setAnimalTreatments((t) => [item, ...t]);
-      toast.success("Cow added to monitoring");
-      return;
+      done("Cow added to monitoring");
+      return true;
     }
     
     // Regular treatment creation - persist to backend API when online
@@ -669,8 +718,8 @@ export default function Home() {
         const result = await response.json();
         if (result.queued) {
           setAnimalTreatments((t) => [deviceCopy(), ...t]);
-          toast.success("Treatment queued for sync when online");
-          return;
+          done("Treatment queued for sync when online");
+          return true;
         }
       }
       
@@ -679,20 +728,23 @@ export default function Home() {
         const error = await response.json().catch(() => ({ error: 'Failed to create treatment' }));
         toast.error(error.error || 'Failed to create treatment');
         console.error('Treatment creation failed:', response.status, error);
-        return;
+        return false;
       }
       
       // Success (2xx): the server's copy, with its doses and milk withholding worked out
       const apiTreatment: AnimalTreatment = await response.json();
       setAnimalTreatments((t) => [apiTreatment, ...t]);
       refetchTreatments();
-      toast.success("Treatment recorded");
+      done("Treatment recorded");
+      return true;
     } catch (error: any) {
       // Network error - fallback to local storage with error toast
       console.error('Network error creating treatment:', error);
       setAnimalTreatments((t) => [deviceCopy(), ...t]);
       toast.error("Network error - treatment saved locally");
+      return true;
     }
+    return false;
   };
 
   // A dose given now. On the server, which keeps the time of the last dose and moves the milk clear
@@ -855,19 +907,6 @@ export default function Home() {
     if (ok) toast.success("Monitoring completed, cow returned to milking mob");
   };
 
-  const addCondition = (condition: { name: string; requiresBodyPart?: boolean; bodyPartType?: 'udder' | 'foot' }) => {
-    addConditionMutation.mutate(condition);
-  };
-
-  const updateCondition = (id: string, condition: { name: string; requiresBodyPart?: boolean; bodyPartType?: 'udder' | 'foot' }) => {
-    setConditions((cs) => cs.map((c) => (c.id === id ? { ...c, ...condition } : c)));
-    toast.success("Condition updated");
-  };
-
-  const removeCondition = (id: string) => {
-    setConditions((cs) => cs.filter((c) => c.id !== id));
-    toast.success("Condition removed");
-  };
 
   const exportCSV = () => {
     download(`dairy-treatment-records-${today()}.csv`, toCSV(records));
@@ -1114,8 +1153,14 @@ export default function Home() {
               products={products}
               users={users}
               conditions={conditions}
-              onSubmit={addAnimalTreatment}
+              onSubmit={async (t, opts) => {
+                const saved = await addAnimalTreatment(t, opts);
+                // A quick record for an animal: on to the current treatments, without the animal in the address
+                if (saved && animalParam) setLocation("/app/treatments/current");
+                return saved;
+              }}
               prefillTreatment={selectedTreatmentForEdit}
+              prefillAnimal={selectedTreatmentForEdit ? null : prefillAnimal}
             />
           </TabsContent>
 
@@ -1246,9 +1291,9 @@ export default function Home() {
             <UserManagement users={users} onAdd={addUser} onUpdate={updateUser} onRemove={removeUser} />
           </TabsContent>
 
-          <TabsContent value="manage-products" className="mt-4 space-y-6">
+          <TabsContent value="manage" className="mt-4 space-y-6">
             <ProductManagement products={products} onAdd={addProduct} onUpdate={updateProduct} onRemove={removeProduct} />
-            <ConditionManagement conditions={conditions} onAdd={addCondition} onUpdate={updateCondition} onRemove={removeCondition} />
+            <ConditionManagement conditions={conditions} />
           </TabsContent>
 
           <TabsContent value="alerts" className="mt-4">

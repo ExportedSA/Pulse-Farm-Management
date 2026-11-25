@@ -22,6 +22,7 @@ import {
   Scale,
   Baby,
   Milk,
+  Syringe,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -35,6 +36,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import AnimalForm from '@/components/AnimalForm';
+import type { AnimalTreatment } from '@shared/schema';
+import { animalWithholding, medicalRecordHref, withholdingLabel } from '@/lib/animal-withholding';
 
 // Types
 interface Animal {
@@ -87,6 +90,7 @@ export default function AnimalDetailPage() {
   // State
   const [animal, setAnimal] = useState<Animal | null>(null);
   const [healthRecords, setHealthRecords] = useState<HealthRecord[]>([]);
+  const [treatments, setTreatments] = useState<AnimalTreatment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -104,12 +108,14 @@ export default function AnimalDetailPage() {
     setLoading(true);
     setError(null);
     try {
-      const [animalData, healthData] = await Promise.all([
+      const [animalData, healthData, treatmentData] = await Promise.all([
         pulseGet<Animal>(`/animals/${animalId}`),
         pulseGet<HealthRecord[]>(`/animals/${animalId}/health`).catch(() => []),
+        pulseGet<AnimalTreatment[]>(`/animals/${animalId}/treatments`).catch(() => []),
       ]);
       setAnimal(animalData);
       setHealthRecords(healthData);
+      setTreatments(treatmentData);
     } catch (err) {
       console.error('Failed to load animal:', err);
       setError('Failed to load animal details. Please try again.');
@@ -256,6 +262,13 @@ export default function AnimalDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* Quick "Medical" record: the treatment form, filled in for this animal */}
+          <Button asChild data-testid="button-medical-record">
+            <Link href={medicalRecordHref(animal.id)}>
+              <Syringe className="h-4 w-4 mr-2" />
+              Medical
+            </Link>
+          </Button>
           <Button variant="outline" onClick={() => setIsEditing(true)}>
             <Edit className="h-4 w-4 mr-2" />
             Edit
@@ -273,6 +286,12 @@ export default function AnimalDetailPage() {
         {getSexBadge(animal.sex)}
         {animal.milkStatus && <Badge variant="outline">{animal.milkStatus}</Badge>}
         {animal.a2Status && <Badge variant="outline">A2: {animal.a2Status}</Badge>}
+        {withholdingLabel('milk', animalWithholding(treatments).milk) && (
+          <Badge className="bg-blue-700 text-white">{withholdingLabel('milk', animalWithholding(treatments).milk)}</Badge>
+        )}
+        {withholdingLabel('meat', animalWithholding(treatments).meat) && (
+          <Badge className="bg-red-700 text-white" data-testid="badge-meat-withholding">{withholdingLabel('meat', animalWithholding(treatments).meat)}</Badge>
+        )}
       </div>
 
       <Tabs defaultValue="overview" className="space-y-6">
