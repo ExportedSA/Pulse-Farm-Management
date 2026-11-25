@@ -14,19 +14,67 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Check, ChevronDown, Edit2, ArrowLeft, ArrowRight, Users, X } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { useAuth } from "@/lib/auth-context";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { parseDoseInterval } from "@shared/dose-schedule";
+import { farmDate, farmDateTimeLocal } from "@shared/withholding";
+
+// Now, in farm time, as the date-and-time box takes it (the server reads the box as New Zealand time)
+const nowLocal = () => farmDateTimeLocal();
+
+// A vet from the farm's list (Veterinary screen)
+type Vet = { id: string; name: string; clinicName?: string | null; isActive?: boolean };
+
+// Fields the form keeps for itself and turns into the treatment's own on save
+type FormValues = InsertAnimalTreatment & {
+  useBirthId?: boolean; id?: string; doseGivenNow?: boolean; meatWithholdingDays?: number | null;
+  isGroup?: boolean; milkWithholdingUnit?: MilkUnit;
+};
+
+// Milk withholding as MINDA records it: in hours, days or milkings
+type MilkUnit = "hours" | "days" | "milkings";
+// How often the herd is milked, for withholding counted in milkings (the hours between milkings)
+const MILKING_PATTERNS = [
+  { hours: 12, label: "Twice a day" },
+  { hours: 16, label: "3 in 2 days" },
+  { hours: 24, label: "Once a day" },
+];
+
+// MINDA's dose units, and a few more
+const DOSE_UNITS = ["mL", "mg", "g", "tube", "tablet", "capsule", "bolus", "oblet", "pessary", "sachet", "unit", "drops", "other"];
+
+// The diagnosis list in its groups, in the list's own order
+function groupConditions(conditions: Condition[]): [string, Condition[]][] {
+  const groups = new Map<string, Condition[]>();
+  for (const c of conditions) {
+    if (c.isActive === false) continue;
+    const key = c.category || "";
+    groups.set(key, [...(groups.get(key) ?? []), c]);
+  }
+  return Array.from(groups.entries());
+}
+
+const INTERVAL_PRESETS = [
+  { hours: 12, label: "Twice daily (12 h)" },
+  { hours: 24, label: "Daily (24 h)" },
+  { hours: 48, label: "Every 48 h" },
+  { hours: 72, label: "Every 72 h" },
+];
 
 type AnimalTreatmentFormProps = {
   users: User[];
   products: Product[];
   conditions: Condition[];
-  onSubmit: (treatment: InsertAnimalTreatment & { id?: string }) => void;
+  // quiet: one of several animals in a group record (the form says how it went, once)
+  onSubmit: (treatment: InsertAnimalTreatment & { id?: string }, opts?: { quiet?: boolean }) => void | boolean | Promise<void | boolean>;
   prefillTreatment?: AnimalTreatment | null;
+  // Quick "Medical" record from an animal: the form opens filled in for it
+  prefillAnimal?: { id: string; cowId: string } | null;
 };
 
 const createFormSchema = (conditions: Condition[], selectedCondition: string) => {
@@ -61,11 +109,27 @@ const createFormSchema = (conditions: Condition[], selectedCondition: string) =>
     monitoringStartDate: z.string().optional(),
     monitoringEndDate: z.string().optional(),
     useBirthId: z.boolean().default(false),
+    // Kept through validation (unlisted fields are dropped), so the first dose is counted
+    doseGivenNow: z.boolean().optional(),
     batchId: z.string().optional(),
     doseAmount: z.string().optional(),
     doseUnit: z.string().optional(),
+    animalId: z.string().optional().nullable(),
+    conditionId: z.string().optional().nullable(),
+    doseIntervalHours: z.number().int().min(1, "At least 1 hour").max(8760).optional().nullable(),
+    milkWithholdingHours: z.number().int().min(0).max(8760).optional().nullable(),
+    meatWithholdingDays: z.number().min(0).max(365).optional().nullable(),
+    separationDate: z.string().optional().nullable(),
+    veterinarianId: z.string().optional().nullable(),
+    vetName: z.string().max(255).optional().nullable(),
+    isGroup: z.boolean().optional(),
+    milkWithholdingUnit: z.enum(["hours", "days", "milkings"]).optional(),
+    milkWithholdingMilkings: z.number().int().min(1, "At least 1 milking").max(100).optional().nullable(),
+    milkingIntervalHours: z.number().int().min(1).max(48).optional().nullable(),
   }).superRefine((data: any, ctx: any) => {
-    if (data.useBirthId) {
+    if (data.isGroup) {
+      // A group record: the animals are picked from the herd list, not by cow number
+    } else if (data.useBirthId) {
       if (!data.birthId?.participantCode) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -124,6 +188,29 @@ const createFormSchema = (conditions: Condition[], selectedCondition: string) =>
       }
     }
     
+    if (!data.awaitingTreatment && !data.monitoring && (data.totalDoses ?? 1) > 1 && !data.doseIntervalHours) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "How many hours between doses? It's needed to plan the next ones",
+        path: ["doseIntervalHours"],
+      });
+    }
+
+    if (data.milkWithholdingUnit === "milkings" && data.milkWithholdingMilkings && !data.milkingIntervalHours) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "How often is the herd milked?",
+        path: ["milkingIntervalHours"],
+      });
+    }
+
+    if (data.doseAmount && !data.batchId) {
+      const doseNum = parseFloat(data.doseAmount);
+      if (isNaN(doseNum) || doseNum <= 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Dose amount must be greater than 0", path: ["doseAmount"] });
+      }
+    }
+
     if (data.monitoring && !data.monitoringDays) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -176,6 +263,7 @@ export default function AnimalTreatmentForm({
   conditions,
   onSubmit,
   prefillTreatment,
+  prefillAnimal,
 }: AnimalTreatmentFormProps) {
   const { user } = useAuth();
   const [step, setStep] = useState(1);
@@ -189,6 +277,7 @@ export default function AnimalTreatmentForm({
   const [openTreatmentSelect, setOpenTreatmentSelect] = useState(false);
   const [openBatchSelect, setOpenBatchSelect] = useState(false);
   const [openDoseUnitSelect, setOpenDoseUnitSelect] = useState(false);
+  const [openVetSelect, setOpenVetSelect] = useState(false);
   const [expandAwaitingHelp, setExpandAwaitingHelp] = useState(false);
   
   // Group treatment state
@@ -208,14 +297,63 @@ export default function AnimalTreatmentForm({
     enabled: isGroupTreatment,
   });
 
+  // Bulk entry: a whole Pulse group at once, or a batch of cow numbers typed in
+  const { data: groups = [] } = useQuery<{ id: string; name: string; groupType?: string; isMob?: boolean }[]>({
+    queryKey: ["/api/groups"],
+    enabled: isGroupTreatment,
+  });
+  const { data: memberships = [] } = useQuery<{ groupId: string; animalId: string }[]>({
+    queryKey: ["/api/groups/memberships"],
+    enabled: isGroupTreatment,
+  });
+  const [cowNumbersText, setCowNumbersText] = useState("");
+  const [notFound, setNotFound] = useState<string[]>([]);
+
+  const addAnimals = (ids: string[]) => {
+    const herd = new Set(animals.map(a => a.id));
+    setSelectedAnimals(prev => Array.from(new Set([...prev, ...ids.filter(id => herd.has(id))])));
+  };
+
+  const addGroup = async (groupId: string) => {
+    const group = groups.find(g => g.id === groupId);
+    let ids = memberships.filter(m => m.groupId === groupId).map(m => m.animalId);
+    if (group?.groupType === "dynamic") {
+      const res = await fetch(`/api/groups/${groupId}/dynamic-members`, { credentials: "include" });
+      ids = res.ok ? ((await res.json()) as { id: string }[]).map(a => a.id) : [];
+    }
+    if (ids.length === 0) {
+      toast.error(`${group?.name ?? "That group"} has no animals in it`);
+      return;
+    }
+    addAnimals(ids);
+  };
+
+  // Cow numbers separated by spaces, commas or new lines, matched to the herd's cow numbers
+  const addCowNumbers = () => {
+    const numbers = cowNumbersText.split(/[\s,;]+/).map(n => n.trim()).filter(Boolean);
+    const byNumber = new Map(animals.filter(a => a.visualId).map(a => [a.visualId!.toLowerCase(), a.id]));
+    const found: string[] = [];
+    const missing: string[] = [];
+    for (const n of numbers) {
+      const id = byNumber.get(n.toLowerCase());
+      if (id) found.push(id); else missing.push(n);
+    }
+    addAnimals(found);
+    setNotFound(missing);
+    setCowNumbersText(missing.join(" "));
+  };
+
+  // The farm's vets, for who prescribed or authorised the treatment
+  const { data: vets = [] } = useQuery<Vet[]>({ queryKey: ["/api/veterinary/vets"] });
+
   const formSchema = createFormSchema(conditions, selectedCondition);
 
-  const form = useForm<InsertAnimalTreatment & { useBirthId?: boolean; id?: string; doseGivenNow?: boolean }>({
+  const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: prefillTreatment ? {
       id: prefillTreatment.id,
       staffMember: prefillTreatment.staffMember || user?.name || "",
-      dateTime: prefillTreatment.dateTime || new Date().toISOString().slice(0, 16),
+      dateTime: prefillTreatment.dateTime || nowLocal(),
       cowId: prefillTreatment.cowId || "",
       birthId: prefillTreatment.birthId || {
         participantCode: "",
@@ -238,8 +376,9 @@ export default function AnimalTreatmentForm({
       doseGivenNow: false,
     } : {
       staffMember: user?.name || "",
-      dateTime: new Date().toISOString().slice(0, 16),
-      cowId: "",
+      dateTime: nowLocal(),
+      cowId: prefillAnimal?.cowId || "",
+      animalId: prefillAnimal?.id || null,
       birthId: {
         participantCode: "",
         year: "",
@@ -267,6 +406,9 @@ export default function AnimalTreatmentForm({
   const selectedProductId = useWatch({ control: form.control, name: "productId" });
   const selectedTreatmentType = useWatch({ control: form.control, name: "treatmentType" });
   const selectedBatchId = useWatch({ control: form.control, name: "batchId" });
+  const totalDosesWatch = useWatch({ control: form.control, name: "totalDoses" });
+  const milkUnit: MilkUnit = useWatch({ control: form.control, name: "milkWithholdingUnit" }) ?? "hours";
+  const milkingsWatch = useWatch({ control: form.control, name: "milkWithholdingMilkings" });
 
   // Fetch open batches for the selected product with custom queryFn
   const { data: batches = [], isLoading: batchesLoading } = useQuery<ProductBatch[]>({
@@ -294,7 +436,7 @@ export default function AnimalTreatmentForm({
       form.reset({
         id: prefillTreatment.id,
         staffMember: prefillTreatment.staffMember || user?.name || "",
-        dateTime: prefillTreatment.dateTime || new Date().toISOString().slice(0, 16),
+        dateTime: prefillTreatment.dateTime || nowLocal(),
         cowId: prefillTreatment.cowId || "",
         birthId: prefillTreatment.birthId || {
           participantCode: "",
@@ -313,6 +455,11 @@ export default function AnimalTreatmentForm({
         batchId: prefillTreatment.batchId || "",
         doseAmount: prefillTreatment.doseAmount || "",
         doseUnit: prefillTreatment.doseUnit || "",
+        animalId: prefillTreatment.animalId ?? null,
+        conditionId: prefillTreatment.conditionId ?? null,
+        separationDate: prefillTreatment.separationDate ?? "",
+        veterinarianId: prefillTreatment.veterinarianId ?? "",
+        vetName: prefillTreatment.vetName ?? "",
       });
       
       // Update local state
@@ -321,11 +468,12 @@ export default function AnimalTreatmentForm({
       setSelectedTreatment(""); // Treatment type is empty for awaiting treatments
       setStep(1); // Start at step 1 to allow user to review/confirm data
     } else {
-      // Reset to empty form when prefillTreatment is cleared
+      // Reset to empty form when prefillTreatment is cleared; filled in for an animal for a quick record
       form.reset({
         staffMember: user?.name || "",
-        dateTime: new Date().toISOString().slice(0, 16),
-        cowId: "",
+        dateTime: nowLocal(),
+        cowId: prefillAnimal?.cowId || "",
+        animalId: prefillAnimal?.id || null,
         birthId: { participantCode: "", year: "", number: "" },
         condition: "",
         bodyPart: "",
@@ -340,12 +488,13 @@ export default function AnimalTreatmentForm({
         doseAmount: "",
         doseUnit: "",
       });
-      setStep(1);
+      // Who, when and which animal are filled in already: start at the diagnosis
+      setStep(prefillAnimal ? 2 : 1);
       setSelectedCondition("");
       setSelectedTreatment("");
       setUseBirthId(false);
     }
-  }, [prefillTreatment]);
+  }, [prefillTreatment, prefillAnimal?.id]);
 
   const parseTotalDoses = (treatmentPlan: string): number => {
     const lowerPlan = treatmentPlan.toLowerCase();
@@ -387,6 +536,9 @@ export default function AnimalTreatmentForm({
     if (currentTreatmentPlan) {
       const suggestedDoses = parseTotalDoses(currentTreatmentPlan);
       form.setValue("totalDoses", suggestedDoses);
+      // The hours between doses, when the plan says (e.g. "once daily", "repeat after 48 hours")
+      const interval = parseDoseInterval(currentTreatmentPlan);
+      if (interval) form.setValue("doseIntervalHours", interval);
     }
   }, [currentTreatmentPlan]);
 
@@ -408,7 +560,12 @@ export default function AnimalTreatmentForm({
     
     if (step === 1) {
       fieldsToValidate = ["staffMember", "dateTime"];
-      if (useBirthId) {
+      if (isGroupTreatment && !prefillTreatment) {
+        if (selectedAnimals.length === 0) {
+          toast.error("Pick the animals for the group record");
+          return;
+        }
+      } else if (useBirthId) {
         fieldsToValidate.push("birthId.participantCode", "birthId.year", "birthId.number");
       } else {
         fieldsToValidate.push("cowId");
@@ -422,7 +579,7 @@ export default function AnimalTreatmentForm({
         }
       } else {
         // Standard workflow: validate all treatment fields
-        fieldsToValidate = ["condition", "treatmentType", "treatmentPlan", "totalDoses"];
+        fieldsToValidate = ["condition", "treatmentType", "treatmentPlan", "totalDoses", "doseIntervalHours", "milkWithholdingHours", "meatWithholdingDays"];
         if (selectedConditionObj?.requiresBodyPart) {
           fieldsToValidate.push("bodyPart");
         }
@@ -439,8 +596,9 @@ export default function AnimalTreatmentForm({
     setStep(step - 1);
   };
 
-  const handleFormSubmit = (data: InsertAnimalTreatment & { useBirthId?: boolean; id?: string; doseGivenNow?: boolean }) => {
-    const { useBirthId: _, doseGivenNow, ...treatmentData } = data;
+  const handleFormSubmit = async (data: FormValues) => {
+    const { useBirthId: _, doseGivenNow, meatWithholdingDays, isGroup: _g, milkWithholdingUnit, ...treatmentData } = data;
+    const inMilkings = milkWithholdingUnit === "milkings" && !!treatmentData.milkWithholdingMilkings;
     const treatment: InsertAnimalTreatment & { id?: string } = {
       ...treatmentData,
       id: prefillTreatment?.id, // Include ID if editing existing treatment
@@ -448,24 +606,59 @@ export default function AnimalTreatmentForm({
       birthId: useBirthId ? data.birthId : undefined,
       bodyPart: treatmentData.bodyPart || undefined,
       clinicalNotes: treatmentData.clinicalNotes || undefined,
+      animalId: treatmentData.animalId || undefined,
+      conditionId: treatmentData.conditionId || undefined,
+      // The staff member picked, by id as well as name
+      staffMemberId: users.find(u => u.name === treatmentData.staffMember)?.id ?? treatmentData.staffMemberId,
+      // An empty box isn't a batch; the amount per dose is kept with or without one
+      batchId: treatmentData.batchId || undefined,
+      doseAmount: treatmentData.doseAmount || undefined,
+      doseUnit: treatmentData.doseAmount ? treatmentData.doseUnit || undefined : undefined,
+      separationDate: treatmentData.separationDate || undefined,
+      veterinarianId: treatmentData.veterinarianId || undefined,
+      vetName: treatmentData.vetName?.trim() || undefined,
+      // Left out when not entered, so the server takes the product's
+      // In milkings, the server works out the hours from the milkings and how often the herd is milked
+      milkWithholdingHours: inMilkings ? undefined : treatmentData.milkWithholdingHours ?? undefined,
+      milkWithholdingMilkings: inMilkings ? treatmentData.milkWithholdingMilkings : null,
+      milkingIntervalHours: inMilkings ? treatmentData.milkingIntervalHours : null,
+      meatWithholdingHours: meatWithholdingDays != null ? Math.round(meatWithholdingDays * 24) : undefined,
+      doseIntervalHours: (treatmentData.totalDoses ?? 1) > 1 ? treatmentData.doseIntervalHours ?? undefined : undefined,
     };
 
     // If creating new treatment and dose given now, set first dose
     if (!prefillTreatment && doseGivenNow) {
-      const dt = form.getValues("dateTime") || new Date().toISOString().slice(0, 16);
+      const dt = form.getValues("dateTime") || nowLocal();
       treatment.dosesGiven = Math.max(1, treatment.dosesGiven || 0);
       treatment.lastDoseDate = dt;
     }
-    onSubmit(treatment);
-    
+    if (isGroupTreatment && !prefillTreatment) {
+      // A group record: the same health event for each animal picked, as in MINDA
+      const picked = animals.filter(a => selectedAnimals.includes(a.id));
+      let saved = 0;
+      for (const a of picked) {
+        const one = { ...treatment, animalId: a.id, cowId: a.visualId || undefined, birthId: undefined };
+        if ((await onSubmit(one, { quiet: true })) !== false) saved++;
+      }
+      if (saved === 0) return;
+      if (saved < picked.length) toast.error(`Recorded for ${saved} of ${picked.length} animals`);
+      else toast.success(`Recorded for ${saved} animals`);
+      setSelectedAnimals([]);
+    } else if ((await onSubmit(treatment)) === false) {
+      // Kept as entered if it wasn't saved, so nothing has to be typed again
+      return;
+    }
+
     // Only reset form if NOT editing (editing will be handled by parent clearing prefillTreatment)
     if (!prefillTreatment) {
       form.reset({
-        staffMember: "",
-        dateTime: new Date().toISOString().slice(0, 16),
+        staffMember: user?.name || "",
+        dateTime: nowLocal(),
         cowId: "",
+        animalId: null,
         birthId: { participantCode: "", year: "", number: "" },
         condition: "",
+        conditionId: null,
         bodyPart: "",
         treatmentType: "",
         treatmentPlan: "",
@@ -475,6 +668,16 @@ export default function AnimalTreatmentForm({
         batchId: "",
         doseAmount: "",
         doseUnit: "",
+        doseIntervalHours: null,
+        milkWithholdingHours: null,
+        meatWithholdingDays: null,
+        separationDate: "",
+        veterinarianId: "",
+        vetName: "",
+        milkWithholdingUnit: "hours",
+        milkWithholdingMilkings: null,
+        milkingIntervalHours: null,
+        isGroup: isGroupTreatment,
       });
       setStep(1);
       setSelectedCondition("");
@@ -681,6 +884,7 @@ export default function AnimalTreatmentForm({
                       checked={isGroupTreatment}
                       onCheckedChange={(checked) => {
                         setIsGroupTreatment(checked === true);
+                        form.setValue("isGroup", checked === true);
                         if (!checked) {
                           setSelectedAnimals([]);
                         }
@@ -701,6 +905,48 @@ export default function AnimalTreatmentForm({
                   {isGroupTreatment && !prefillTreatment ? (
                     <div className="space-y-3">
                       <FormLabel>Select Animals *</FormLabel>
+
+                      {/* Bulk entry: a whole group, or a batch of cow numbers */}
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium">Add a group</p>
+                          <Select value="" onValueChange={addGroup}>
+                            <SelectTrigger data-testid="select-bulk-group">
+                              <SelectValue placeholder={groups.length ? "Choose a group or mob..." : "No groups yet"} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {groups.map(g => {
+                                const n = memberships.filter(m => m.groupId === g.id).length;
+                                return (
+                                  <SelectItem key={g.id} value={g.id} data-testid={`option-bulk-group-${g.id}`}>
+                                    {g.name}{g.groupType === "dynamic" ? "" : ` (${n})`}
+                                  </SelectItem>
+                                );
+                              })}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium">Or type cow numbers</p>
+                          <div className="flex gap-2">
+                            <Textarea
+                              rows={2}
+                              placeholder="e.g. 254 367 480"
+                              value={cowNumbersText}
+                              onChange={(e) => setCowNumbersText(e.target.value)}
+                              data-testid="input-bulk-cow-numbers"
+                            />
+                            <Button type="button" variant="outline" onClick={addCowNumbers} disabled={!cowNumbersText.trim()} data-testid="button-add-cow-numbers">
+                              Add
+                            </Button>
+                          </div>
+                          {notFound.length > 0 && (
+                            <p className="text-xs text-red-700" data-testid="text-cows-not-found">
+                              Not in the herd: {notFound.join(", ")}
+                            </p>
+                          )}
+                        </div>
+                      </div>
                       
                       {/* Selected animals badges */}
                       {selectedAnimals.length > 0 && (
@@ -722,6 +968,9 @@ export default function AnimalTreatmentForm({
                           <span className="text-xs self-center" style={{ color: '#636e72' }}>
                             {selectedAnimals.length} selected
                           </span>
+                          <Button type="button" size="sm" variant="ghost" onClick={() => setSelectedAnimals([])} data-testid="button-clear-animals">
+                            Clear all
+                          </Button>
                         </div>
                       )}
                       
@@ -946,14 +1195,16 @@ export default function AnimalTreatmentForm({
                           <Command>
                             <CommandInput placeholder="Search conditions..." data-testid="input-search-condition" />
                             <CommandList>
-                              <CommandEmpty>No condition found.</CommandEmpty>
-                              <CommandGroup>
-                                {conditions.map((condition) => (
+                              <CommandEmpty>No diagnosis found. Add it under Manage.</CommandEmpty>
+                              {groupConditions(conditions).map(([group, items]) => (
+                              <CommandGroup key={group || "-"} heading={group || undefined}>
+                                {items.map((condition) => (
                                   <CommandItem
                                     key={condition.id}
-                                    value={condition.name}
+                                    value={`${condition.code ?? ""} ${condition.name} ${condition.category ?? ""}`}
                                     onSelect={() => {
                                       field.onChange(condition.name);
+                                      form.setValue("conditionId", condition.id.length === 36 ? condition.id : null);
                                       setSelectedCondition(condition.name);
                                       setOpenConditionSelect(false);
                                       if (condition.requiresBodyPart) {
@@ -968,10 +1219,12 @@ export default function AnimalTreatmentForm({
                                         field.value === condition.name ? "opacity-100" : "opacity-0"
                                       )}
                                     />
+                                    {condition.code && <span className="mr-2 font-mono text-xs text-muted-foreground">{condition.code}</span>}
                                     {condition.name}
                                   </CommandItem>
                                 ))}
                               </CommandGroup>
+                              ))}
                             </CommandList>
                           </Command>
                         </PopoverContent>
@@ -1104,6 +1357,12 @@ export default function AnimalTreatmentForm({
                                           setSelectedTreatment(product.name);
                                           form.setValue("productId", product.id);
                                           form.setValue("treatmentPlan", product.treatmentPlan || "");
+                                          // The product's withholding, which can be changed for this treatment
+                                          const milkDays = product.milkWithdrawalDays ?? product.withdrawalDays;
+                                          form.setValue("milkWithholdingHours", milkDays != null ? milkDays * 24 : null);
+                                          form.setValue("milkWithholdingUnit", "days");
+                                          form.setValue("milkWithholdingMilkings", null);
+                                          form.setValue("meatWithholdingDays", product.meatWithdrawalDays ?? null);
                                           // Clear batch fields when product changes
                                           form.setValue("batchId", "");
                                           form.setValue("doseAmount", "");
@@ -1209,15 +1468,15 @@ export default function AnimalTreatmentForm({
                           )}
                         />
 
-                        {/* Dose Amount and Unit */}
-                        {selectedBatchId && (
+                        {/* Amount per dose and unit (MINDA's dosage); needed when a batch is picked, for the stock */}
+                        {(
                           <div className="grid grid-cols-2 gap-3">
                             <FormField
                               control={form.control}
                               name="doseAmount"
                               render={({ field }) => (
                                 <FormItem>
-                                  <FormLabel>Dose Amount *</FormLabel>
+                                  <FormLabel>Amount per dose{selectedBatchId ? " *" : ""}</FormLabel>
                                   <FormControl>
                                     <Input
                                       type="number"
@@ -1242,7 +1501,7 @@ export default function AnimalTreatmentForm({
                               name="doseUnit"
                               render={({ field }) => (
                                 <FormItem>
-                                  <FormLabel>Unit *</FormLabel>
+                                  <FormLabel>Unit{selectedBatchId ? " *" : ""}</FormLabel>
                                   <Popover open={openDoseUnitSelect} onOpenChange={setOpenDoseUnitSelect}>
                                     <PopoverTrigger asChild>
                                       <FormControl>
@@ -1264,7 +1523,7 @@ export default function AnimalTreatmentForm({
                                       <Command>
                                         <CommandList>
                                           <CommandGroup>
-                                            {['mL', 'g', 'tablet', 'bolus', 'sachet', 'capsule', 'drops', 'other'].map((unit) => (
+                                            {DOSE_UNITS.map((unit) => (
                                               <CommandItem
                                                 key={unit}
                                                 value={unit}
@@ -1346,6 +1605,170 @@ export default function AnimalTreatmentForm({
                           )}
                         />
 
+                        {/* Hours between doses: plans the follow-up doses and shows when each is due */}
+                        {(totalDosesWatch ?? 1) > 1 && (
+                          <FormField
+                            control={form.control}
+                            name="doseIntervalHours"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Hours between doses *</FormLabel>
+                                <div className="flex flex-wrap gap-2">
+                                  {INTERVAL_PRESETS.map((p) => (
+                                    <Button
+                                      key={p.hours}
+                                      type="button"
+                                      size="sm"
+                                      variant={field.value === p.hours ? "default" : "outline"}
+                                      onClick={() => field.onChange(p.hours)}
+                                      data-testid={`button-interval-${p.hours}`}
+                                    >
+                                      {p.label}
+                                    </Button>
+                                  ))}
+                                </div>
+                                <FormControl>
+                                  <Input
+                                    type="number"
+                                    min="1"
+                                    placeholder="Hours"
+                                    value={field.value ?? ""}
+                                    onChange={(e) => field.onChange(e.target.value === "" ? null : parseInt(e.target.value, 10))}
+                                    data-testid="input-dose-interval"
+                                  />
+                                </FormControl>
+                                <p className="text-xs text-muted-foreground">
+                                  Each dose is due this long after the one before. Taken from the treatment plan where it says.
+                                </p>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        )}
+
+                        {/* Withholding: from the product, can be changed for this treatment. Counted from the last dose. */}
+                        <div className="grid grid-cols-2 gap-3">
+                          {milkUnit === "milkings" ? (
+                            <FormField
+                              key="milk-milkings"
+                              control={form.control}
+                              name="milkWithholdingMilkings"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>Milk withholding (milkings)</FormLabel>
+                                  <FormControl>
+                                    <Input
+                                      type="number"
+                                      min="1"
+                                      placeholder="Milkings"
+                                      value={field.value ?? ""}
+                                      onChange={(e) => field.onChange(e.target.value === "" ? null : parseInt(e.target.value, 10))}
+                                      data-testid="input-milk-withholding-milkings"
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                          ) : (
+                            <FormField
+                              key="milk-hours"
+                              control={form.control}
+                              name="milkWithholdingHours"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>Milk withholding ({milkUnit})</FormLabel>
+                                  <FormControl>
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      step={milkUnit === "days" ? "0.5" : "1"}
+                                      placeholder="From the product"
+                                      value={field.value == null ? "" : milkUnit === "days" ? field.value / 24 : field.value}
+                                      onChange={(e) => {
+                                        if (e.target.value === "") return field.onChange(null);
+                                        const v = Number(e.target.value);
+                                        field.onChange(Math.round(milkUnit === "days" ? v * 24 : v));
+                                      }}
+                                      data-testid="input-milk-withholding"
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                          )}
+                          <FormField
+                            control={form.control}
+                            name="meatWithholdingDays"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Meat withholding (days)</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    placeholder="From the product"
+                                    value={field.value ?? ""}
+                                    onChange={(e) => field.onChange(e.target.value === "" ? null : Number(e.target.value))}
+                                    data-testid="input-meat-withholding"
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 -mt-1">
+                          <span className="text-xs text-muted-foreground">Milk withholding in</span>
+                          {(["hours", "days", "milkings"] as MilkUnit[]).map((u) => (
+                            <Button
+                              key={u}
+                              type="button"
+                              size="sm"
+                              variant={milkUnit === u ? "default" : "outline"}
+                              onClick={() => form.setValue("milkWithholdingUnit", u)}
+                              data-testid={`button-milk-unit-${u}`}
+                            >
+                              {u}
+                            </Button>
+                          ))}
+                        </div>
+                        {milkUnit === "milkings" && (
+                          <FormField
+                            control={form.control}
+                            name="milkingIntervalHours"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>The herd is milked</FormLabel>
+                                <div className="flex flex-wrap gap-2">
+                                  {MILKING_PATTERNS.map((p) => (
+                                    <Button
+                                      key={p.hours}
+                                      type="button"
+                                      size="sm"
+                                      variant={field.value === p.hours ? "default" : "outline"}
+                                      onClick={() => field.onChange(p.hours)}
+                                      data-testid={`button-milking-pattern-${p.hours}`}
+                                    >
+                                      {p.label}
+                                    </Button>
+                                  ))}
+                                </div>
+                                {milkingsWatch && field.value ? (
+                                  <p className="text-xs text-muted-foreground">
+                                    {milkingsWatch} milkings: back in the vat {milkingsWatch * field.value} hours after the last dose.
+                                  </p>
+                                ) : null}
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        )}
+                        <p className="text-xs text-muted-foreground -mt-2">
+                          Both run from the last dose. Check the product label.
+                        </p>
+
                         {/* Dose given now - counts as first dose on create */}
                         {!prefillTreatment && (
                           <FormField
@@ -1402,6 +1825,97 @@ export default function AnimalTreatmentForm({
 
             {step === 3 && (
               <div className="space-y-4">
+                {!awaitingTreatment && (
+                  <FormField
+                    control={form.control}
+                    name="separationDate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Separated from the milking herd</FormLabel>
+                        <div className="flex gap-2">
+                          <FormControl>
+                            <Input
+                              type="date"
+                              value={field.value ?? ""}
+                              onChange={(e) => field.onChange(e.target.value)}
+                              className="flex-1"
+                              data-testid="input-separation-date"
+                            />
+                          </FormControl>
+                          <Button type="button" variant="outline" onClick={() => field.onChange(farmDate(new Date()))} data-testid="button-separation-today">
+                            Today
+                          </Button>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          The day she was, or must be, drafted out of the milking herd.
+                        </p>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+
+                <FormField
+                  control={form.control}
+                  name="veterinarianId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Vet (prescribed or authorised)</FormLabel>
+                      <Popover open={openVetSelect} onOpenChange={setOpenVetSelect}>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              className={cn("w-full justify-between", !field.value && !form.getValues("vetName") && "text-muted-foreground")}
+                              data-testid="button-select-vet"
+                            >
+                              {vets.find(v => v.id === field.value)?.name || form.getValues("vetName") || "Select vet..."}
+                              <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-full p-0">
+                          <Command>
+                            <CommandInput placeholder="Search vets..." data-testid="input-search-vet" />
+                            <CommandList>
+                              <CommandEmpty>Not on the farm's list. Type the name below, or add the vet on the Veterinary screen.</CommandEmpty>
+                              <CommandGroup>
+                                {vets.filter(v => v.isActive !== false).map((vet) => (
+                                  <CommandItem
+                                    key={vet.id}
+                                    value={`${vet.name} ${vet.clinicName ?? ""}`}
+                                    onSelect={() => {
+                                      field.onChange(vet.id);
+                                      form.setValue("vetName", vet.name);
+                                      setOpenVetSelect(false);
+                                    }}
+                                    data-testid={`option-vet-${vet.id}`}
+                                  >
+                                    <Check className={cn("mr-2 h-4 w-4", field.value === vet.id ? "opacity-100" : "opacity-0")} />
+                                    {vet.name}
+                                    {vet.clinicName && <span className="ml-2 text-xs text-muted-foreground">{vet.clinicName}</span>}
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                      <Input
+                        placeholder="Or type the vet's name"
+                        value={field.value ? "" : form.watch("vetName") ?? ""}
+                        onChange={(e) => {
+                          field.onChange("");
+                          form.setValue("vetName", e.target.value);
+                        }}
+                        data-testid="input-vet-name"
+                      />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
                 <FormField
                   control={form.control}
                   name="clinicalNotes"

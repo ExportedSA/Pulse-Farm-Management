@@ -9,9 +9,32 @@ import { Syringe, AlertCircle, CheckCircle2, Clock, Eye } from "lucide-react";
 import type { AnimalTreatment, Product } from "@shared/schema";
 import { getTreatmentPhase, type TreatmentPhase } from "@/pages/home";
 import { daysUntil } from "@/lib/utils";
-import { formatFarmTime } from "@shared/withholding";
+import { formatFarmTime, meatWithheldText } from "@shared/withholding";
+import { doseDueState, plannedDoses } from "@shared/dose-schedule";
+
+// When the next dose is due, e.g. "Next dose due Thu 19 Nov, 6:56 am", and whether that's now or overdue
+function nextDoseText(t: AnimalTreatment): { text: string; state: ReturnType<typeof doseDueState> } | null {
+  if (!t.nextDoseDueAt) return null;
+  const state = doseDueState(t);
+  const when = formatFarmTime(new Date(t.nextDoseDueAt));
+  return { text: state === "overdue" ? `Dose overdue since ${when}` : `Next dose due ${when}`, state };
+}
+
+// "Separated 20 Nov" (a past or today's date), "Separate by 22 Nov" (a later one)
+function separationText(date: string | null | undefined): string | null {
+  if (!date) return null;
+  const d = new Date(`${date}T12:00:00`);
+  const label = d.toLocaleDateString("en-NZ", { weekday: "short", day: "numeric", month: "short" });
+  return (daysUntil(date) ?? 0) > 0 ? `Separate from the milking herd by ${label}` : `Separated from the milking herd ${label}`;
+}
 
 // When the cow's milk can go back in the vat, to the minute after the last dose
+// Milk withholding as entered: in milkings (and the hours they come to), or in hours
+function milkWithholdingText(t: { milkWithholdingHours?: number | null; milkWithholdingMilkings?: number | null }) {
+  const hours = `${t.milkWithholdingHours} hours`;
+  return t.milkWithholdingMilkings ? `${t.milkWithholdingMilkings} milkings (${hours})` : hours;
+}
+
 function clearText(t: AnimalTreatment): string {
   if (t.milkClearAt) {
     const clear = new Date(t.milkClearAt);
@@ -184,6 +207,22 @@ export default function CurrentTreatments({
               {treatment.treatmentPlan}
             </p>
           </div>
+          {status === 'treatment' && nextDoseText(treatment) && (
+            <p
+              className={`mt-2 text-xs font-medium ${nextDoseText(treatment)!.state === 'overdue' ? 'text-red-600' : nextDoseText(treatment)!.state === 'due' ? 'text-amber-700' : 'text-muted-foreground'}`}
+              data-testid="text-next-dose"
+            >
+              {nextDoseText(treatment)!.text}
+            </p>
+          )}
+          {meatWithheldText(treatment.meatClearAt) && (
+            <p className="mt-1 text-xs font-medium text-red-700" data-testid="text-meat-withholding">
+              {meatWithheldText(treatment.meatClearAt)}
+            </p>
+          )}
+          {!treatment.meatClearAt && (treatment.meatWithholdingHours ?? 0) > 0 && status === 'treatment' && (
+            <p className="mt-1 text-xs text-muted-foreground">Meat withheld: ends {Math.round((treatment.meatWithholdingHours ?? 0) / 24)} days after the last dose</p>
+          )}
         </CardContent>
       </Card>
     );
@@ -224,8 +263,46 @@ export default function CurrentTreatments({
                 </p>
                 {(selectedTreatment.milkWithholdingHours ?? 0) > 0 && (
                   <p className="text-sm text-muted-foreground mt-1">
-                    Milk withholding: {selectedTreatment.milkWithholdingHours} hours after the last dose.
+                    Milk withholding: {milkWithholdingText(selectedTreatment)} after the last dose.
                   </p>
+                )}
+                {(selectedTreatment.meatWithholdingHours ?? 0) > 0 && (
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Meat withholding: {Math.round((selectedTreatment.meatWithholdingHours ?? 0) / 24)} days after the last dose.
+                  </p>
+                )}
+                {plannedDoses(selectedTreatment as any).length > 0 && (
+                  <div className="mt-2" data-testid="list-planned-doses">
+                    <p className="text-sm font-medium">Doses still to give</p>
+                    <ul className="text-sm text-muted-foreground">
+                      {plannedDoses(selectedTreatment as any).map((d) => (
+                        <li key={d.dose}>Dose {d.dose}: {formatFarmTime(d.dueAt)}</li>
+                      ))}
+                    </ul>
+                    {selectedTreatment.doseIntervalHours && (
+                      <p className="text-xs text-muted-foreground">Every {selectedTreatment.doseIntervalHours} hours, from the dose before.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            {meatWithheldText(selectedTreatment.meatClearAt) && (
+              <div>
+                <p className="text-base font-medium mb-1">Meat withholding</p>
+                <p className="text-base text-red-700">{meatWithheldText(selectedTreatment.meatClearAt)}</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {Math.round((selectedTreatment.meatWithholdingHours ?? 0) / 24)} days after the last dose
+                  {selectedTreatment.lastDoseAt ? ` (${formatFarmTime(new Date(selectedTreatment.lastDoseAt))})` : ""}.
+                </p>
+              </div>
+            )}
+            {(selectedTreatment.separationDate || selectedTreatment.vetName) && (
+              <div>
+                {separationText(selectedTreatment.separationDate) && (
+                  <p className="text-sm text-muted-foreground">{separationText(selectedTreatment.separationDate)}</p>
+                )}
+                {selectedTreatment.vetName && (
+                  <p className="text-sm text-muted-foreground">Vet: {selectedTreatment.vetName}</p>
                 )}
               </div>
             )}
@@ -235,7 +312,7 @@ export default function CurrentTreatments({
                 <p className="text-base text-muted-foreground">{clearText(selectedTreatment)}</p>
                 {selectedTreatment.milkWithholdingHours != null && (
                   <p className="text-sm text-muted-foreground mt-1">
-                    {selectedTreatment.milkWithholdingHours} hours after the last dose
+                    {milkWithholdingText(selectedTreatment)} after the last dose
                     {selectedTreatment.lastDoseAt ? ` (${formatFarmTime(new Date(selectedTreatment.lastDoseAt))})` : ""}.
                   </p>
                 )}

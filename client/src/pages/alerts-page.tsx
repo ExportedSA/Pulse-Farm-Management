@@ -6,6 +6,26 @@ import { Link } from "wouter";
 import { AlertTriangle, Clock, Eye, AlertCircle, Package, Pill, Droplet } from "lucide-react";
 import type { AnimalTreatment, ReminderSettings } from "@shared/schema";
 import { daysUntil } from "@/lib/utils";
+import { formatFarmTime } from "@shared/withholding";
+
+// Milk: when she can go back in the vat (to the minute after the last dose), or why it isn't known yet
+function milkText(t: AnimalTreatment): string | null {
+  if (t.returnedToVatAt || !(t.milkWithholdingHours ?? 0)) return null;
+  if (t.milkClearAt) {
+    const at = new Date(t.milkClearAt);
+    return at.getTime() > Date.now() ? `Milk: withheld until ${formatFarmTime(at)}` : null;
+  }
+  return "Milk: withheld (doses still to give)";
+}
+
+// Meat: when she can go for slaughter, which often runs on after she's back in the vat
+function meatText(t: AnimalTreatment): string | null {
+  if (t.meatClearAt) {
+    const at = new Date(t.meatClearAt);
+    return at.getTime() > Date.now() ? `Meat: not for slaughter until ${formatFarmTime(at)}` : null;
+  }
+  return (t.meatWithholdingHours ?? 0) > 0 && t.status === 'active' ? "Meat: withheld (doses still to give)" : null;
+}
 
 export default function AlertsPage() {
   const { data: treatments = [] } = useQuery<AnimalTreatment[]>({
@@ -14,6 +34,12 @@ export default function AlertsPage() {
 
   const { data: settingsData } = useQuery<ReminderSettings>({
     queryKey: ["/api/settings/reminders"],
+  });
+
+  // Treated animals still withheld, milk or meat (from the treatments' own clear times)
+  const { data: withheld = [] } = useQuery<AnimalTreatment[]>({
+    queryKey: ["/api/treatment-withholdings"],
+    refetchInterval: 60_000,
   });
 
   const { data: milkWithholdings = [] } = useQuery<any[]>({
@@ -114,7 +140,10 @@ export default function AlertsPage() {
     return batch.status === 'open' && (batch.quantityRemaining || 0) < 10;
   });
 
+  const withheldRows = withheld.filter(t => milkText(t) || meatText(t));
+
   const totalAlerts = Object.values(treatmentAlerts).reduce((sum, arr) => sum + arr.length, 0)
+    + withheldRows.length
     + activeMilkWithholdings.length
     + expiringBatches.length
     + lowStockBatches.length;
@@ -138,6 +167,46 @@ export default function AlertsPage() {
         </Card>
       ) : (
         <div className="grid gap-6">
+          {withheldRows.length > 0 && (
+            <Card className="border-red-700 border-2" data-testid="alert-category-treatment-withholdings">
+              <CardHeader className="bg-red-50 dark:bg-red-950">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Droplet className="w-6 h-6 text-red-700" strokeWidth={1.5} />
+                    <div>
+                      <CardTitle>Withholding: milk and meat</CardTitle>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Treated animals whose milk can't go in the vat, or who can't go for slaughter, yet
+                      </p>
+                    </div>
+                  </div>
+                  <Badge className="text-red-700 bg-white dark:bg-black text-lg px-3 py-1">{withheldRows.length}</Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="p-4">
+                <div className="space-y-2">
+                  {withheldRows.map((t) => (
+                    <div key={t.id} className="flex items-center justify-between p-3 border rounded-md" data-testid={`withholding-item-${t.id}`}>
+                      <div>
+                        <p className="font-semibold">
+                          {t.animalId ? (
+                            <Link href={`/app/animals/${t.animalId}`}>{getCowIdentifier(t.cowId, t.birthId)}</Link>
+                          ) : getCowIdentifier(t.cowId, t.birthId)}
+                          <span className="ml-2 text-sm font-normal text-muted-foreground">{t.treatmentType}</span>
+                        </p>
+                        {milkText(t) && <p className="text-sm text-blue-700">{milkText(t)}</p>}
+                        {meatText(t) && <p className="text-sm text-red-700">{meatText(t)}</p>}
+                      </div>
+                      <Link href="/app/treatments/current">
+                        <Button size="sm" variant="outline" data-testid={`button-view-withholding-${t.id}`}>View</Button>
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {activeMilkWithholdings.length > 0 && (
             <Card className="border-blue-600 border-2" data-testid="alert-category-milk-withholdings">
               <CardHeader className="bg-blue-100 dark:bg-blue-950">

@@ -5,7 +5,7 @@ import { pool, farmDbContext } from "./db";
 import { farmDate, returnToVatProblem } from "@shared/withholding";
 import passport from "passport";
 import { sanitizeUser, sanitizeUsers } from "./auth-utils";
-import { requireAuth, optionalAuth, getFarmId, getUserId } from "./middleware/auth";
+import { requireAuth, optionalAuth, getFarmId, getUserId, requireAnyRole } from "./middleware/auth";
 import { getFarmRole } from "./domain/farms";
 import { uploadsMiddleware } from "./middleware/serveUploads";
 import { contractorGuard, uploadsGuard } from "./middleware/farmAccess";
@@ -859,6 +859,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/conditions/import - load a diagnosis list (e.g. MINDA's) into the farm's own list.
+  // Rows matched by code, or by name when there's no code, are updated; the rest are added.
+  app.post("/api/conditions/import", requireAnyRole(['owner', 'manager', 'admin']), async (req, res) => {
+    try {
+      const { rows } = z.object({
+        rows: z.array(z.object({
+          code: z.string().trim().max(20).optional().nullable(),
+          name: z.string().trim().min(1, "Every diagnosis needs a name").max(255),
+          category: z.string().trim().max(100).optional().nullable(),
+          requiresBodyPart: z.boolean().optional(),
+          bodyPartType: z.enum(['udder', 'foot']).optional().nullable(),
+        })).min(1, "The list is empty").max(2000),
+      }).parse(req.body ?? {});
+      res.json(await storage.importConditions(rows));
+    } catch (error: any) {
+      if (error.name === 'ZodError') return res.status(400).json({ error: error.errors?.[0]?.message ?? "That list couldn't be read" });
+      console.error("Failed to import conditions:", error);
+      res.status(500).json({ error: "Failed to import the diagnosis list" });
+    }
+  });
+
   // ===== ANIMALS =====
 
   app.get("/api/animals", async (req, res) => {
@@ -1329,6 +1350,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/treatment-withholdings - animals still withheld: milk not yet clear for the vat, or meat
+  // not yet clear for slaughter (which can run on after the cow is back in the vat)
+  app.get("/api/treatment-withholdings", async (_req, res) => {
+    try {
+      res.json(await storage.getWithheldTreatments());
+    } catch (error) {
+      console.error("Failed to fetch withholdings:", error);
+      res.status(500).json({ error: "Failed to fetch withholdings" });
+    }
+  });
+
   app.get("/api/treatments/:id", async (req, res) => {
     try {
       const treatment = await storage.getAnimalTreatment(req.params.id);
@@ -1354,7 +1386,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/treatments", async (req, res) => {
     try {
-      const data = insertAnimalTreatmentSchema.parse(req.body);
+      // Recorded by the signed-in user when the app doesn't say which staff member gave it
+      const data = insertAnimalTreatmentSchema.parse({ ...req.body, staffMemberId: req.body?.staffMemberId || getUserId(req) });
       const treatment = await storage.createAnimalTreatment(data);
       
       // Auto-create lifecycle event for batch traceability (fire-and-forget)
@@ -1387,6 +1420,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error.name === 'ZodError') {
         return res.status(400).json({ error: error.message });
       }
+      // A link to another farm's animal, product or vet (the farm guard)
+      if (['P0403', '42501'].includes(error.code ?? error.cause?.code)) return res.status(403).json({ error: 'That belongs to another farm' });
       console.error("Failed to create treatment:", error);
       res.status(500).json({ error: "Failed to create treatment" });
     }
@@ -1404,6 +1439,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error.name === 'ZodError') {
         return res.status(400).json({ error: error.message });
       }
+      if (['P0403', '42501'].includes(error.code ?? error.cause?.code)) return res.status(403).json({ error: 'That belongs to another farm' });
       console.error("Failed to update treatment:", error);
       res.status(500).json({ error: "Failed to update treatment" });
     }

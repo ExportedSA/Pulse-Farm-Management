@@ -195,6 +195,11 @@ export const conditions = pgTable('conditions', {
   name: varchar('name', { length: 255 }).notNull(),
   requiresBodyPart: boolean('requires_body_part').default(false),
   bodyPartType: bodyPartTypeEnum('body_part_type'),
+  // The diagnosis list's own code, group and order, so a full list (e.g. MINDA's) can be loaded (migration 0036)
+  code: varchar('code', { length: 20 }),
+  category: varchar('category', { length: 100 }),
+  sortOrder: integer('sort_order'),
+  isActive: boolean('is_active').default(true).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -1180,6 +1185,17 @@ export const animalTreatments = pgTable('animal_treatments', {
   milkWithholdingHours: integer('milk_withholding_hours'),
   milkClearAt: timestamp('milk_clear_at', { withTimezone: true }),
   returnedToVatAt: timestamp('returned_to_vat_at', { withTimezone: true }),
+  // Meat withholding, from the last dose like the milk; dose schedule; separation; vet (migration 0036)
+  meatWithholdingHours: integer('meat_withholding_hours'),
+  meatClearAt: timestamp('meat_clear_at', { withTimezone: true }),
+  doseIntervalHours: integer('dose_interval_hours'),
+  nextDoseDueAt: timestamp('next_dose_due_at', { withTimezone: true }),
+  separationDate: date('separation_date'),
+  veterinarianId: uuid('veterinarian_id').references(() => veterinarians.id),
+  vetName: varchar('vet_name', { length: 255 }),
+  // Milk withholding counted in milkings, as MINDA allows: the hours are milkings x hours between milkings (0037)
+  milkWithholdingMilkings: integer('milk_withholding_milkings'),
+  milkingIntervalHours: integer('milking_interval_hours'),
   retreatmentOf: uuid('retreatment_of').references((): any => animalTreatments.id),
   retreatmentReason: text('retreatment_reason'),
   awaitingTreatment: boolean('awaiting_treatment').default(false),
@@ -2501,6 +2517,8 @@ export const insertBatchLifecycleEventSchema = createInsertSchema(batchLifecycle
 
 export const insertConditionSchema = createInsertSchema(conditions, {
   name: z.string().min(1, "Condition name required"),
+  code: z.string().max(20).optional().nullable(),
+  category: z.string().max(100).optional().nullable(),
 }).omit({ id: true, createdAt: true, updatedAt: true });
 
 export const insertAnimalSchema = createInsertSchema(animals).omit({ 
@@ -2701,7 +2719,19 @@ export const insertAnimalTreatmentSchema = createInsertSchema(animalTreatments, 
   // Sent by the app as an ISO time; the server works out the rest
   lastDoseAt: z.coerce.date().optional().nullable(),
   milkWithholdingHours: z.number().int().min(0).max(24 * 365).optional().nullable(),
-}).omit({ id: true, createdAt: true, updatedAt: true, version: true, milkClearAt: true, returnedToVatAt: true });
+  meatWithholdingHours: z.number().int().min(0).max(24 * 365).optional().nullable(),
+  doseIntervalHours: z.number().int().min(1).max(24 * 365).optional().nullable(),
+  totalDoses: z.number().int().min(1).max(100).optional().nullable(),
+  separationDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Separation date must be a date").optional().nullable(),
+  veterinarianId: z.string().uuid().optional().nullable(),
+  vetName: z.string().max(255).optional().nullable(),
+  conditionId: z.string().uuid().optional().nullable(),
+  milkWithholdingMilkings: z.number().int().min(1).max(100).optional().nullable(),
+  milkingIntervalHours: z.number().int().min(1).max(48).optional().nullable(),
+}).omit({
+  id: true, createdAt: true, updatedAt: true, version: true, milkClearAt: true, returnedToVatAt: true,
+  meatClearAt: true, nextDoseDueAt: true,
+});
 
 export const insertReproductionEventSchema = createInsertSchema(reproductionEvents, {
   animalId: z.string().min(1, "Animal ID required"),

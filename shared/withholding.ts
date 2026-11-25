@@ -112,3 +112,30 @@ export function returnToVatProblem(t: WithholdingInput, now: Date = new Date()):
 export function formatFarmTime(at: Date, timeZone = FARM_TIME_ZONE): string {
   return new Intl.DateTimeFormat("en-NZ", { timeZone, weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }).format(at);
 }
+
+/**
+ * When the animal can go for slaughter: the last dose plus the meat withholding period, counted the
+ * same way as the milk. For a course that was stopped early (`courseEnded`: moved to monitoring, or
+ * finished), it counts from the last dose actually given. Null while doses are still to be given.
+ */
+export function meatClearAt(t: WithholdingInput & { meatWithholdingHours?: number | null }, courseEnded = false): Date | null {
+  if (t.meatWithholdingHours == null) return null;
+  const input = { ...t, milkWithholdingHours: t.meatWithholdingHours };
+  return milkClearAt(input) ?? (courseEnded ? clearAfterDosesGiven(input) : null);
+}
+
+/** "Not for slaughter until Thu 19 Nov, 6:56 am", or null once it has passed (or isn't set) */
+export function meatWithheldText(meatClear: string | Date | null | undefined, now: Date = new Date()): string | null {
+  if (!meatClear) return null;
+  const at = new Date(meatClear);
+  if (!Number.isFinite(at.getTime()) || at.getTime() <= now.getTime()) return null;
+  return `Not for slaughter until ${formatFarmTime(at)}`;
+}
+
+/** A moment as a date-and-time box shows it, in farm time: "2026-11-10T06:56" */
+export function farmDateTimeLocal(at: Date = new Date(), timeZone = FARM_TIME_ZONE): string {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+  }).formatToParts(at).map(x => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
+}

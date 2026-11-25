@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
-import { useParams, useLocation } from "wouter";
+import { useParams, useLocation, useSearch } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -26,7 +26,9 @@ import CompletedTreatments from "@/components/CompletedTreatments";
 import Alerts from "@/pages/alerts";
 import { uid, load, save, today, toCSV, parseCSV, download, requestNotificationPermission, showLocalNotification, addDays, daysUntil } from "@/lib/utils";
 import type { RecordItem, Product, User, ReminderSettings, Condition, AnimalTreatment, InsertAnimalTreatment } from "@shared/schema";
-import { clearAfterDosesGiven, daysToHours, formatFarmTime, milkClearAt, parseFarmTime, returnToVatProblem } from "@shared/withholding";
+import { clearAfterDosesGiven, daysToHours, formatFarmTime, meatClearAt, milkClearAt, parseFarmTime, returnToVatProblem } from "@shared/withholding";
+import { nextDoseDueAt } from "@shared/dose-schedule";
+import type { Animal } from "@shared/schema";
 
 export type TreatmentPhase = 'awaiting' | 'treatment' | 'withholding' | 'monitoring' | 'returnToVat';
 
@@ -37,7 +39,8 @@ const isServerId = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 function toServerPatch(patch: Record<string, any>): Record<string, any> {
   const {
     id: _id, createdAt: _c, updatedAt: _u, version: _v, deletedAt: _d, farmId: _f,
-    milkClearAt: _m, milkWithdrawalEndDate: _e, returnedToVatAt: _r, lastDoseDate, completedDate, lastDoseAt, ...rest
+    milkClearAt: _m, milkWithdrawalEndDate: _e, returnedToVatAt: _r, meatClearAt: _mc, nextDoseDueAt: _nd,
+    lastDoseDate, completedDate, lastDoseAt, ...rest
   } = patch;
   const out: Record<string, any> = { ...rest };
   if (lastDoseAt !== undefined) out.lastDoseAt = lastDoseAt instanceof Date ? lastDoseAt.toISOString() : lastDoseAt;
@@ -46,10 +49,22 @@ function toServerPatch(patch: Record<string, any>): Record<string, any> {
   return out;
 }
 
-// For a treatment kept on this device only: the milk withholding worked out the same way the server does
-function withLocalWithholding<T extends Record<string, any>>(t: T): T {
+// For a treatment kept on this device only: the withholding and next dose worked out the same way the server does
+function withLocalWithholding<T extends Record<string, any>>(t0: T): T {
+  // Withholding in milkings comes to the milkings times the hours between them, as the server works it out
+  const t: T = t0.milkWithholdingMilkings && t0.milkingIntervalHours && t0.milkWithholdingHours == null
+    ? { ...t0, milkWithholdingHours: t0.milkWithholdingMilkings * t0.milkingIntervalHours }
+    : t0;
   const clear = milkClearAt(t as any);
-  return { ...t, milkClearAt: clear ? clear.toISOString() : null, milkWithdrawalEndDate: clear ? clear.toISOString().slice(0, 10) : t.milkWithdrawalEndDate };
+  const meat = meatClearAt(t as any, t.status === 'completed' || t.monitoring === true);
+  const next = t.status === 'active' && !t.awaitingTreatment && !t.monitoring ? nextDoseDueAt(t as any) : null;
+  return {
+    ...t,
+    milkClearAt: clear ? clear.toISOString() : null,
+    milkWithdrawalEndDate: clear ? clear.toISOString().slice(0, 10) : t.milkWithdrawalEndDate,
+    meatClearAt: meat ? meat.toISOString() : null,
+    nextDoseDueAt: next ? next.toISOString() : null,
+  };
 }
 
 // What to say after a dose: the next step, or when the milk can go back in the vat
@@ -95,6 +110,16 @@ export default function Home() {
   const params = useParams<{ section?: string }>();
   const [, setLocation] = useLocation();
   const section = params.section || 'treatments';
+
+  // Quick "Medical" record from an animal (/app/treatments/treatment?animal=<id>): the treatment form
+  // opens filled in for it
+  const animalParam = new URLSearchParams(useSearch()).get('animal');
+  const { data: quickAnimal } = useQuery<Animal>({ queryKey: [`/api/animals/${animalParam}`], enabled: !!animalParam });
+  const prefillAnimal = useMemo(() => {
+    if (!animalParam || !quickAnimal) return null;
+    const cowId = quickAnimal.visualId || quickAnimal.cowId || quickAnimal.naitTag || quickAnimal.lifetimeId || "";
+    return { id: quickAnimal.id, cowId };
+  }, [animalParam, quickAnimal]);
 
   const [records, setRecords] = useState<RecordItem[]>(() => load("dairy_records", [] as RecordItem[]));
   const [products, setProducts] = useState<Product[]>(() =>
@@ -566,7 +591,10 @@ export default function Home() {
     toast.success("Staff member removed");
   };
 
-  const addAnimalTreatment = async (treatment: InsertAnimalTreatment & { id?: string }) => {
+  // Returns false when the treatment wasn't saved anywhere (the server refused it)
+  // quiet: one animal of a group record (the form says once how it went)
+  const addAnimalTreatment = async (treatment: InsertAnimalTreatment & { id?: string }, opts?: { quiet?: boolean }): Promise<boolean> => {
+    const done = (message: string) => { if (!opts?.quiet) toast.success(message); };
     // If updating an existing treatment (has ID), update it instead of creating new
     if (treatment.id && selectedTreatmentForEdit) {
       const product = treatment.productId
@@ -580,8 +608,9 @@ export default function Home() {
           setSelectedTreatmentForEdit(null);
           setActiveTab("treatment-current");
           toast.success("Treatment plan added - cow moved to treatment list");
+          return true;
         }
-        return;
+        return false;
       }
       // Awaiting on this device only: the treatment itself is saved on the server, as a new one
       setAnimalTreatments(list => list.filter(t => t.id !== treatment.id));
@@ -603,8 +632,8 @@ export default function Home() {
         awaitingTreatment: true,
       };
       setAnimalTreatments((t) => [item, ...t]);
-      toast.success("Cow added to awaiting treatment list");
-      return;
+      done("Cow added to awaiting treatment list");
+      return true;
     }
 
     if (treatment.monitoring && treatment.monitoringDays) {
@@ -622,8 +651,8 @@ export default function Home() {
         monitoringEndDate: monitoringEnd,
       };
       setAnimalTreatments((t) => [item, ...t]);
-      toast.success("Cow added to monitoring");
-      return;
+      done("Cow added to monitoring");
+      return true;
     }
     
     // Regular treatment creation - persist to backend API when online
@@ -669,8 +698,8 @@ export default function Home() {
         const result = await response.json();
         if (result.queued) {
           setAnimalTreatments((t) => [deviceCopy(), ...t]);
-          toast.success("Treatment queued for sync when online");
-          return;
+          done("Treatment queued for sync when online");
+          return true;
         }
       }
       
@@ -679,20 +708,23 @@ export default function Home() {
         const error = await response.json().catch(() => ({ error: 'Failed to create treatment' }));
         toast.error(error.error || 'Failed to create treatment');
         console.error('Treatment creation failed:', response.status, error);
-        return;
+        return false;
       }
       
       // Success (2xx): the server's copy, with its doses and milk withholding worked out
       const apiTreatment: AnimalTreatment = await response.json();
       setAnimalTreatments((t) => [apiTreatment, ...t]);
       refetchTreatments();
-      toast.success("Treatment recorded");
+      done("Treatment recorded");
+      return true;
     } catch (error: any) {
       // Network error - fallback to local storage with error toast
       console.error('Network error creating treatment:', error);
       setAnimalTreatments((t) => [deviceCopy(), ...t]);
       toast.error("Network error - treatment saved locally");
+      return true;
     }
+    return false;
   };
 
   // A dose given now. On the server, which keeps the time of the last dose and moves the milk clear
@@ -1114,8 +1146,14 @@ export default function Home() {
               products={products}
               users={users}
               conditions={conditions}
-              onSubmit={addAnimalTreatment}
+              onSubmit={async (t, opts) => {
+                const saved = await addAnimalTreatment(t, opts);
+                // A quick record for an animal: on to the current treatments, without the animal in the address
+                if (saved && animalParam) setLocation("/app/treatments/current");
+                return saved;
+              }}
               prefillTreatment={selectedTreatmentForEdit}
+              prefillAnimal={selectedTreatmentForEdit ? null : prefillAnimal}
             />
           </TabsContent>
 
@@ -1246,9 +1284,9 @@ export default function Home() {
             <UserManagement users={users} onAdd={addUser} onUpdate={updateUser} onRemove={removeUser} />
           </TabsContent>
 
-          <TabsContent value="manage-products" className="mt-4 space-y-6">
+          <TabsContent value="manage" className="mt-4 space-y-6">
             <ProductManagement products={products} onAdd={addProduct} onUpdate={updateProduct} onRemove={removeProduct} />
-            <ConditionManagement conditions={conditions} onAdd={addCondition} onUpdate={updateCondition} onRemove={removeCondition} />
+            <ConditionManagement conditions={conditions} />
           </TabsContent>
 
           <TabsContent value="alerts" className="mt-4">

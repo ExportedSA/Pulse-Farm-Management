@@ -16,6 +16,9 @@ import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
 import type { Animal, Pasture, AnimalTreatment, ReproductionEvent, WeightRecord, HealthScore, HealthAlert, BreedingRecord, LactationRecord, HeatRecord, LabResult, Prescription } from "@shared/schema";
 import { format } from "date-fns";
+import { useLocation } from "wouter";
+import { animalWithholding, medicalRecordHref, withholdingLabel } from "@/lib/animal-withholding";
+import { formatFarmTime, meatWithheldText } from "@shared/withholding";
 
 type AnimalGroup = {
   id: string;
@@ -49,6 +52,7 @@ export default function AnimalDetailDialog({
   const [showVetHistory, setShowVetHistory] = useState(false);
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const [, navigate] = useLocation();
 
   // Handle weight record submission
   const handleWeightSubmit = () => {
@@ -241,6 +245,7 @@ export default function AnimalDetailDialog({
 
   const activeTreatments = treatments.filter(t => t.status === 'active');
   const completedTreatments = treatments.filter(t => t.status === 'completed');
+  const withholding = animalWithholding(treatments);
 
   return (
     <Dialog open={!!animal} onOpenChange={onClose}>
@@ -263,16 +268,40 @@ export default function AnimalDetailDialog({
                 )}
               </div>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onEdit(animal)}
-              data-testid="button-edit-animal-detail"
-            >
-              <Edit className="h-4 w-4 mr-2" />
-              Edit
-            </Button>
+            <div className="flex gap-2">
+              {/* Quick "Medical" record: the treatment form, filled in for this animal */}
+              <Button
+                size="sm"
+                onClick={() => {
+                  onClose();
+                  navigate(medicalRecordHref(animal.id));
+                }}
+                data-testid="button-medical-record"
+              >
+                <Syringe className="h-4 w-4 mr-2" />
+                Medical
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onEdit(animal)}
+                data-testid="button-edit-animal-detail"
+              >
+                <Edit className="h-4 w-4 mr-2" />
+                Edit
+              </Button>
+            </div>
           </div>
+          {(withholding.milk || withholding.meat) && (
+            <div className="mt-3 flex flex-wrap gap-2" data-testid="animal-withholding">
+              {withholdingLabel("milk", withholding.milk) && (
+                <Badge className="bg-blue-700 text-white">{withholdingLabel("milk", withholding.milk)}</Badge>
+              )}
+              {withholdingLabel("meat", withholding.meat) && (
+                <Badge className="bg-red-700 text-white">{withholdingLabel("meat", withholding.meat)}</Badge>
+              )}
+            </div>
+          )}
         </DialogHeader>
 
         <div className="space-y-6 mt-4">
@@ -443,6 +472,20 @@ export default function AnimalDetailDialog({
                             {t.dosesGiven !== undefined && t.totalDoses !== undefined && (
                               <div className="text-xs text-muted-foreground">
                                 Doses: {t.dosesGiven} / {t.totalDoses}
+                                {t.nextDoseDueAt && ` · next due ${formatFarmTime(new Date(t.nextDoseDueAt))}`}
+                              </div>
+                            )}
+                            {t.milkClearAt && !t.returnedToVatAt && (
+                              <div className="text-xs text-blue-700">Milk clear from {formatFarmTime(new Date(t.milkClearAt))}</div>
+                            )}
+                            {meatWithheldText(t.meatClearAt) && (
+                              <div className="text-xs text-red-700">{meatWithheldText(t.meatClearAt)}</div>
+                            )}
+                            {(t.separationDate || t.vetName) && (
+                              <div className="text-xs text-muted-foreground">
+                                {t.separationDate && `Separated ${format(new Date(`${t.separationDate}T12:00:00`), 'MMM d')}`}
+                                {t.separationDate && t.vetName && ' · '}
+                                {t.vetName && `Vet: ${t.vetName}`}
                               </div>
                             )}
                           </div>
@@ -467,6 +510,9 @@ export default function AnimalDetailDialog({
                             <div className="text-xs text-muted-foreground mt-1">
                               Completed: {t.completedDate ? format(new Date(t.completedDate), 'MMM d, yyyy') : 'Date unknown'}
                             </div>
+                            {meatWithheldText(t.meatClearAt) && (
+                              <div className="text-xs text-red-700">{meatWithheldText(t.meatClearAt)}</div>
+                            )}
                           </div>
                         ))}
                       </div>
