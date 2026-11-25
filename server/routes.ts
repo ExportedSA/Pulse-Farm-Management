@@ -552,7 +552,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/products/:id", async (req, res) => {
+  // Medicines: like spray and fertiliser products, only owners and managers change or remove them
+  const productManager = async (req: Request, res: Response, next: NextFunction) => {
+    const farmId = getFarmId(req);
+    const userId = getUserId(req);
+    const role = farmId && userId ? await getFarmRole(userId, farmId) : undefined;
+    if (role !== 'owner' && role !== 'manager') {
+      return res.status(403).json({ error: "Only owners and managers can change or remove products" });
+    }
+    next();
+  };
+
+  app.put("/api/products/:id", productManager, async (req, res) => {
     try {
       const data = insertProductSchema.partial().parse(req.body);
       const product = await storage.updateProduct(req.params.id, data);
@@ -569,7 +580,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/products/:id", async (req, res) => {
+  app.delete("/api/products/:id", productManager, async (req, res) => {
     try {
       const existing = await storage.getProduct(req.params.id);
       if (!existing) {

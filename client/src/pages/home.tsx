@@ -74,6 +74,18 @@ function doseMessage(t: AnimalTreatment): string {
   return t.milkClearAt ? `Last dose recorded. Milk can go back in the vat from ${formatFarmTime(new Date(t.milkClearAt))}` : "Last dose recorded";
 }
 
+// The server's reason for refusing a request ("403: {"error":"..."}" from apiRequest), else the fallback
+function serverMessage(error: unknown, fallback: string): string {
+  const text = error instanceof Error ? error.message : '';
+  try {
+    const body = JSON.parse(text.replace(/^\d{3}:\s*/, ''));
+    if (typeof body?.error === 'string') return body.error;
+  } catch {
+    // not JSON
+  }
+  return fallback;
+}
+
 export const getTreatmentPhase = (treatment: AnimalTreatment): TreatmentPhase => {
   if (treatment.awaitingTreatment) return 'awaiting';
   if (treatment.monitoring) {
@@ -254,7 +266,7 @@ export default function Home() {
   // Mutations for creating/updating/deleting products
   const addProductMutation = useMutation({
     mutationFn: (product: { name: string; withdrawalDays?: number; milkWithdrawalDays?: number; meatWithdrawalDays?: number; useByDays?: number; treatmentPlan?: string; barcode?: string }) =>
-      apiRequest('/api/products', { method: 'POST', body: product }),
+      apiRequest('/api/products', 'POST', product),
     onMutate: async (product) => {
       // Capture snapshot and optimistically update local state
       let previousProducts: Product[] = [];
@@ -336,42 +348,52 @@ export default function Home() {
     }
   });
 
-  const addConditionMutation = useMutation({
-    mutationFn: (condition: { name: string; requiresBodyPart?: boolean; bodyPartType?: 'udder' | 'foot' }) =>
-      apiRequest('/api/conditions', { method: 'POST', body: condition }),
-    onMutate: async (condition) => {
-      // Capture snapshot and optimistically update local state
-      let previousConditions: Condition[] = [];
-      const tempCondition: Condition = {
-        ...condition,
-        id: uid(),
-        farmId: null,
-        createdAt: new Date(new Date().toISOString()) as any,
-        updatedAt: new Date(new Date().toISOString()) as any,
-        requiresBodyPart: condition.requiresBodyPart ?? null,
-        bodyPartType: condition.bodyPartType ?? null,
-      };
-      setConditions((cs) => {
-        previousConditions = [...cs];
-        return [...cs, tempCondition];
+  // Diagnoses are MINDA's list (migration 0037), shown read only on the Manage tab: nothing here
+  // adds, changes or removes them.
+
+  type ProductFields = { name: string; withdrawalDays?: number; milkWithdrawalDays?: number; meatWithdrawalDays?: number; useByDays?: number; treatmentPlan?: string; barcode?: string };
+
+  // Product changes are saved on the server; the list shows them straight away and goes back if
+  // the server refuses (for example, only owners and managers can change or remove products)
+  const updateProductMutation = useMutation({
+    mutationFn: ({ id, product }: { id: string; product: ProductFields }) =>
+      apiRequest(`/api/products/${id}`, 'PUT', product),
+    onMutate: async ({ id, product }) => {
+      let previousProducts: Product[] = [];
+      setProducts((ps) => {
+        previousProducts = [...ps];
+        return ps.map((p) => (p.id === id ? { ...p, ...product } : p));
       });
-      return { previousConditions };
+      return { previousProducts };
     },
-    onSuccess: (response) => {
-      const isQueued = response?.status === 202;
-      if (!isQueued) {
-        queryClient.invalidateQueries({ queryKey: ['/api/conditions'] });
-        toast.success('Condition added');
-      } else {
-        toast.success('Condition queued - will sync when online');
-      }
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/products'] });
+      toast.success('Product updated');
     },
-    onError: (_error, _variables, context) => {
-      if (context?.previousConditions) {
-        setConditions(context.previousConditions);
-      }
-      toast.error('Failed to add condition');
-    }
+    onError: (error, _variables, context) => {
+      if (context?.previousProducts) setProducts(context.previousProducts);
+      toast.error(serverMessage(error, 'Failed to update product'));
+    },
+  });
+
+  const removeProductMutation = useMutation({
+    mutationFn: (id: string) => apiRequest(`/api/products/${id}`, 'DELETE'),
+    onMutate: async (id) => {
+      let previousProducts: Product[] = [];
+      setProducts((ps) => {
+        previousProducts = [...ps];
+        return ps.filter((p) => p.id !== id);
+      });
+      return { previousProducts };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/products'] });
+      toast.success('Product removed');
+    },
+    onError: (error, _variables, context) => {
+      if (context?.previousProducts) setProducts(context.previousProducts);
+      toast.error(serverMessage(error, 'Failed to remove product'));
+    },
   });
 
   const [showScanner, setShowScanner] = useState(false);
@@ -567,14 +589,12 @@ export default function Home() {
     addProductMutation.mutate(product);
   };
 
-  const updateProduct = (id: string, product: { name: string; withdrawalDays?: number; milkWithdrawalDays?: number; meatWithdrawalDays?: number; useByDays?: number; treatmentPlan?: string; barcode?: string }) => {
-    setProducts((ps) => ps.map((p) => (p.id === id ? { ...p, ...product } : p)));
-    toast.success("Product updated");
+  const updateProduct = (id: string, product: ProductFields) => {
+    updateProductMutation.mutate({ id, product });
   };
 
   const removeProduct = (id: string) => {
-    setProducts((ps) => ps.filter((p) => p.id !== id));
-    toast.success("Product removed");
+    removeProductMutation.mutate(id);
   };
 
   const addUser = (name: string) => {
@@ -887,19 +907,6 @@ export default function Home() {
     if (ok) toast.success("Monitoring completed, cow returned to milking mob");
   };
 
-  const addCondition = (condition: { name: string; requiresBodyPart?: boolean; bodyPartType?: 'udder' | 'foot' }) => {
-    addConditionMutation.mutate(condition);
-  };
-
-  const updateCondition = (id: string, condition: { name: string; requiresBodyPart?: boolean; bodyPartType?: 'udder' | 'foot' }) => {
-    setConditions((cs) => cs.map((c) => (c.id === id ? { ...c, ...condition } : c)));
-    toast.success("Condition updated");
-  };
-
-  const removeCondition = (id: string) => {
-    setConditions((cs) => cs.filter((c) => c.id !== id));
-    toast.success("Condition removed");
-  };
 
   const exportCSV = () => {
     download(`dairy-treatment-records-${today()}.csv`, toCSV(records));
