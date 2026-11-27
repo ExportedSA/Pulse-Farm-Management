@@ -272,7 +272,7 @@ export interface IStorage {
   getPastureMovements(animalId?: string, pastureId?: string): Promise<PastureMovement[]>;
   getPastureMovement(id: string): Promise<PastureMovement | undefined>;
   createPastureMovement(data: InsertPastureMovement): Promise<PastureMovement>;
-  moveanimalsToPasture(animalIds: string[], toPastureId: string, movedBy: string, reason?: string): Promise<PastureMovement[]>;
+  moveanimalsToPasture(animalIds: string[], toPastureId: string, movedBy: string, reason?: string, movedAt?: Date): Promise<PastureMovement[]>;
 
   // Pasture Health Records (Phase 5.3: Health Tracking History)
   getPastureHealthRecords(pastureId: string): Promise<PastureHealthRecord[]>;
@@ -1396,14 +1396,14 @@ export class DatabaseStorage implements IStorage {
     return movement;
   }
 
-  async moveanimalsToPasture(animalIds: string[], toPastureId: string, movedBy: string, reason?: string): Promise<PastureMovement[]> {
+  async moveanimalsToPasture(animalIds: string[], toPastureId: string, movedBy: string, reason?: string, movedAt?: Date): Promise<PastureMovement[]> {
     const movements: PastureMovement[] = [];
     
     // Get current pasture IDs for all animals in one query
     const animalsData = await db
       .select({ id: animals.id, currentPastureId: animals.currentPastureId })
       .from(animals)
-      .where(sql`${animals.id} = ANY(${animalIds})`);
+      .where(inArray(animals.id, animalIds));
     
     // Count animals by source pasture for efficient updates
     const fromPastureCounts = new Map<string, number>();
@@ -1425,6 +1425,7 @@ export class DatabaseStorage implements IStorage {
           toPastureId,
           movedBy,
           reason,
+          ...(movedAt ? { movedAt } : {}),
         })
         .returning();
       
@@ -1435,7 +1436,7 @@ export class DatabaseStorage implements IStorage {
     await db
       .update(animals)
       .set({ currentPastureId: toPastureId })
-      .where(sql`${animals.id} = ANY(${animalIds})`);
+      .where(inArray(animals.id, animalIds));
     
     // Update stock counts for source pastures
     for (const [pastureId, count] of Array.from(fromPastureCounts.entries())) {

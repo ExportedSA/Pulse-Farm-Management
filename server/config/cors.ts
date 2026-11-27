@@ -70,6 +70,7 @@ const corsOptions: CorsOptions = {
     'Cache-Control',
     'X-File-Type',
     'X-Request-ID',
+    'Idempotency-Key', // a save from the offline queue (middleware/request-receipts.ts)
   ],
   
   // Expose these headers to the client

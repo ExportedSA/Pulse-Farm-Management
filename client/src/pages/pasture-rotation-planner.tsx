@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient } from "@/lib/queryClient";
+import { send } from "@/lib/outbox";
 import { useAuth } from "@/lib/auth-context";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -76,6 +77,8 @@ export default function PastureRotationPlanner() {
 
   // Move mutation
   const moveMutation = useMutation({
+    // Run without signal too: the save goes to the offline queue (React Query would otherwise wait)
+    networkMode: "always",
     mutationFn: async ({
       animalIds,
       toPastureId,
@@ -85,14 +88,38 @@ export default function PastureRotationPlanner() {
       toPastureId: string;
       reason?: string;
     }) => {
-      return await apiRequest("/api/pasture-movements/bulk", "POST", {
-        animalIds,
-        toPastureId,
-        movedBy: user?.name || user?.id || "unknown",
-        reason,
-      });
+      // Sent now, or kept in the offline queue with the time of the move (lib/outbox.ts)
+      const to = pastures.find(p => p.id === toPastureId)?.name ?? "a paddock";
+      try {
+        await send("POST", "/api/pasture-movements/bulk", {
+          animalIds,
+          toPastureId,
+          movedBy: user?.id,
+          reason,
+          movedAt: new Date().toISOString(),
+        }, { label: `Move of ${animalIds.length} animal${animalIds.length === 1 ? "" : "s"} to ${to}` });
+        return { queued: false };
+      } catch (e: any) {
+        if (!e?.queued) throw e;
+        // Shown moved on this device until the move reaches the server
+        const moving = new Set(animalIds);
+        queryClient.setQueryData<Animal[]>(["/api/animals"], list =>
+          list?.map(a => (moving.has(a.id) ? { ...a, currentPastureId: toPastureId } : a)));
+        return { queued: true };
+      }
     },
-    onSuccess: () => {
+    onSuccess: ({ queued }) => {
+      if (queued) {
+        toast({
+          title: "Move saved on this device",
+          description: `${selectedAnimals.size} animal(s). It will send when you're back online.`,
+        });
+        setSelectedAnimals(new Set());
+        setTargetPasture(null);
+        setShowConfirmDialog(false);
+        setMoveReason("");
+        return;
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/animals"] });
       queryClient.invalidateQueries({ queryKey: ["/api/pastures"] });
       queryClient.invalidateQueries({ queryKey: ["/api/pasture-movements"] });

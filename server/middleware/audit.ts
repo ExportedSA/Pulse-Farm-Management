@@ -65,7 +65,8 @@ export function auditTrail(farmOf: (req: Request) => Promise<string | null>) {
     }) as Response['json'];
 
     res.on('finish', () => {
-      if (res.statusCode >= 400) return;
+      // A repeat of a save already made (middleware/request-receipts.ts) changed nothing
+      if (res.statusCode >= 400 || res.locals.idempotentReplay) return;
       void (async () => {
         const farmId = await farmOf(req);
         if (!farmId) return;

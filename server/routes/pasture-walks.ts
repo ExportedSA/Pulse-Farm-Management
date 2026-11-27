@@ -79,8 +79,9 @@ router.get("/sessions/:id", async (req: Request, res: Response) => {
 // POST /api/pasture-walks/sessions - Create new walk session
 router.post("/sessions", async (req: Request, res: Response) => {
   try {
-    const validatedData = insertPastureWalkSessionSchema.parse(req.body);
-    
+    // A walk started without signal brings the id the phone gave it, so its measurements can name it
+    const validatedData = insertPastureWalkSessionSchema.extend({ id: z.string().uuid().optional() }).parse(req.body);
+
     const [session] = await db
       .insert(pastureWalkSessions)
       .values(validatedData)
@@ -342,9 +343,17 @@ router.post("/measurements/quick", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Measurements array required" });
     }
     
-    const today = format(new Date(), 'yyyy-MM-dd');
-    const time = format(new Date(), 'HH:mm');
-    
+    // When they were measured: sent by the phone (farm time), which may be well before they arrive
+    const { measurementDate, measurementTime } = req.body as { measurementDate?: string; measurementTime?: string };
+    if (measurementDate != null && !/^\d{4}-\d{2}-\d{2}$/.test(measurementDate)) {
+      return res.status(400).json({ error: "measurementDate must be YYYY-MM-DD" });
+    }
+    if (measurementTime != null && !/^\d{2}:\d{2}$/.test(measurementTime)) {
+      return res.status(400).json({ error: "measurementTime must be HH:MM" });
+    }
+    const today = measurementDate ?? format(new Date(), 'yyyy-MM-dd');
+    const time = measurementTime ?? format(new Date(), 'HH:mm');
+
     const results = [];
     
     for (const m of measurements) {

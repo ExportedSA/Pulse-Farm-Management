@@ -142,7 +142,9 @@ function NewHazard({ onSaved, onCancel }: { onSaved: (id: string) => void; onCan
           const { id } = await safety.createHazard({ ...v, title: v.title.trim() });
           onSaved(id);
         } catch (err: any) {
-          toast.error(err.message);
+          // No signal: it joins the register once it has sent
+          if (err?.queued) { toast.success(err.message); onCancel(); }
+          else toast.error(err.message);
         } finally {
           setSaving(false);
         }

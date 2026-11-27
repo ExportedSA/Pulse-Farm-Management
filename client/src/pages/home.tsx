@@ -28,12 +28,15 @@ import { uid, load, save, today, toCSV, parseCSV, download, requestNotificationP
 import type { RecordItem, Product, User, ReminderSettings, Condition, AnimalTreatment, InsertAnimalTreatment } from "@shared/schema";
 import { clearAfterDosesGiven, daysToHours, formatFarmTime, meatClearAt, milkClearAt, parseFarmTime, returnToVatProblem } from "@shared/withholding";
 import { nextDoseDueAt } from "@shared/dose-schedule";
+import { send, outboxHas, newRequestId } from "@/lib/outbox";
 import type { Animal } from "@shared/schema";
 
 export type TreatmentPhase = 'awaiting' | 'treatment' | 'withholding' | 'monitoring' | 'returnToVat';
 
 // Treatments on the server have UUIDs; ones saved on this device while offline have short local ids
 const isServerId = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+// A treatment waiting in the offline queue (lib/outbox.ts) is shown with this before its request id
+const QUEUED = "queued-";
 
 // Fields the server works out itself, or that don't fit its columns, left out of what's sent
 function toServerPatch(patch: Record<string, any>): Record<string, any> {
@@ -195,7 +198,9 @@ export default function Home() {
   });
   useEffect(() => {
     if (!apiTreatments) return;
-    setAnimalTreatments(local => [...apiTreatments, ...local.filter(t => !isServerId(t.id))]);
+    // A copy kept while its save waited in the offline queue gives way to the server's once sent
+    const sent = (id: string) => id.startsWith(QUEUED) && !outboxHas(id.slice(QUEUED.length));
+    setAnimalTreatments(local => [...apiTreatments, ...local.filter(t => !isServerId(t.id) && !sent(t.id))]);
   }, [apiTreatments]);
   // A treatment as the server now has it
   const replaceTreatment = (updated: AnimalTreatment) =>
@@ -690,9 +695,10 @@ export default function Home() {
       lastDoseAt: firstDoseGiven ? parseFarmTime(treatment.lastDoseDate || treatment.dateTime)?.toISOString() : undefined,
     } as any);
     // Kept on this device until it reaches the server; withholding worked out the same way
+    const requestId = newRequestId();
     const deviceCopy = (): AnimalTreatment => withLocalWithholding({
       ...treatment,
-      id: uid(),
+      id: `${QUEUED}${requestId}`,
       status: 'active' as const,
       condition: treatment.condition || '',
       treatmentType: treatment.treatmentType || '',
@@ -705,46 +711,26 @@ export default function Home() {
     } as any);
 
     try {
-      // Attempt to post to backend API (Service Worker handles offline queueing)
-      const response = await fetch('/api/treatments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(body),
+      // Sent now, or kept in the offline queue and sent once there's signal (lib/outbox.ts)
+      const apiTreatment = await send<AnimalTreatment>('POST', '/api/treatments', body, {
+        label: `Treatment for ${treatment.cowId ? `cow ${treatment.cowId}` : 'an animal'}`,
+        requestId,
       });
-
-      if (response.status === 202) {
-        // Offline - queued by Service Worker for background sync
-        const result = await response.json();
-        if (result.queued) {
-          setAnimalTreatments((t) => [deviceCopy(), ...t]);
-          done("Treatment queued for sync when online");
-          return true;
-        }
-      }
-      
-      if (!response.ok) {
-        // Server error (4xx/5xx) - surface error to user
-        const error = await response.json().catch(() => ({ error: 'Failed to create treatment' }));
-        toast.error(error.error || 'Failed to create treatment');
-        console.error('Treatment creation failed:', response.status, error);
-        return false;
-      }
-      
-      // Success (2xx): the server's copy, with its doses and milk withholding worked out
-      const apiTreatment: AnimalTreatment = await response.json();
+      // The server's copy, with its doses and milk withholding worked out
       setAnimalTreatments((t) => [apiTreatment, ...t]);
       refetchTreatments();
       done("Treatment recorded");
       return true;
     } catch (error: any) {
-      // Network error - fallback to local storage with error toast
-      console.error('Network error creating treatment:', error);
-      setAnimalTreatments((t) => [deviceCopy(), ...t]);
-      toast.error("Network error - treatment saved locally");
-      return true;
+      if (error?.queued) {
+        // Shown here until it reaches the server
+        setAnimalTreatments((t) => [deviceCopy(), ...t]);
+        done("Treatment saved on this device. It will send when you're back online.");
+        return true;
+      }
+      toast.error(error?.message || 'Failed to create treatment');
+      return false;
     }
-    return false;
   };
 
   // A dose given now. On the server, which keeps the time of the last dose and moves the milk clear
