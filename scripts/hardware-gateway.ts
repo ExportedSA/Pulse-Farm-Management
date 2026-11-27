@@ -1,14 +1,19 @@
-// Gives a farm its shed hardware gateway, or takes it away (migration 0038). Run by whoever runs the
-// service, as the database owner: farms can't add or change gateways from the app, because a
-// gateway's address is somewhere the server sends commands.
+// Gives a farm its shed hardware gateway, or takes it away (migrations 0038 and 0039). Run by whoever
+// runs the service, as the database owner: farms can't add or change gateways from the app, because a
+// gateway's address is somewhere the server sends commands, and a Stride link token lets a shed PC in.
 //
 // Usage (DATABASE_URL in .env, or set for the database you mean):
 //   npx tsx scripts/hardware-gateway.ts list
+//   npx tsx scripts/hardware-gateway.ts add <farm id> --stride               Stride on the shed PC links in;
+//                                                                            prints its link token once
 //   npx tsx scripts/hardware-gateway.ts add <farm id> --simulated            the built-in simulator
 //   npx tsx scripts/hardware-gateway.ts add <farm id>                        the server's PULSE_GATEWAY_URL
 //   npx tsx scripts/hardware-gateway.ts add <farm id> --url https://... [--name "Shed 2"]
+//   npx tsx scripts/hardware-gateway.ts token <farm id>                      a new Stride link token (the old
+//                                                                            one stops working)
 //   npx tsx scripts/hardware-gateway.ts remove <farm id>                     stops it (kept for the log)
 import "dotenv/config";
+import crypto from "crypto";
 import { Pool, neonConfig } from "@neondatabase/serverless";
 import ws from "ws";
 
@@ -21,19 +26,32 @@ function option(name: string): string | undefined {
   return i > 0 ? process.argv[i + 1] : undefined;
 }
 
+// Same shape and hash as server/domain/shed.ts newLinkToken: only the SHA-256 is stored
+function newLinkToken() {
+  const token = `pst_${crypto.randomBytes(32).toString("base64url")}`;
+  return { token, hash: crypto.createHash("sha256").update(token).digest("hex") };
+}
+
+function showToken(farmName: string, token: string) {
+  console.log(`${farmName}: Stride link token (shown once; paste it into Stride's Settings):`);
+  console.log(`  ${token}`);
+}
+
 async function main() {
   const [action, farmId] = process.argv.slice(2);
 
   if (action === "list") {
     const { rows } = await pool.query(`
-      SELECT f.name AS farm, g.farm_id, g.name, coalesce(g.base_url, '(server gateway)') AS gateway,
-             g.simulated, g.is_active, g.created_at
+      SELECT f.name AS farm, g.farm_id, g.name, g.kind, coalesce(g.base_url, '(server gateway)') AS gateway,
+             g.simulated, g.is_active, g.last_seen_at
       FROM hardware_gateways g JOIN farms f ON f.id = g.farm_id
       ORDER BY g.is_active DESC, f.name`);
     if (!rows.length) console.log("No farm has shed hardware.");
     for (const r of rows) {
-      console.log(`${r.is_active ? "active " : "stopped"}  ${r.farm} (${r.farm_id})  ${r.name}: ` +
-        `${r.simulated ? "simulator" : r.gateway}`);
+      const what = r.simulated ? "simulator"
+        : r.kind === "stride" ? `Stride link${r.last_seen_at ? `, last seen ${new Date(r.last_seen_at).toISOString()}` : ", never connected"}`
+        : r.gateway;
+      console.log(`${r.is_active ? "active " : "stopped"}  ${r.farm} (${r.farm_id})  ${r.name}: ${what}`);
     }
     return;
   }
@@ -44,18 +62,20 @@ async function main() {
 
   if (action === "add") {
     const simulated = process.argv.includes("--simulated");
+    const stride = process.argv.includes("--stride");
     const url = option("url") ?? null;
     if (url && !/^https?:\/\/[^\s/]+/.test(url)) throw new Error("--url must be an http(s) address");
-    if (url && simulated) throw new Error("Use --simulated or --url, not both");
+    if ([simulated, stride, !!url].filter(Boolean).length > 1) throw new Error("Use one of --stride, --simulated or --url");
     const name = option("name") ?? "Shed";
+    const link = stride ? newLinkToken() : null;
     // The guard and default read the farm from app.farm_id, as a farm's own request would
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
       await client.query("SELECT set_config('app.farm_id', $1, true)", [farmId]);
       await client.query(
-        "INSERT INTO hardware_gateways (farm_id, name, base_url, simulated) VALUES ($1, $2, $3, $4)",
-        [farmId, name, url, simulated]);
+        "INSERT INTO hardware_gateways (farm_id, name, base_url, simulated, kind, link_token_hash) VALUES ($1, $2, $3, $4, $5, $6)",
+        [farmId, name, url, simulated, stride ? "stride" : "http", link?.hash ?? null]);
       await client.query("COMMIT");
     } catch (e: any) {
       await client.query("ROLLBACK");
@@ -64,7 +84,18 @@ async function main() {
     } finally {
       client.release();
     }
-    console.log(`${farm.name}: shed hardware added (${simulated ? "simulator" : url ?? "the server's gateway"}).`);
+    if (link) showToken(farm.name, link.token);
+    else console.log(`${farm.name}: shed hardware added (${simulated ? "simulator" : url ?? "the server's gateway"}).`);
+    return;
+  }
+
+  if (action === "token") {
+    const link = newLinkToken();
+    const { rowCount } = await pool.query(
+      "UPDATE hardware_gateways SET link_token_hash = $2 WHERE farm_id = $1 AND is_active AND kind = 'stride'",
+      [farmId, link.hash]);
+    if (!rowCount) throw new Error(`${farm.name} has no active Stride gateway. Add one with --stride.`);
+    showToken(farm.name, link.token);
     return;
   }
 
@@ -75,7 +106,7 @@ async function main() {
     return;
   }
 
-  throw new Error("Use list, add or remove (see the top of this file).");
+  throw new Error("Use list, add, token or remove (see the top of this file).");
 }
 
 main()

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Warehouse, Activity, Radio, GitBranch, Settings2 } from "lucide-react";
+import { Warehouse, Activity, Radio, GitBranch, Settings2, Wheat, Link2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,17 +9,17 @@ import { SystemHealthBadge } from "../components/dashboard/SystemHealthBadge";
 import { FeedHeadPanel } from "../components/dashboard/FeedHeadPanel";
 import { DraftGatePanel } from "../components/dashboard/DraftGatePanel";
 import { EidPanel } from "../components/dashboard/EidPanel";
-import { DraftRuleInspectorPanel } from "../components/dashboard/DraftRuleInspectorPanel";
+import { DraftRulesPanel, FeedLevelsPanel, StrideLinkPanel } from "../components/shed/ShedLinkPanels";
 import { getDemoMode, setDemoMode } from "../api/hardwareClient";
 
-type ShedTab = "feed" | "draft" | "eid" | "rules";
+type ShedTab = "link" | "rules" | "levels" | "feed" | "draft" | "eid";
 
 export const ShedPage: React.FC = () => {
   const [demo, setDemo] = useState<boolean | null>(null);
   const [canToggle, setCanToggle] = useState<boolean>(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<ShedTab>("feed");
+  const [tab, setTab] = useState<ShedTab>("link");
 
   useEffect(() => {
     (async () => {
@@ -96,7 +96,7 @@ export const ShedPage: React.FC = () => {
         <Alert className="mb-6 border-amber-500/50 bg-amber-500/10">
           <Activity className="h-4 w-4" />
           <AlertDescription>
-            <strong>Training mode active:</strong> All gate, feed and EID behaviour is simulated. No physical hardware will operate.
+            <strong>Training mode active:</strong> Hardware that Pulse calls directly is simulated and won't operate. A Stride link isn't affected: Stride has its own demo mode in the shed.
           </AlertDescription>
         </Alert>
       )}
@@ -110,7 +110,19 @@ export const ShedPage: React.FC = () => {
       )}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as ShedTab)} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid">
+        <TabsList className="grid w-full grid-cols-3 md:grid-cols-6 h-auto lg:w-auto lg:inline-grid">
+          <TabsTrigger value="link" className="gap-2">
+            <Link2 className="h-4 w-4" />
+            Stride Link
+          </TabsTrigger>
+          <TabsTrigger value="rules" className="gap-2">
+            <Settings2 className="h-4 w-4" />
+            Draft Rules
+          </TabsTrigger>
+          <TabsTrigger value="levels" className="gap-2">
+            <Wheat className="h-4 w-4" />
+            Feed Levels
+          </TabsTrigger>
           <TabsTrigger value="feed" className="gap-2">
             <Warehouse className="h-4 w-4" />
             Feed Heads
@@ -123,11 +135,15 @@ export const ShedPage: React.FC = () => {
             <Radio className="h-4 w-4" />
             EID Activity
           </TabsTrigger>
-          <TabsTrigger value="rules" className="gap-2">
-            <Settings2 className="h-4 w-4" />
-            Draft Rules
-          </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="link" className="space-y-6">
+          <StrideLinkPanel />
+        </TabsContent>
+
+        <TabsContent value="levels" className="space-y-6">
+          <FeedLevelsPanel />
+        </TabsContent>
 
         <TabsContent value="feed" className="space-y-6">
           <FeedHeadPanel />
@@ -142,7 +158,7 @@ export const ShedPage: React.FC = () => {
         </TabsContent>
 
         <TabsContent value="rules" className="space-y-6">
-          <DraftRuleInspectorPanel />
+          <DraftRulesPanel />
         </TabsContent>
       </Tabs>
     </div>

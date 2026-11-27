@@ -7,6 +7,7 @@ import { storage } from "./storage";
 import { startHardwareSimulator } from "./sim/hardwareSimulator";
 import { isDemoMode } from "./config/demoMode";
 import { chatWebSocket, scannerWebSocket } from "./websocket";
+import { shedLink } from "./shed-link";
 import { log } from "./logger";
 
 const app = express();
@@ -64,6 +65,8 @@ app.use((req, res, next) => {
   // Initialize WebSocket servers
   chatWebSocket.initialize(server);
   scannerWebSocket.initialize(server);
+  // Stride, on a farm's shed PC, connects out to this (docs/shed-link-protocol.md)
+  shedLink.initialize(server);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

@@ -165,6 +165,7 @@ const menuItems = [
     subItems: [
       { title: "Onboarding", url: "/app/setup" },
       { title: "Billing", url: "/app/billing" },
+      { title: "Activity log", url: "/app/activity" },
       { title: "Settings", url: "/app/settings" },
       { title: "Multi-Farm", url: "/app/multi-farm" },
     ],

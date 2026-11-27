@@ -107,6 +107,7 @@ import ForgotPasswordPage from "@/pages/forgot-password-page";
 import ResetPasswordPage from "@/pages/reset-password-page";
 import { PrivacyPage, TermsPage } from "@/pages/legal-pages";
 import BillingPage from "@/pages/billing-page";
+import ActivityLogPage from "@/pages/activity-log-page";
 import { BillingBanner } from "@/components/billing-banner";
 
 // Screens shown on their own, without the app's menu: before signing in, and the legal pages
@@ -224,6 +225,7 @@ function Router() {
         <Route path="/app/health/reports" component={HealthReports} />
         <Route path="/app/setup" component={OnboardingWizard} />
         <Route path="/app/billing" component={BillingPage} />
+        <Route path="/app/activity" component={ActivityLogPage} />
         <Route component={NotFound} />
       </Switch>
       </ScreenErrorBoundary>

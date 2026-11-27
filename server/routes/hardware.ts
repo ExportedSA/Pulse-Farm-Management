@@ -4,12 +4,19 @@
 // service's operator adds; a farm without one gets 404. Farm staff (owner, manager, worker) can see
 // status and reads; only owners and managers can send feed or gate commands, and every command is
 // logged in hardware_commands. Contractors and viewers get nothing.
+//
+// Draft rules and feed levels (set here, sent to a farm's Stride over the shed link) don't need a
+// gateway: a farm can set them up before Stride is connected. Staff can read them; owners and
+// managers change them.
 import { Router, type Request, type Response, type NextFunction } from "express";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, gte } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "../db";
 import { getFarmId, getUserId } from "../middleware/auth";
 import { getFarmRole } from "../domain/farms";
-import { hardwareCommands, hardwareGateways } from "@shared/platform-schema";
+import { hardwareCommands, hardwareGateways, shedDraftRules, shedEvents, shedFeedLevels } from "@shared/platform-schema";
+import { compileSnapshotHere, draftRuleInput, draftRuleValues, feedLevelInput } from "../domain/shed";
+import { shedLink } from "../shed-link";
 import logger from "../config/logger";
 import { fetchStatus, getHardwareHealth, startBailFeed, stopBailFeed } from "../services/feedService";
 import { executeDraft } from "../services/draftGateService";
@@ -52,6 +59,115 @@ hardwareRouter.post("/demo-mode", (req, res) => {
   res.json({ demo: isDemoMode(), canToggle: true });
 });
 
+// ── Draft rules and feed levels ──
+
+async function farmRole(req: Request): Promise<string | undefined> {
+  const farmId = getFarmId(req);
+  const userId = getUserId(req);
+  return farmId && userId ? getFarmRole(userId, farmId) : undefined;
+}
+
+const staffOnly = async (req: Request, res: Response, next: NextFunction) => {
+  const role = await farmRole(req).catch(() => undefined);
+  if (!role || !SHED_ROLES.includes(role)) return res.status(403).json({ error: "Only farm staff can see the shed set-up" });
+  next();
+};
+const managersOnly = async (req: Request, res: Response, next: NextFunction) => {
+  const role = await farmRole(req).catch(() => undefined);
+  if (!role || !COMMAND_ROLES.includes(role)) {
+    return res.status(403).json({ error: "Only owners and managers can change draft rules and feed levels" });
+  }
+  next();
+};
+
+const route = (fn: (req: Request, res: Response) => Promise<unknown>) =>
+  async (req: Request, res: Response) => {
+    try {
+      await fn(req, res);
+    } catch (e: any) {
+      if (e instanceof z.ZodError) return res.status(400).json({ error: e.errors[0]?.message ?? "Invalid request" });
+      if (e?.code === "P0403" || e?.code === "42501") return res.status(403).json({ error: "That belongs to another farm" });
+      if (e?.code === "23503") return res.status(400).json({ error: "That animal or group doesn't exist" });
+      logger.error({ err: e }, "Shed set-up request failed");
+      res.status(500).json({ error: "Something went wrong" });
+    }
+  };
+
+// After a change, the farm's Stride gets the new lists straight away (when it's connected)
+const refresh = (req: Request) => {
+  void shedLink.refreshFarm(getFarmId(req)!).catch(err => logger.warn({ err }, "Shed link refresh failed"));
+};
+
+hardwareRouter.get("/draft-rules", staffOnly, route(async (_req, res) => {
+  res.json(await db.select().from(shedDraftRules).orderBy(desc(shedDraftRules.priority), asc(shedDraftRules.createdAt)));
+}));
+
+hardwareRouter.post("/draft-rules", managersOnly, route(async (req, res) => {
+  const values = draftRuleValues(draftRuleInput.parse(req.body));
+  const [row] = await db.insert(shedDraftRules).values({ ...values, farmId: getFarmId(req)! }).returning();
+  refresh(req);
+  res.status(201).json(row);
+}));
+
+hardwareRouter.put("/draft-rules/:id", managersOnly, route(async (req, res) => {
+  const values = draftRuleValues(draftRuleInput.parse(req.body));
+  const [row] = await db.update(shedDraftRules).set({ ...values, updatedAt: new Date() })
+    .where(eq(shedDraftRules.id, req.params.id)).returning();
+  if (!row) return res.status(404).json({ error: "Draft rule not found" });
+  refresh(req);
+  res.json(row);
+}));
+
+hardwareRouter.delete("/draft-rules/:id", managersOnly, route(async (req, res) => {
+  const [row] = await db.delete(shedDraftRules).where(eq(shedDraftRules.id, req.params.id)).returning({ id: shedDraftRules.id });
+  if (!row) return res.status(404).json({ error: "Draft rule not found" });
+  refresh(req);
+  res.status(204).send();
+}));
+
+hardwareRouter.get("/feed-levels", staffOnly, route(async (_req, res) => {
+  res.json(await db.select().from(shedFeedLevels).orderBy(desc(shedFeedLevels.priority), desc(shedFeedLevels.createdAt)));
+}));
+
+const levelValues = (input: z.infer<typeof feedLevelInput>) => ({
+  animalId: input.animalId ?? null,
+  groupId: input.groupId ?? null,
+  gramsPerVisit: input.gramsPerVisit,
+  priority: input.priority,
+  enabled: input.enabled,
+  validFrom: input.validFrom ?? null,
+  validTo: input.validTo ?? null,
+  note: input.note ?? null,
+});
+
+hardwareRouter.post("/feed-levels", managersOnly, route(async (req, res) => {
+  const values = levelValues(feedLevelInput.parse(req.body));
+  const [row] = await db.insert(shedFeedLevels).values({ ...values, farmId: getFarmId(req)! }).returning();
+  refresh(req);
+  res.status(201).json(row);
+}));
+
+hardwareRouter.put("/feed-levels/:id", managersOnly, route(async (req, res) => {
+  const values = levelValues(feedLevelInput.parse(req.body));
+  const [row] = await db.update(shedFeedLevels).set({ ...values, updatedAt: new Date() })
+    .where(eq(shedFeedLevels.id, req.params.id)).returning();
+  if (!row) return res.status(404).json({ error: "Feed level not found" });
+  refresh(req);
+  res.json(row);
+}));
+
+hardwareRouter.delete("/feed-levels/:id", managersOnly, route(async (req, res) => {
+  const [row] = await db.delete(shedFeedLevels).where(eq(shedFeedLevels.id, req.params.id)).returning({ id: shedFeedLevels.id });
+  if (!row) return res.status(404).json({ error: "Feed level not found" });
+  refresh(req);
+  res.status(204).send();
+}));
+
+// What the farm's Stride is (or would be) sent right now: who drafts where, and grams per visit
+hardwareRouter.get("/snapshot", managersOnly, route(async (_req, res) => {
+  res.json(await compileSnapshotHere());
+}));
+
 // Everything below works with the signed-in person's farm and that farm's gateway only
 async function farmGateway(req: ShedRequest, res: Response, next: NextFunction) {
   const farmId = getFarmId(req);
@@ -63,7 +179,7 @@ async function farmGateway(req: ShedRequest, res: Response, next: NextFunction) 
       return res.status(403).json({ error: "Only farm staff can use the shed hardware" });
     }
     const [gateway] = await db
-      .select({ id: hardwareGateways.id, baseUrl: hardwareGateways.baseUrl, simulated: hardwareGateways.simulated })
+      .select({ id: hardwareGateways.id, baseUrl: hardwareGateways.baseUrl, simulated: hardwareGateways.simulated, kind: hardwareGateways.kind })
       .from(hardwareGateways)
       .where(and(eq(hardwareGateways.farmId, farmId), eq(hardwareGateways.isActive, true)))
       .limit(1);
@@ -194,9 +310,32 @@ hardwareRouter.get("/commands", commandRole, async (req: ShedRequest, res, next)
   }
 });
 
-// Recent EIDs
-hardwareRouter.get("/eid/recent", (req: ShedRequest, res) => {
-  res.json(getRecentEids(req.gateway!));
+// Recent EIDs: a Stride gateway's are the reads it reported; others come from the gateway
+hardwareRouter.get("/eid/recent", async (req: ShedRequest, res, next) => {
+  try {
+    if (req.gateway!.kind === "stride" && !req.gateway!.simulated) {
+      const rows = await db.select({ eid: shedEvents.eid, at: shedEvents.occurredAt }).from(shedEvents)
+        .where(and(eq(shedEvents.kind, "eid"), eq(shedEvents.gatewayId, req.gateway!.id)))
+        .orderBy(desc(shedEvents.occurredAt)).limit(50);
+      return res.json(rows.filter(r => r.eid).map(r => ({ eid: r.eid, timestamp: new Date(r.at).toISOString() })));
+    }
+    res.json(getRecentEids(req.gateway!));
+  } catch (e) {
+    next(e);
+  }
+});
+
+// What happened in the shed: drafts, feeds and reads Stride reported (default: the last 24 hours)
+hardwareRouter.get("/events", async (req: ShedRequest, res, next) => {
+  try {
+    const hours = Math.min(Math.max(Number(req.query.hours) || 24, 1), 24 * 31);
+    const rows = await db.select().from(shedEvents)
+      .where(gte(shedEvents.occurredAt, new Date(Date.now() - hours * 3600_000)))
+      .orderBy(desc(shedEvents.occurredAt)).limit(500);
+    res.json(rows);
+  } catch (e) {
+    next(e);
+  }
 });
 
 // Draft rule preview
