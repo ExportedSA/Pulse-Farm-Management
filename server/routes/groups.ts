@@ -150,7 +150,7 @@ interface DynamicGroupCriteria {
 }
 
 // Helper function to evaluate criteria against an animal
-function evaluateAnimalAgainstCriteria(animal: any, criteria: DynamicGroupCriteria): boolean {
+export function evaluateAnimalAgainstCriteria(animal: any, criteria: DynamicGroupCriteria): boolean {
   const { rules, logic } = criteria;
   
   const results = rules.map(rule => {

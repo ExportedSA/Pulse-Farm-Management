@@ -21,4 +21,5 @@ export type FarmGateway = {
   id: string;
   baseUrl: string | null; // null = the server's PULSE_GATEWAY_URL
   simulated: boolean;
+  kind: string; // 'http': Pulse calls the gateway; 'stride': Stride is linked in (server/shed-link.ts)
 };
