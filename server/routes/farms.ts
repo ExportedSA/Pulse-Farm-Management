@@ -11,6 +11,7 @@ import { getFarmId, getUserId, generateToken, AUTH_COOKIE, authCookieOptions } f
 import { listUserFarms, getFarmRole, createFarmForUser, type FarmRole } from '../domain/farms';
 import { listOpenInvites, createInvite, resendInvite, revokeInvite, InviteError } from '../domain/accounts';
 import { buildFarmExport } from '../domain/farm-export';
+import { recordAudit } from '../middleware/audit';
 
 const router = Router();
 
@@ -145,6 +146,8 @@ router.get('/current/export', async (req, res) => {
     if (!farmId || !role) return res.status(404).json({ error: 'No farm selected' });
     if (role !== 'owner') return res.status(403).json({ error: "Only the farm's owner can download all of its data" });
     const { zip, filename } = await buildFarmExport(farmId);
+    // A copy of everything leaving the farm is worth a line in its activity log
+    await recordAudit(req, 'export', 'farms/export', farmId, { filename });
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Cache-Control', 'no-store');

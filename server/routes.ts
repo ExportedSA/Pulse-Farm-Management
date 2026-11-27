@@ -62,6 +62,8 @@ import reportsRouter from "./routes/reports";
 import farmsRouter from "./routes/farms";
 import billingRouter from "./routes/billing";
 import { readOnlyWhenLapsed } from "./middleware/read-only";
+import { auditTrail } from "./middleware/audit";
+import { auditRouter } from "./routes/audit";
 import recordsRouter from "./routes/records";
 import stockReconRouter from "./routes/stock-recon";
 import paddockMapRouter from "./routes/paddock-map";
@@ -160,6 +162,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api", farmDbContext(memberFarm));
   // A farm whose trial or subscription has ended is read-only (billing)
   app.use("/api", readOnlyWhenLapsed);
+  // Every successful change to a farm's data is recorded in its activity log (middleware/audit.ts)
+  app.use("/api", auditTrail(memberFarm));
 
   // ===== PHASE 4: ANIMAL GROUPS =====
   app.use("/api/groups", requireAuth, groupsRouter);
@@ -191,6 +195,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ===== BILLING (the Stripe webhook is open; Stripe signs it) =====
   app.use("/api/billing", billingRouter);
+
+  // ===== ACTIVITY LOG (owner only) =====
+  app.use("/api/audit", requireAuth, auditRouter);
 
   // ===== FARM RECORDS, TAGS, ATTACHMENTS & SEARCH =====
   app.use("/api/records", requireAuth, recordsRouter);

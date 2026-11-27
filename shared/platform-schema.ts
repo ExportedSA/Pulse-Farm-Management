@@ -139,3 +139,21 @@ export const hardwareCommands = pgTable('hardware_commands', {
   error: text('error'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
+
+// Who created, changed, deleted, exported or opened what, and when (migration 0040; build guide F3).
+// Only the names of changed fields are kept, never their values.
+export const auditEvents = pgTable('audit_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  farmId: uuid('farm_id').references(() => farms.id).notNull(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  action: varchar('action', { length: 10 }).notNull(), // create, update, delete, view, export
+  recordType: varchar('record_type', { length: 60 }).notNull(),
+  recordId: varchar('record_id', { length: 64 }),
+  method: varchar('method', { length: 10 }),
+  path: varchar('path', { length: 300 }),
+  status: integer('status'),
+  details: jsonb('details').default({}).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export type AuditEvent = typeof auditEvents.$inferSelect;
