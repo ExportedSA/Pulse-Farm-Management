@@ -85,7 +85,13 @@ export function HazardForm({ pending, onSaved, onDiscard }: { pending: Drawn; on
         toast.success("Hazard added to the register");
         onSaved(id);
       } catch (err: any) {
-        toast.error(err.message);
+        if (err?.queued) {
+          // No signal: it goes in the register, and on the map, once it has sent
+          toast.success(err.message);
+          onDiscard();
+        } else {
+          toast.error(err.message);
+        }
       } finally {
         setSaving(false);
       }

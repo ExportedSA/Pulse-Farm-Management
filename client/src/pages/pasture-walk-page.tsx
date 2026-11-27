@@ -14,6 +14,7 @@ import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
+import { send } from "@/lib/outbox";
 import { format, differenceInDays, addDays, startOfWeek, endOfWeek, eachWeekOfInterval, isWithinInterval, parseISO, getMonth, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isToday, isSameDay } from "date-fns";
 import { 
   Leaf, Plus, Play, Check, Clock, TrendingUp, TrendingDown,
@@ -155,59 +156,77 @@ export default function PastureWalkPage() {
 
   // Create session mutation
   const createSessionMutation = useMutation({
+    // Run without signal too: the save goes to the offline queue (React Query would otherwise wait)
+    networkMode: "always",
+    // Sent now, or kept in the offline queue (lib/outbox.ts). The phone gives the walk its id, so
+    // measurements can name it before it has reached the server.
     mutationFn: async (data: any) => {
-      const res = await fetch("/api/pasture-walks/sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) throw new Error("Failed to create session");
-      return res.json();
+      const session = { ...data, id: crypto.randomUUID() };
+      try {
+        return { session: await send("POST", "/api/pasture-walks/sessions", session, { label: `Pasture walk of ${data.walkDate}` }), queued: false };
+      } catch (e: any) {
+        if (!e?.queued) throw e;
+        queryClient.setQueryData<any[]>(["/api/pasture-walks/sessions"], list =>
+          [{ ...session, status: "in_progress", totalPaddocks: 0, averageCover: null }, ...(list ?? [])]);
+        return { session, queued: true };
+      }
     },
-    onSuccess: (session) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/pasture-walks/sessions"] });
+    onSuccess: ({ session, queued }) => {
+      if (!queued) queryClient.invalidateQueries({ queryKey: ["/api/pasture-walks/sessions"] });
       setShowNewWalkDialog(false);
       setSelectedSession(session.id);
       setShowQuickEntryDialog(true);
-      toast.success("Walk session started");
+      toast.success(queued ? "Walk started on this device. It will send when you're back online." : "Walk session started");
     },
-    onError: () => toast.error("Failed to create session"),
+    onError: (e: any) => toast.error(e?.message || "Failed to create session"),
   });
 
   // Quick entry mutation
   const quickEntryMutation = useMutation({
+    // Run without signal too: the save goes to the offline queue (React Query would otherwise wait)
+    networkMode: "always",
+    // With the date and time they were measured, which may be well before they reach the server
     mutationFn: async (data: any) => {
-      const res = await fetch("/api/pasture-walks/measurements/quick", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) throw new Error("Failed to save measurements");
-      return res.json();
+      const now = new Date();
+      const body = { ...data, measurementDate: format(now, "yyyy-MM-dd"), measurementTime: format(now, "HH:mm") };
+      try {
+        return { result: await send("POST", "/api/pasture-walks/measurements/quick", body, { label: `${data.measurements.length} paddock cover${data.measurements.length === 1 ? "" : "s"}` }), queued: false };
+      } catch (e: any) {
+        if (!e?.queued) throw e;
+        return { result: { created: data.measurements.length }, queued: true };
+      }
     },
-    onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/pasture-walks"] });
+    onSuccess: ({ result, queued }) => {
+      if (!queued) queryClient.invalidateQueries({ queryKey: ["/api/pasture-walks"] });
       setShowQuickEntryDialog(false);
       setQuickEntries({});
-      toast.success(`Saved ${result.created} measurements`);
+      toast.success(queued
+        ? `${result.created} measurements saved on this device. They will send when you're back online.`
+        : `Saved ${result.created} measurements`);
     },
-    onError: () => toast.error("Failed to save measurements"),
+    onError: (e: any) => toast.error(e?.message || "Failed to save measurements"),
   });
 
   // Complete session mutation
   const completeSessionMutation = useMutation({
+    // Run without signal too: the save goes to the offline queue (React Query would otherwise wait)
+    networkMode: "always",
     mutationFn: async (sessionId: string) => {
-      const res = await fetch(`/api/pasture-walks/sessions/${sessionId}/complete`, {
-        method: "POST",
-      });
-      if (!res.ok) throw new Error("Failed to complete session");
-      return res.json();
+      try {
+        await send("POST", `/api/pasture-walks/sessions/${sessionId}/complete`, undefined, { label: "Finished pasture walk" });
+        return { queued: false };
+      } catch (e: any) {
+        if (!e?.queued) throw e;
+        queryClient.setQueryData<any[]>(["/api/pasture-walks/sessions"], list =>
+          list?.map(s => (s.id === sessionId ? { ...s, status: "completed" } : s)));
+        return { queued: true };
+      }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/pasture-walks"] });
-      toast.success("Walk session completed");
+    onSuccess: ({ queued }) => {
+      if (!queued) queryClient.invalidateQueries({ queryKey: ["/api/pasture-walks"] });
+      toast.success(queued ? "Walk finished on this device. It will send when you're back online." : "Walk session completed");
     },
-    onError: () => toast.error("Failed to complete session"),
+    onError: (e: any) => toast.error(e?.message || "Failed to complete session"),
   });
 
   const handleStartWalk = () => {

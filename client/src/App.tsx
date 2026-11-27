@@ -18,6 +18,7 @@ import { ScreenErrorBoundary } from "@/components/ScreenErrorBoundary";
 import { ChatProvider } from "@/contexts/ChatContext";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 import { FarmSwitcher } from "@/components/FarmSwitcher";
+import { OutboxStatus } from "@/components/OutboxStatus";
 import { Home as HomeIcon, LogOut, Wifi, WifiOff, Bell, MapPin, Search } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -394,6 +395,7 @@ function AppHeader() {
               {offlineQueueCount}
             </span>
           )}
+          <OutboxStatus />
         </div>
         {user && (
           <span className="text-sm text-muted-foreground hidden md:inline">

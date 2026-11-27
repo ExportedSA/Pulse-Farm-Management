@@ -1,6 +1,6 @@
 // Tables for running Pulse as a service: invites, password resets, billing and shed hardware.
 // Kept apart from schema.ts; the SQL is in scripts/migrations (0030 onwards).
-import { pgTable, uuid, varchar, timestamp, integer, boolean, text, jsonb, date } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, timestamp, integer, boolean, text, jsonb, date, primaryKey } from 'drizzle-orm/pg-core';
 import { farms, users, userRoleEnum, animals, animalGroups } from './schema';
 
 // An emailed invite to join a farm with a role. Only a hash of the link's secret is kept.
@@ -157,3 +157,18 @@ export const auditEvents = pgTable('audit_events', {
 });
 
 export type AuditEvent = typeof auditEvents.$inferSelect;
+
+// One save per request id, for the offline queue (migration 0041; build guide F4). Written only by
+// server/middleware/request-receipts.ts, which keeps the first answer to give back to a repeat.
+export const requestReceipts = pgTable('request_receipts', {
+  farmId: uuid('farm_id').references(() => farms.id, { onDelete: 'cascade' }).notNull(),
+  requestKey: varchar('request_key', { length: 100 }).notNull(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  method: varchar('method', { length: 10 }).notNull(),
+  path: varchar('path', { length: 300 }).notNull(),
+  state: varchar('state', { length: 10 }).default('pending').notNull(), // pending, done
+  status: integer('status'),
+  body: jsonb('body'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+}, t => ({ pk: primaryKey({ columns: [t.farmId, t.requestKey] }) }));

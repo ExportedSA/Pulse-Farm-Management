@@ -63,6 +63,7 @@ import farmsRouter from "./routes/farms";
 import billingRouter from "./routes/billing";
 import { readOnlyWhenLapsed } from "./middleware/read-only";
 import { auditTrail } from "./middleware/audit";
+import { requestReceipts } from "./middleware/request-receipts";
 import { auditRouter } from "./routes/audit";
 import recordsRouter from "./routes/records";
 import stockReconRouter from "./routes/stock-recon";
@@ -164,6 +165,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api", readOnlyWhenLapsed);
   // Every successful change to a farm's data is recorded in its activity log (middleware/audit.ts)
   app.use("/api", auditTrail(memberFarm));
+  // A save sent again with the same request id (a phone's offline queue retrying) is done once
+  app.use("/api", requestReceipts(memberFarm));
 
   // ===== PHASE 4: ANIMAL GROUPS =====
   app.use("/api/groups", requireAuth, groupsRouter);
@@ -1187,17 +1190,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/pasture-movements/bulk", async (req, res) => {
     try {
-      const { animalIds, toPastureId, movedBy, reason } = req.body;
-      
+      const { animalIds, toPastureId, reason } = req.body;
+      // Who moved them: the person signed in (moved_by is their user id, not a name)
+      const movedBy = getUserId(req);
+
       if (!Array.isArray(animalIds) || animalIds.length === 0) {
         return res.status(400).json({ error: "animalIds array is required" });
       }
-      
+
       if (!toPastureId || !movedBy) {
-        return res.status(400).json({ error: "toPastureId and movedBy are required" });
+        return res.status(400).json({ error: "toPastureId is required, and you need to be signed in" });
       }
 
-      const movements = await storage.moveanimalsToPasture(animalIds, toPastureId, movedBy, reason);
+      // A move made without signal is sent later with the time it was made (never one in the future)
+      let movedAt: Date | undefined;
+      if (req.body.movedAt != null) {
+        movedAt = new Date(req.body.movedAt);
+        if (isNaN(movedAt.getTime()) || movedAt.getTime() > Date.now() + 5 * 60_000) {
+          return res.status(400).json({ error: "movedAt must be a time that has already happened" });
+        }
+      }
+
+      const movements = await storage.moveanimalsToPasture(animalIds, toPastureId, movedBy, reason, movedAt);
       res.status(201).json(movements);
     } catch (error: any) {
       console.error("Failed to move animals:", error);
