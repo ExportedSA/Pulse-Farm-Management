@@ -197,7 +197,7 @@
 | Route Group (Backend) | Frontend Page/Component | Status |
 |----------------------|------------------------|--------|
 | `routes/mobile-features.ts` | `mobile-scanner.tsx` | Live |
-| `routes/sync.core.ts` | `lib/sync.ts`, `lib/idb.ts` | Patch |
+| `middleware/request-receipts.ts` | `lib/outbox.ts`, `OutboxStatus.tsx` | Live |
 | `routes/photos.ts` | `JobPhotoUpload.tsx` | Live |
 | — | `field-mode-dashboard.tsx` | Live |
 | — | `qr-code-management-page.tsx` | Live |
@@ -242,7 +242,7 @@
 
 ### High Priority (Patch → Live)
 1. `med.withhold.ts` / `med.withhold.ids.ts` - Complete withhold status integration
-2. `sync.core.ts` - Finish offline sync implementation
+2. ~~`sync.core.ts`~~ - Removed; offline saves go through `lib/outbox.ts` (build guide F4)
 3. `repro.plan.ts` / `repro.extras.ts` - Complete reproduction planning features
 
 ### Medium Priority (Stub → Live)

@@ -1,6 +1,7 @@
 // Fertiliser jobs, the product catalogue and dockets (API helpers and types)
 // Job writes go through the device outbox when offline (see application-outbox.ts)
 import { queued } from "./application-outbox";
+import { sendForm } from "./outbox";
 
 export interface CatalogueProduct {
   id: string; farmId: string | null; kind: string; name: string; supplier: string | null; category: string | null;
@@ -134,12 +135,10 @@ export const jobsApi = {
   update: (id: string, b: any) => queued<Job>("PATCH", `/api/applications/${id}`, b, "Job change"),
   applied: (id: string, b: { lineId: string; quantity: number | null }[]) => queued<Job>("PUT", `/api/applications/${id}/applied`, b, "Applied amounts"),
   cancel: (id: string) => send("DELETE", `/api/applications/${id}`),
-  addDocket: (id: string, data: any, files: File[]) => {
-    const form = new FormData();
-    form.append("data", JSON.stringify(data));
-    files.forEach(f => form.append("files", f));
-    return api<Job>(`/api/applications/${id}/dockets`, { method: "POST", body: form });
-  },
+  // With its photos: kept on this device without signal and sent once back online (lib/outbox.ts)
+  addDocket: (id: string, data: any, files: File[]) =>
+    sendForm<Job>("POST", `/api/applications/${id}/dockets`, { data: JSON.stringify(data) }, files.map(file => ({ field: "files", file })),
+      { label: `Docket ${data?.number ?? ""}`.trim() }),
   linkDocket: (id: string, docketId: string, allocated?: number | null) => send<Job>("POST", `/api/applications/${id}/dockets`, { docketId, allocated: allocated ?? null }),
   unlinkDocket: (id: string, docketId: string) => send<Job>("DELETE", `/api/applications/${id}/dockets/${docketId}`),
   used: (id: string, b: { tankLoads?: number | null; used: { mixId: string; quantity: number | null; unit: string | null }[] }) => queued<Job>("PUT", `/api/applications/${id}/used`, b, "Quantities used"),

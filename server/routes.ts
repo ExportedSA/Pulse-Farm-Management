@@ -76,7 +76,6 @@ import animalTagsRouter from "./routes/animal-tags";
 // Phase overlay routes
 import milkRouter from "./milk-routes";
 import financialRouter from "./financial-routes";
-import syncCoreRouter from "./routes/sync.core";
 import naitCoreRouter from "./routes/nait.core";
 import { z } from "zod";
 import {
@@ -220,11 +219,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ===== ANIMAL TAG MANAGEMENT =====
   app.use(/^\/api\/animals\/(tags\/bulk|[^/]+\/tags|[^/]+\/tag-history)/, requireAuth);
   app.use(animalTagsRouter);
-
-
-
-  // ===== PHASE OVERLAY: OFFLINE SYNC =====
-  app.use("/api/sync", requireAuth, syncCoreRouter);
 
   // ===== PHASE OVERLAY: NAIT CORE =====
   app.use("/api/nait/core", requireAuth, naitCoreRouter);
@@ -1419,7 +1413,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/treatments", async (req, res) => {
     try {
       // Recorded by the signed-in user when the app doesn't say which staff member gave it
-      const data = insertAnimalTreatmentSchema.parse({ ...req.body, staffMemberId: req.body?.staffMemberId || getUserId(req) });
+      // A treatment recorded without signal brings the id the phone gave it, so a dose given before it
+      // sent can name it
+      const data = insertAnimalTreatmentSchema.extend({ id: z.string().uuid().optional() })
+        .parse({ ...req.body, staffMemberId: req.body?.staffMemberId || getUserId(req) });
       const treatment = await storage.createAnimalTreatment(data);
       
       // Auto-create lifecycle event for batch traceability (fire-and-forget)
@@ -1454,6 +1451,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       // A link to another farm's animal, product or vet (the farm guard)
       if (['P0403', '42501'].includes(error.code ?? error.cause?.code)) return res.status(403).json({ error: 'That belongs to another farm' });
+      // An id already used (by this treatment, sent before without a request id, or another)
+      if ((error.code ?? error.cause?.code) === '23505') return res.status(409).json({ error: 'A treatment with that id is already recorded' });
       console.error("Failed to create treatment:", error);
       res.status(500).json({ error: "Failed to create treatment" });
     }
@@ -1791,6 +1790,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (code === 'P0403' || code === '42501') {
       return res.status(403).json({ error: 'That belongs to another farm' });
     }
+
+    // A file refused on the way in (wrong type, too big, too many): the save is wrong, not the server,
+    // so the offline queue flags it for the person instead of retrying it for ever
+    if ((err as any)?.name === 'MulterError') {
+      return res.status((err as any).code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err.message });
+    }
+    if (/^Invalid file type/.test(err?.message ?? '')) return res.status(415).json({ error: err.message });
 
     // Don't expose error details in production
     const isDevelopment = process.env.NODE_ENV !== 'production';

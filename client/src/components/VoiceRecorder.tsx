@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
+import { sendForm } from "@/lib/outbox";
 import { 
   Mic, MicOff, Square, Play, Pause, Trash2, Loader2, 
   Clock, Volume2, Download, FileAudio
@@ -77,46 +78,32 @@ export function VoiceRecorder({
 
   // Upload and save mutation
   const saveMutation = useMutation({
+    // Run without signal too: the note goes to the offline queue (React Query would otherwise wait)
+    networkMode: "always",
+    // The recording and its note in one save, recorded by the person signed in: sent now, or kept on
+    // this device with the time it was recorded and sent once back online (lib/outbox.ts). null when kept.
     mutationFn: async () => {
       if (!audioBlob) throw new Error("No recording to save");
-
-      // First upload the audio file
-      const formData = new FormData();
-      formData.append("audio", audioBlob, "recording.webm");
-
-      const uploadRes = await fetch("/api/voice-notes/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!uploadRes.ok) throw new Error("Failed to upload audio");
-      const uploadData = await uploadRes.json();
-
-      // Then create the voice note record
-      const noteRes = await fetch("/api/voice-notes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          animalId: animalId || null,
-          treatmentId: treatmentId || null,
-          audioUrl: uploadData.url,
-          duration: recordingTime,
-          fileSize: audioBlob.size,
-          mimeType: audioBlob.type,
-          transcription: transcription || null,
-          isTranscribed: !!transcription,
-          recordedBy: user?.id,
-        }),
-      });
-
-      if (!noteRes.ok) throw new Error("Failed to save voice note");
-      return noteRes.json();
+      const fields: Record<string, string> = { duration: String(recordingTime), recordedAt: new Date().toISOString() };
+      if (animalId) fields.animalId = animalId;
+      if (treatmentId) fields.treatmentId = treatmentId;
+      if (transcription) fields.transcription = transcription;
+      try {
+        return await sendForm("POST", "/api/voice-notes/with-audio", fields, [{ field: "audio", file: audioBlob, name: audioBlob.type.startsWith("audio/mp4") ? "recording.m4a" : "recording.webm" }], { label: "Voice note" });
+      } catch (e: any) {
+        if (e?.queued) return null;
+        throw e;
+      }
     },
     onSuccess: (data) => {
-      toast.success("Voice note saved");
       resetRecording();
       setShowSaveDialog(false);
       setTranscription("");
+      if (!data) {
+        toast.success("Voice note saved on this device. It will upload when you're back online.");
+        return;
+      }
+      toast.success("Voice note saved");
       if (queryKey) {
         queryClient.invalidateQueries({ queryKey });
       }

@@ -4810,7 +4810,7 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(animalTreatments)
       .where(and(
-        sql`${animalTreatments.animalId} = ANY(${animalIds})`,
+        inArray(animalTreatments.animalId, animalIds),
         or(
           eq(animalTreatments.category, 'vaccination'),
           eq(animalTreatments.category, 'drench')

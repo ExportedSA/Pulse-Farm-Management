@@ -4,7 +4,7 @@ import { storage } from "../storage";
 import { insertVoiceNoteSchema } from "@shared/schema";
 import { z } from "zod";
 import { uploadSingleAudio } from "../middleware/upload";
-import { getFarmId, requireFarm } from "../middleware/auth";
+import { getFarmId, getUserId, requireFarm } from "../middleware/auth";
 import { saveUpload, deleteFileByUrl } from "../services/fileStorage";
 
 const router = Router();
@@ -29,6 +29,48 @@ router.post("/upload", uploadSingleAudio, async (req: Request, res: Response) =>
   } catch (error) {
     console.error("Error uploading audio:", error);
     res.status(500).json({ error: "Failed to upload audio" });
+  }
+});
+
+// POST /api/voice-notes/with-audio - a recording and its note in one save (multipart: audio,
+// animalId, treatmentId, duration, transcription, recordedAt), so a note recorded without signal can
+// wait in the offline queue as one save (client/src/lib/outbox.ts). Recorded by the person signed in.
+router.post("/with-audio", uploadSingleAudio, async (req: Request, res: Response) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "No recording uploaded" });
+    const b = req.body ?? {};
+    const recordedAt = b.recordedAt ? new Date(b.recordedAt) : new Date();
+    if (isNaN(recordedAt.getTime()) || recordedAt.getTime() > Date.now() + 5 * 60_000) {
+      return res.status(400).json({ error: "recordedAt must be a time that has already happened" });
+    }
+    const duration = b.duration ? Number(b.duration) : null;
+    const note = {
+      animalId: b.animalId || null,
+      treatmentId: b.treatmentId || null,
+      duration: duration != null && Number.isFinite(duration) ? Math.round(duration) : null,
+      fileSize: req.file.size,
+      mimeType: req.file.mimetype,
+      transcription: b.transcription || null,
+      isTranscribed: !!b.transcription,
+      recordedAt,
+      recordedBy: getUserId(req),
+    };
+    // Checked before the recording is kept, so a refused save leaves no file behind
+    insertVoiceNoteSchema.parse({ ...note, audioUrl: "pending" });
+    const { url } = await saveUpload(getFarmId(req)!, 'voice-notes', req.file);
+    try {
+      res.status(201).json(await storage.createVoiceNote(insertVoiceNoteSchema.parse({ ...note, audioUrl: url })));
+    } catch (error) {
+      await deleteFileByUrl(url).catch(() => {});
+      throw error;
+    }
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Invalid input", details: error.errors });
+    }
+    if (['P0403', '42501', '23503'].includes(error.code ?? error.cause?.code)) return res.status(403).json({ error: "That belongs to another farm" });
+    console.error("Error saving voice note:", error);
+    res.status(500).json({ error: "Failed to save the voice note" });
   }
 });
 

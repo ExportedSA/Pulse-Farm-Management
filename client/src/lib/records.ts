@@ -3,6 +3,7 @@
 import type { AreaGeometry } from "@shared/geo";
 import { MONTHLY_CHECK_ITEMS, SEASON_MONTHS } from "@shared/dairy-diary";
 import { FEED_TYPES, FENCE_TYPES, HS_INJURY, HS_KINDS, TREATMENT_ROUTES } from "./record-checks";
+import { send as sendJson, sendForm } from "./outbox";
 
 export type RecordType =
   | "spray" | "fertiliser" | "feed_in" | "feed_out" | "baleage" | "effluent" | "monthly_check"
@@ -363,20 +364,18 @@ export const deleteRecord = (id: string) => apiJson(`/api/records/${id}`, { meth
 export const fetchRecord = (id: string) => apiJson<FarmRecord>(`/api/records/${id}`);
 
 /**
- * Save changes to a record, then add any new evidence. Needs a connection.
+ * Save changes to a record, then add any new evidence. Without signal both wait in the offline
+ * queue (lib/outbox.ts), in that order, and "queued" is returned.
  */
-export async function updateRecord(id: string, draft: RecordDraft, files: File[]): Promise<FarmRecord> {
-  const record = await apiJson<FarmRecord>(`/api/records/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(draft),
-  });
+export async function updateRecord(id: string, draft: RecordDraft, files: File[]): Promise<"saved" | "queued"> {
+  let queued = false;
+  const kept = (e: any) => { if (!e?.queued) throw e; queued = true; };
+  await sendJson("PATCH", `/api/records/${id}`, draft, { label: `Change to the record ${draft.title}` }).catch(kept);
   if (files.length > 0) {
-    const form = new FormData();
-    files.forEach(file => form.append("files", file));
-    await apiJson(`/api/records/${id}/attachments`, { method: "POST", body: form });
+    await sendForm("POST", `/api/records/${id}/attachments`, {}, files.map(file => ({ field: "files", file })),
+      { label: `Evidence for the record ${draft.title}` }).catch(kept);
   }
-  return record;
+  return queued ? "queued" : "saved";
 }
 
 function recordForm(draft: RecordDraft, clientId: string, files: File[] | Blob[]): FormData {

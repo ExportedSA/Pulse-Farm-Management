@@ -123,7 +123,8 @@ export function HazardPanel({ hazard, canManage, canReport, onEditShape, onPlace
   const refresh = () => Promise.all([queryClient.invalidateQueries({ queryKey: FARM_MAP_KEY }), queryClient.invalidateQueries({ queryKey: HAZARDS_KEY })]);
   const act = async (work: () => Promise<unknown>, done: string) => {
     setSaving(true);
-    try { await work(); await refresh(); toast.success(done); return true; } catch (err: any) { toast.error(err.message); return false; } finally { setSaving(false); }
+    // Kept on this device without signal (lib/outbox.ts): that is said, as a success
+    try { await work(); await refresh(); toast.success(done); return true; } catch (err: any) { if (err?.queued) { toast.success(err.message); return true; } toast.error(err.message); return false; } finally { setSaving(false); }
   };
   const overdue = v.reviewDue && v.reviewDue < new Date().toISOString().slice(0, 10);
   return (

@@ -33,17 +33,26 @@ import type { Animal } from "@shared/schema";
 
 export type TreatmentPhase = 'awaiting' | 'treatment' | 'withholding' | 'monitoring' | 'returnToVat';
 
-// Treatments on the server have UUIDs; ones saved on this device while offline have short local ids
+// Treatments on the server have UUIDs, and so do ones waiting in the offline queue (the phone gives
+// them the id the server will use). Ones kept on this device only have short local ids.
 const isServerId = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-// A treatment waiting in the offline queue (lib/outbox.ts) is shown with this before its request id
+// A treatment queued before the phone chose its id was shown with this before its request id
 const QUEUED = "queued-";
+// A treatment with a save still waiting in the offline queue (lib/outbox.ts): the request ids of the
+// saves (the treatment itself, a dose, back in the vat, a change). Shown as this device has it until
+// every one has reached the server, so a dose given offline isn't undone by the server's older copy.
+type Waiting = { pendingRequests?: string[] };
+const stillWaiting = (t: AnimalTreatment) => ((t as Waiting).pendingRequests ?? []).some(outboxHas);
+const withPending = (t: AnimalTreatment, requestId: string) =>
+  ({ ...t, pendingRequests: [...((t as Waiting).pendingRequests ?? []), requestId] }) as AnimalTreatment;
+const cowName = (t: { cowId?: string | null }) => (t.cowId ? `cow ${t.cowId}` : "an animal");
 
 // Fields the server works out itself, or that don't fit its columns, left out of what's sent
 function toServerPatch(patch: Record<string, any>): Record<string, any> {
   const {
     id: _id, createdAt: _c, updatedAt: _u, version: _v, deletedAt: _d, farmId: _f,
     milkClearAt: _m, milkWithdrawalEndDate: _e, returnedToVatAt: _r, meatClearAt: _mc, nextDoseDueAt: _nd,
-    lastDoseDate, completedDate, lastDoseAt, ...rest
+    pendingRequests: _p, lastDoseDate, completedDate, lastDoseAt, ...rest
   } = patch;
   const out: Record<string, any> = { ...rest };
   if (lastDoseAt !== undefined) out.lastDoseAt = lastDoseAt instanceof Date ? lastDoseAt.toISOString() : lastDoseAt;
@@ -191,7 +200,8 @@ export default function Home() {
   });
 
   // Treatments from the server, so every device and person sees the same doses and withholding.
-  // Ones saved on this device while offline (not on the server yet) are kept alongside.
+  // Ones saved on this device while offline (not on the server yet) are kept alongside, and one with
+  // a save still waiting to send is shown as this device has it.
   const { data: apiTreatments, refetch: refetchTreatments } = useQuery<AnimalTreatment[]>({
     queryKey: ['/api/treatments'],
     refetchInterval: 60_000,
@@ -200,7 +210,14 @@ export default function Home() {
     if (!apiTreatments) return;
     // A copy kept while its save waited in the offline queue gives way to the server's once sent
     const sent = (id: string) => id.startsWith(QUEUED) && !outboxHas(id.slice(QUEUED.length));
-    setAnimalTreatments(local => [...apiTreatments, ...local.filter(t => !isServerId(t.id) && !sent(t.id))]);
+    setAnimalTreatments(local => {
+      const waiting = new Map(local.filter(stillWaiting).map(t => [t.id, t] as const));
+      const onServer = new Set(apiTreatments.map(t => t.id));
+      return [
+        ...apiTreatments.map(t => waiting.get(t.id) ?? t),
+        ...local.filter(t => !onServer.has(t.id) && (waiting.has(t.id) || (!isServerId(t.id) && !sent(t.id)))),
+      ];
+    });
   }, [apiTreatments]);
   // A treatment as the server now has it
   const replaceTreatment = (updated: AnimalTreatment) =>
@@ -213,38 +230,33 @@ export default function Home() {
       setAnimalTreatments(list => list.map(t => (t.id === id ? withLocalWithholding({ ...t, ...patch } as any) : t)));
       return true;
     }
+    const t = animalTreatments.find(x => x.id === id);
     try {
-      const res = await fetch(`/api/treatments/${id}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify(toServerPatch(patch)),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(body.error || "Couldn't save the change");
-        return false;
-      }
-      replaceTreatment(body);
+      // Sent now, or kept in the offline queue behind the treatment's earlier saves
+      replaceTreatment(await send<AnimalTreatment>('PUT', `/api/treatments/${id}`, toServerPatch(patch), {
+        label: `Change to the treatment for ${cowName(t ?? {})}`,
+      }));
       return true;
-    } catch {
-      toast.error("No connection: the change wasn't saved. Try again when you're online.");
+    } catch (e: any) {
+      if (e?.queued) {
+        setAnimalTreatments(list => list.map(x => (x.id === id ? withPending(withLocalWithholding({ ...x, ...patch } as any), e.requestId) : x)));
+        toast.info("Saved on this device. It will send when you're back online.");
+        return true;
+      }
+      toast.error(e?.message || "Couldn't save the change");
       return false;
     }
   };
 
-  // A dose or return to vat, which the server checks (POST /api/treatments/:id/<action>)
-  const treatmentAction = async (id: string, action: "doses" | "return-to-vat", payload: object): Promise<AnimalTreatment | null> => {
+  // A dose or return to vat, which the server checks (POST /api/treatments/:id/<action>). Without
+  // signal it waits in the offline queue, behind the treatment itself if that hasn't sent yet, and
+  // the request id is given back so the device copy can be marked as waiting.
+  const treatmentAction = async (id: string, action: "doses" | "return-to-vat", payload: object, label: string): Promise<{ updated: AnimalTreatment } | { requestId: string } | null> => {
     try {
-      const res = await fetch(`/api/treatments/${id}/${action}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(payload),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(body.error || "That couldn't be saved");
-        return null;
-      }
-      return body;
-    } catch {
-      toast.error("No connection: nothing was saved. Try again when you're online.");
+      return { updated: await send<AnimalTreatment>('POST', `/api/treatments/${id}/${action}`, payload, { label }) };
+    } catch (e: any) {
+      if (e?.queued) return { requestId: e.requestId };
+      toast.error(e?.message || "That couldn't be saved");
       return null;
     }
   };
@@ -689,16 +701,23 @@ export default function Home() {
     // The first dose, when it was given as the treatment was recorded: sent as a time with its zone
     // (the form gives farm time), so the server can count the withholding from it
     const firstDoseGiven = (treatment.dosesGiven ?? 0) >= 1;
-    const body = toServerPatch({
-      ...treatment,
-      productId: product?.id ?? treatment.productId,
-      lastDoseAt: firstDoseGiven ? parseFarmTime(treatment.lastDoseDate || treatment.dateTime)?.toISOString() : undefined,
-    } as any);
+    // The phone gives it the id the server will use, so a dose or change made before it has sent can
+    // wait in the queue behind it and name it
+    const treatmentId = crypto.randomUUID();
+    const body = {
+      ...toServerPatch({
+        ...treatment,
+        productId: product?.id ?? treatment.productId,
+        lastDoseAt: firstDoseGiven ? parseFarmTime(treatment.lastDoseDate || treatment.dateTime)?.toISOString() : undefined,
+      } as any),
+      id: treatmentId,
+    };
     // Kept on this device until it reaches the server; withholding worked out the same way
     const requestId = newRequestId();
     const deviceCopy = (): AnimalTreatment => withLocalWithholding({
       ...treatment,
-      id: `${QUEUED}${requestId}`,
+      id: treatmentId,
+      pendingRequests: [requestId],
       status: 'active' as const,
       condition: treatment.condition || '',
       treatmentType: treatment.treatmentType || '',
@@ -713,7 +732,7 @@ export default function Home() {
     try {
       // Sent now, or kept in the offline queue and sent once there's signal (lib/outbox.ts)
       const apiTreatment = await send<AnimalTreatment>('POST', '/api/treatments', body, {
-        label: `Treatment for ${treatment.cowId ? `cow ${treatment.cowId}` : 'an animal'}`,
+        label: `Treatment for ${cowName(treatment)}`,
         requestId,
       });
       // The server's copy, with its doses and milk withholding worked out
@@ -734,7 +753,8 @@ export default function Home() {
   };
 
   // A dose given now. On the server, which keeps the time of the last dose and moves the milk clear
-  // time to after it; on this device only for a treatment saved while offline.
+  // time to after it. Without signal it waits in the offline queue with the time it was given, and
+  // this device works out the withholding the same way meanwhile.
   const administerDose = async (treatmentId: string) => {
     const t = animalTreatments.find(x => x.id === treatmentId);
     if (!t) return;
@@ -744,10 +764,16 @@ export default function Home() {
     }
     const at = new Date().toISOString();
     if (isServerId(treatmentId)) {
-      const updated = await treatmentAction(treatmentId, "doses", { administeredAt: at });
-      if (!updated) return;
+      const r = await treatmentAction(treatmentId, "doses", { administeredAt: at }, `Dose for ${cowName(t)}`);
+      if (!r) return;
+      if ('updated' in r) {
+        replaceTreatment(r.updated);
+        toast.success(doseMessage(r.updated));
+        return;
+      }
+      const updated = withPending(withLocalWithholding({ ...t, dosesGiven: (t.dosesGiven || 0) + 1, lastDoseAt: at } as any), r.requestId);
       replaceTreatment(updated);
-      toast.success(doseMessage(updated));
+      toast.success(`${doseMessage(updated)}. Saved on this device until you're back online.`);
       return;
     }
     const updated = withLocalWithholding({ ...t, dosesGiven: (t.dosesGiven || 0) + 1, lastDoseAt: at } as any);
@@ -774,16 +800,23 @@ export default function Home() {
   const returnToVat = async (treatmentId: string) => {
     const t = animalTreatments.find(x => x.id === treatmentId);
     if (!t) return;
-    if (isServerId(treatmentId)) {
-      const updated = await treatmentAction(treatmentId, "return-to-vat", {});
-      if (!updated) return;
-      replaceTreatment(updated);
-      toast.success("Cow returned to milking mob");
-      return;
-    }
+    // Checked here too, so a return made without signal isn't one the server will refuse later
     const problem = returnToVatProblem(t as any);
     if (problem) {
       toast.error(`Not yet: ${problem}`);
+      return;
+    }
+    if (isServerId(treatmentId)) {
+      const at = new Date().toISOString();
+      const r = await treatmentAction(treatmentId, "return-to-vat", { at }, `Back in the vat: ${cowName(t)}`);
+      if (!r) return;
+      if ('updated' in r) {
+        replaceTreatment(r.updated);
+        toast.success("Cow returned to milking mob");
+        return;
+      }
+      replaceTreatment(withPending({ ...t, status: 'completed', completedDate: today(), returnedToVatAt: at } as any, r.requestId));
+      toast.success("Cow returned to milking mob. Saved on this device until you're back online.");
       return;
     }
     replaceTreatment({ ...t, status: 'completed', completedDate: today(), returnedToVatAt: new Date() } as any);

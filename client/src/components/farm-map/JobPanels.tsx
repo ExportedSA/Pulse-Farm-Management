@@ -594,7 +594,9 @@ function DocketForm({ job, onDone }: { job: Job; onDone: (j?: Job) => void }) {
       toast.success("Docket attached");
       onDone(j);
     } catch (e: any) {
-      toast.error(e.message);
+      // No signal: kept on this device with its photos, and attached once it has sent
+      if (e?.queued) { toast.success(e.message); onDone(job); }
+      else toast.error(e.message);
     } finally {
       setSaving(false);
     }

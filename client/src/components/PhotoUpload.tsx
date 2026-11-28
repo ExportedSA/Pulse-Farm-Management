@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { toast } from "sonner";
 import { Camera, Upload, X, Image, Trash2, Loader2, ZoomIn } from "lucide-react";
 import type { PhotoAttachment } from "@shared/schema";
+import { sendForm } from "@/lib/outbox";
 
 interface PhotoUploadProps {
   animalId?: string;
@@ -58,48 +59,31 @@ export function PhotoUpload({
 
   // Upload mutation
   const uploadMutation = useMutation({
-    mutationFn: async (file: File) => {
-      // First upload the file
-      const formData = new FormData();
-      formData.append("photo", file);
-
-      const uploadRes = await fetch("/api/photos/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!uploadRes.ok) {
-        throw new Error("Failed to upload photo");
+    // Run without signal too: the photo goes to the offline queue (React Query would otherwise wait)
+    networkMode: "always",
+    // The photo and its record in one save: sent now, or kept on this device and sent once back
+    // online (lib/outbox.ts). null when it was kept.
+    mutationFn: async (file: File): Promise<PhotoAttachment | null> => {
+      const fields: Record<string, string> = {};
+      if (animalId) fields.animalId = animalId;
+      if (treatmentId) fields.treatmentId = treatmentId;
+      if (vetVisitId) fields.vetVisitId = vetVisitId;
+      if (caption) fields.caption = caption;
+      try {
+        return await sendForm<PhotoAttachment>("POST", "/api/photos/attachments/with-photo", fields, [{ field: "photo", file }], { label: "Photo" });
+      } catch (e: any) {
+        if (e?.queued) return null;
+        throw e;
       }
-
-      const uploadData = await uploadRes.json();
-
-      // Then create the attachment record
-      const attachmentRes = await fetch("/api/photos/attachments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          animalId: animalId || null,
-          treatmentId: treatmentId || null,
-          vetVisitId: vetVisitId || null,
-          photoUrl: uploadData.url,
-          fileName: uploadData.originalName,
-          fileSize: uploadData.size,
-          mimeType: uploadData.mimetype,
-          caption: caption || null,
-        }),
-      });
-
-      if (!attachmentRes.ok) {
-        throw new Error("Failed to save photo attachment");
-      }
-
-      return attachmentRes.json();
     },
     onSuccess: (data) => {
-      toast.success("Photo uploaded successfully");
       setPreviewUrl(null);
       setCaption("");
+      if (!data) {
+        toast.success("Photo saved on this device. It will upload when you're back online.");
+        return;
+      }
+      toast.success("Photo uploaded successfully");
       if (queryKey) {
         queryClient.invalidateQueries({ queryKey });
       }

@@ -62,11 +62,13 @@ export const uploadAttachments = multer({
 export const uploadAudio = multer({
   storage,
   fileFilter: (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-    const allowedTypes = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/m4a', 'audio/ogg'];
-    if (allowedTypes.includes(file.mimetype)) {
+    // Includes what the app's recorder makes (VoiceRecorder.tsx): WebM, or MP4 audio on iPhones.
+    // Compared without parameters such as ";codecs=opus".
+    const allowedTypes = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/m4a', 'audio/x-m4a', 'audio/ogg', 'audio/webm', 'audio/mp4'];
+    if (allowedTypes.includes(file.mimetype.split(';')[0].trim().toLowerCase())) {
       cb(null, true);
     } else {
-      cb(new Error('Invalid file type. Only MP3, WAV, M4A, and OGG audio files are allowed.'));
+      cb(new Error('Invalid file type. Only MP3, WAV, M4A, OGG and WebM audio files are allowed.'));
     }
   },
   limits: {

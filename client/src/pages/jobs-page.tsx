@@ -24,6 +24,7 @@ import { EditJobDialog } from '@/components/jobs/EditJobDialog';
 import { cacheJobs, cachedJobs, drainJobOutbox, listJobOutbox, onJobOutboxChange, sendJobAction } from '@/lib/job-outbox';
 import { ChecklistManager, CompactChecklist, type ChecklistItem } from '@/components/ChecklistManager';
 import { toast } from 'sonner';
+import { send, sendForm } from '@/lib/outbox';
 
 import { 
   Calendar, 
@@ -321,64 +322,53 @@ export default function JobsPage() {
           estimatedDuration: newJob.estimatedDuration,
         };
 
-        const response = await fetch('/api/recurring-tasks/templates', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(recurringData),
-          credentials: 'include'
-        });
-
-        if (!response.ok) {
-          throw new Error('Failed to create recurring task');
+        // Sent now, or kept on this device and sent once back online (lib/outbox.ts)
+        try {
+          await send('POST', '/api/recurring-tasks/templates', recurringData, { label: `Recurring task: ${newJob.title}` });
+          toast.success('Recurring task created successfully! View it in Recurring Tasks.');
+        } catch (e: any) {
+          if (!e?.queued) throw e;
+          toast.success(e.message);
         }
-
-        toast.success('Recurring task created successfully! View it in Recurring Tasks.');
         // Reset and close
         resetForm();
         return;
       }
 
-      // Create FormData for file upload (one-off job)
-      const formData = new FormData();
-      formData.append('title', newJob.title);
-      formData.append('description', newJob.description);
-      formData.append('location', newJob.location || paddocks.find(p => p.id === newJob.pastureId)?.name || '');
-      if (newJob.pastureId) formData.append('pastureId', newJob.pastureId);
-      if (newJob.latitude !== undefined) formData.append('latitude', newJob.latitude.toString());
-      if (newJob.longitude !== undefined) formData.append('longitude', newJob.longitude.toString());
-      
-      // Add actual photo files to FormData
-      newJob.photos.forEach((photo, index) => {
-        formData.append(`photos`, photo);
-      });
-      
-      formData.append('assignedTo', JSON.stringify(newJob.assignedTo));
-      formData.append('priority', newJob.priority);
-      formData.append('startDate', newJob.startDate);
-      formData.append('startTime', newJob.startTime);
-      if (newJob.endDate) formData.append('endDate', newJob.endDate);
-      if (newJob.endTime) formData.append('endTime', newJob.endTime);
-      formData.append('category', newJob.category);
-      if (newJob.notes) formData.append('notes', newJob.notes);
+      // A one-off job, with its photos: sent now, or kept on this device with them and sent once
+      // back online (lib/outbox.ts)
+      const fields: Record<string, string> = {
+        title: newJob.title,
+        description: newJob.description,
+        location: newJob.location || paddocks.find(p => p.id === newJob.pastureId)?.name || '',
+        assignedTo: JSON.stringify(newJob.assignedTo),
+        priority: newJob.priority,
+        startDate: newJob.startDate,
+        startTime: newJob.startTime,
+        category: newJob.category,
+      };
+      if (newJob.pastureId) fields.pastureId = newJob.pastureId;
+      if (newJob.latitude !== undefined) fields.latitude = newJob.latitude.toString();
+      if (newJob.longitude !== undefined) fields.longitude = newJob.longitude.toString();
+      if (newJob.endDate) fields.endDate = newJob.endDate;
+      if (newJob.endTime) fields.endTime = newJob.endTime;
+      if (newJob.notes) fields.notes = newJob.notes;
 
-      const response = await fetch('/api/jobs', {
-        method: 'POST',
-        body: formData,
-        credentials: 'include'
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to create job');
+      try {
+        const job = await sendForm<Job>('POST', '/api/jobs', fields, newJob.photos.map(file => ({ field: 'photos', file })), {
+          label: `Job: ${newJob.title}`,
+        });
+        setJobs([job, ...jobs]);
+        toast.success('Job created successfully');
+      } catch (e: any) {
+        if (!e?.queued) throw e;
+        // Shown in the list once it has sent
+        toast.success(e.message);
       }
-      
-      const job = await response.json();
-      setJobs([job, ...jobs]);
-      
       resetForm();
-      toast.success('Job created successfully');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to create job:', error);
-      toast.error('Failed to create job. Please try again.');
+      toast.error(error?.message ? `Couldn't create the job: ${error.message}` : 'Failed to create job. Please try again.');
     }
   };
 

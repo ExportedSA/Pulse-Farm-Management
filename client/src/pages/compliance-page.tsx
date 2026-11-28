@@ -164,7 +164,7 @@ function NewHazard({ onSaved, onCancel }: { onSaved: (id: string) => void; onCan
 function HazardCard({ hazard: h, canManage, onChanged }: { hazard: Hazard; canManage: boolean; onChanged: () => Promise<unknown> }) {
   const overdue = h.status !== 'resolved' && h.reviewDue && h.reviewDue < today();
   const act = async (work: () => Promise<unknown>, done: string) => {
-    try { await work(); await onChanged(); toast.success(done); } catch (err: any) { toast.error(err.message); }
+    try { await work(); await onChanged(); toast.success(done); } catch (err: any) { if (err?.queued) toast.success(err.message); else toast.error(err.message); }
   };
   return (
     <Card className="p-4">
@@ -309,7 +309,7 @@ function Documents({ canManage }: { canManage: boolean }) {
   const grouped = useMemo(() => SAFETY_DOCUMENT_TYPES.map(t => ({ type: t, docs: docs.filter(d => d.docType === t.key) })).filter(g => g.docs.length), [docs]);
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const act = async (work: () => Promise<unknown>, done: string) => {
-    try { await work(); await refresh(); toast.success(done); } catch (err: any) { toast.error(err.message); }
+    try { await work(); await refresh(); toast.success(done); } catch (err: any) { if (err?.queued) toast.success(err.message); else toast.error(err.message); }
   };
   return (
     <div className="space-y-4">
@@ -387,7 +387,9 @@ function NewDocument({ onSaved, onCancel }: { onSaved: () => void; onCancel: () 
           toast.success('Document added');
           onSaved();
         } catch (err: any) {
-          toast.error(err.message);
+          // No signal: kept on this device with its files, and added once it has sent
+          if (err?.queued) { toast.success(err.message); onSaved(); }
+          else toast.error(err.message);
         } finally {
           setSaving(false);
         }

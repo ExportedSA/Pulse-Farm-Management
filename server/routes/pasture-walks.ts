@@ -98,11 +98,20 @@ router.post("/sessions", async (req: Request, res: Response) => {
 });
 
 // PUT /api/pasture-walks/sessions/:id - Update session
+// Only the walk's own fields, each checked; never its id or farm
+const updateWalkSessionSchema = insertPastureWalkSessionSchema
+  .omit({ farmId: true })
+  .extend({ completedAt: z.coerce.date().nullable().optional() })
+  .partial()
+  .strict();
+
 router.put("/sessions/:id", async (req: Request, res: Response) => {
   try {
+    const parsed = updateWalkSessionSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Invalid walk" });
     const [session] = await db
       .update(pastureWalkSessions)
-      .set({ ...req.body, updatedAt: new Date() })
+      .set({ ...parsed.data, updatedAt: new Date() })
       .where(eq(pastureWalkSessions.id, req.params.id))
       .returning();
     

@@ -229,8 +229,10 @@ export function RecordDialog({ open, onOpenChange, initialType = "spray", preset
         tags,
       };
       if (editing) {
-        await updateRecord(editRecordId!, draft, files);
-        toast.success(`${def.label} record updated`);
+        const updated = await updateRecord(editRecordId!, draft, files);
+        toast.success(updated === "saved"
+          ? `${def.label} record updated`
+          : "No signal: the change is saved on this device. It will upload when you're back online.");
         queryClient.invalidateQueries({ queryKey: ["/api/records"] });
         queryClient.invalidateQueries({ queryKey: ["/api/compliance"] });
         onOpenChange(false);
